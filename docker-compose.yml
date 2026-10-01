@@ -1,0 +1,15 @@
+# 로컬 배포용 compose. 운영과 같은 이미지(frontend/Dockerfile → nginx)를 이 PC 에서 빌드해 띄운다.
+#   docker compose up -d --build   →  http://localhost:8080
+#   docker compose down            (중지)
+# 개발할 때는 Vite 개발 서버(npm --prefix frontend run dev, :5173)를 쓰고, 이건 빌드 결과물을 확인할 때 쓴다.
+name: rcs
+
+services:
+  chatbot:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: rcs-chatbot:latest
+    ports:
+      - "8080:80"
+    restart: unless-stopped
