@@ -97,7 +97,7 @@ export function PaymentSheet({ method, order, onCancel, onPaid }: Props) {
               <dl className="summary">
                 <dt>상품</dt>
                 <dd>
-                  {order.food} {order.qty}마리
+                  {order.food} {order.qty}{order.unit}
                 </dd>
                 <dt>매장</dt>
                 <dd>{order.store.name}</dd>
