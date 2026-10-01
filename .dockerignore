@@ -1,0 +1,7 @@
+# 이미지 빌드 컨텍스트(저장소 루트)에는 frontend/ 소스와 deploy/nginx.conf 만 남긴다
+*
+!frontend
+!deploy/nginx.conf
+frontend/node_modules
+frontend/dist
+frontend/*.log
