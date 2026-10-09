@@ -1186,10 +1186,8 @@ export function OrderChatbot() {
   return (
     <div className="app">
       <header>
-        {/* 글자 로고: Say 는 흰색, lo 는 브랜드 파란색 */}
-        <h1 className="title">
-          Say<span className="accent">lo</span>
-        </h1>
+        {/* 글자 로고 */}
+        <h1 className="title">Saylo</h1>
         <div className="header-tools">
           {tts.supported && (
             <button

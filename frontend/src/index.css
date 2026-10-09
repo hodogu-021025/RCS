@@ -52,12 +52,11 @@ header {
   background: var(--header-bg);
   flex-shrink: 0;
 }
-/* 글자 로고 "Saylo": Say 는 흰색, lo 는 브랜드 파란색. 흰 글자라 헤더는 어두운 배경이어야 보인다 */
+/* 글자 로고 "Saylo": 흰 글자 하나로. 흰 글자라 헤더는 어두운 배경이어야 보인다 */
 header .title {
   margin: 0; line-height: 1;
   font-size: 22px; font-weight: 900; letter-spacing: -.03em; color: #fff;
 }
-header .title .accent { color: var(--accent); }
 /* 헤더 오른쪽: 읽어 주기 · 마이크 아이콘, 그 옆에 새 대화 */
 .header-tools { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .icon-btn {
