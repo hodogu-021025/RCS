@@ -1,4 +1,4 @@
-// 입력창의 link 버튼으로 여는 빠른 메뉴와, 무슨 말인지 모를 때의 안내.
+// 입력창의 + 버튼으로 여는 빠른 메뉴와, 무슨 말인지 모를 때의 안내.
 // 배달·식당·쇼핑·예매 각각의 첫 질문으로 이어진다.
 import { DELIVERY_PROMPT, FOOD_PROMPT, type BotPrompt } from "./orderChatKnowledge";
 import { SHOP_PROMPT } from "./shoppingKnowledge";

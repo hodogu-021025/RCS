@@ -14,7 +14,7 @@ const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 
 function send(text: string) {
   fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
-  fireEvent.click(screen.getByRole("button", { name: "ON 전송" }));
+  fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
 }
 
 // 메뉴와 수량을 한 번에 말해 주문서까지 간 뒤 "응 해줘"
@@ -67,7 +67,7 @@ describe("OrderChatbot", () => {
     wait(700);
     expect(screen.getByText(/몇 마리 주문할까요\?/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "직접 입력" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "ON 전송" }).closest("form")).toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).toHaveAttribute("inert");
 
     const minus = screen.getByRole("button", { name: "한 마리 줄이기" });
     expect(minus).toBeDisabled(); // 1마리에서 시작
@@ -179,9 +179,9 @@ describe("OrderChatbot", () => {
     expect(screen.getByRole("button", { name: /신용카드/ })).toBeEnabled();
   });
 
-  it("link 를 누르면 빠른 메뉴가 열리고, 메뉴를 고르면 닫히면서 답한다", () => {
+  it("+ 를 누르면 빠른 메뉴가 열리고, 메뉴를 고르면 닫히면서 답한다", () => {
     render(<OrderChatbot />);
-    const toggle = screen.getByRole("button", { name: "link 메뉴" });
+    const toggle = screen.getByRole("button", { name: "메뉴" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     fireEvent.click(toggle);
@@ -321,7 +321,7 @@ describe("OrderChatbot", () => {
 
   it("식당: 음식 선택지를 버튼으로 보여 주고, 누르면 근처 식당 목록이 나온다", () => {
     render(<OrderChatbot />);
-    fireEvent.click(screen.getByRole("button", { name: "link 메뉴" }));
+    fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
     expect(screen.getByText(/어떤 음식을 원하세요\?/)).toBeInTheDocument();
@@ -337,7 +337,7 @@ describe("OrderChatbot", () => {
 
   it("선택지가 떠 있으면 입력창이 접히고, 직접 입력을 누르면 열린다", () => {
     render(<OrderChatbot />);
-    const form = screen.getByRole("button", { name: "ON 전송" }).closest("form")!;
+    const form = screen.getByRole("button", { name: "Say 전송" }).closest("form")!;
     expect(form).not.toHaveAttribute("inert");
 
     send("식당");
@@ -352,7 +352,7 @@ describe("OrderChatbot", () => {
 
   it("식당: 직접 입력한 메뉴 이름으로도 찾고, 목록에서 고르면 상세 정보를 보여 준다", () => {
     render(<OrderChatbot />);
-    fireEvent.click(screen.getByRole("button", { name: "link 메뉴" }));
+    fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
 
@@ -396,7 +396,7 @@ describe("OrderChatbot", () => {
     // 인원: −/+ 카운터 버튼으로 고르고 "N명 선택"으로 확정 (직접 입력 없음, 입력창도 접힌 채)
     expect(screen.getByText(/몇 명이 방문하시나요\?/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "직접 입력" }).every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
-    const form = screen.getByRole("button", { name: "ON 전송" }).closest("form")!;
+    const form = screen.getByRole("button", { name: "Say 전송" }).closest("form")!;
     expect(form).toHaveAttribute("inert");
     expect(screen.getByRole("button", { name: "2명 선택" })).toBeEnabled(); // 2명에서 시작
     fireEvent.click(screen.getByRole("button", { name: "한 명 늘리기" }));
@@ -450,7 +450,7 @@ describe("OrderChatbot", () => {
 
   it("식당 예약: 날짜의 직접 입력은 달력을 펼치고, 고를 수 있는 날만 누를 수 있다", () => {
     startReservation();
-    const form = screen.getByRole("button", { name: "ON 전송" }).closest("form")!;
+    const form = screen.getByRole("button", { name: "Say 전송" }).closest("form")!;
 
     fireEvent.click(directInput());
     expect(screen.getByText("2026년 10월")).toBeInTheDocument();
@@ -512,7 +512,7 @@ describe("OrderChatbot", () => {
 
   it("식당: 모르는 음식이면 다시 물어본다", () => {
     render(<OrderChatbot />);
-    fireEvent.click(screen.getByRole("button", { name: "link 메뉴" }));
+    fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
 
@@ -533,9 +533,9 @@ describe("OrderChatbot", () => {
     expect(screen.getByRole("button", { name: "직접 입력" })).toBeEnabled();
   });
 
-  it("ON 전송 버튼은 입력이 비어 있으면 꺼져 있고, 글자를 쓰면 켜진다", () => {
+  it("Say 전송 버튼은 입력이 비어 있으면 꺼져 있고, 글자를 쓰면 켜진다", () => {
     render(<OrderChatbot />);
-    const sendButton = screen.getByRole("button", { name: "ON 전송" });
+    const sendButton = screen.getByRole("button", { name: "Say 전송" });
     expect(sendButton).toBeDisabled();
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "  " } });
@@ -547,7 +547,7 @@ describe("OrderChatbot", () => {
 
   it("빠른 메뉴는 바깥을 누르면 닫힌다", () => {
     render(<OrderChatbot />);
-    const toggle = screen.getByRole("button", { name: "link 메뉴" });
+    const toggle = screen.getByRole("button", { name: "메뉴" });
     fireEvent.click(toggle);
     fireEvent.pointerDown(document.body);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -662,7 +662,7 @@ describe("음성", () => {
     speakInto("식당이요");
     wait(700);
     expect(screen.getByText(/어떤 음식을 원하세요\?/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "ON 전송" }).closest("form")).toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).toHaveAttribute("inert");
 
     speakInto("한식");
     wait(900);

@@ -1,6 +1,6 @@
 // HTML 한 파일 만들기 (npm run build:html)
 // 1) 이미지·영상까지 전부 data URI 로 넣어 빌드한다 (dist-html/)
-// 2) 나온 JS·CSS 를 index.html 안에 그대로 넣어 저장소 루트의 link-on.html 로 저장한다
+// 2) 나온 JS·CSS 를 index.html 안에 그대로 넣어 저장소 루트의 saylo.html 로 저장한다
 // 결과 파일은 서버 없이 더블클릭으로 열어도 동작한다. (본문 글꼴 Pretendard 만 인터넷에서 받고, 없으면 맑은 고딕으로 보인다)
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -9,7 +9,7 @@ import { build } from "vite";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist-html");
-const target = resolve(root, "..", "link-on.html");
+const target = resolve(root, "..", "saylo.html");
 
 await build({
   root,

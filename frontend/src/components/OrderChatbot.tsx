@@ -1,6 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import backgroundVideo from "../image/linkon_background.mp4";
-import logo from "../image/linkon_logo.png";
+import backgroundVideo from "../image/saylo_background.mp4";
 import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { CalendarPicker } from "./CalendarPicker";
@@ -147,7 +146,7 @@ type Message =
 
 type NewMessage = Message extends infer M ? (M extends Message ? Omit<M, "id"> : never) : never;
 
-const GREETING = "안녕하세요! link ON이에요.\n무엇을 주문해 드릴까요?";
+const GREETING = "안녕하세요! Saylo예요.\n무엇을 주문해 드릴까요?";
 
 let nextId = 1;
 const botText = (text: string): NewMessage => ({ role: "bot", kind: "text", text });
@@ -1187,8 +1186,9 @@ export function OrderChatbot() {
   return (
     <div className="app">
       <header>
+        {/* 글자 로고: Say 는 흰색, lo 는 브랜드 파란색 */}
         <h1 className="title">
-          <img src={logo} alt="link ON" />
+          Say<span className="accent">lo</span>
         </h1>
         <div className="header-tools">
           {tts.supported && (
@@ -1278,9 +1278,9 @@ export function OrderChatbot() {
         <form onSubmit={onSubmit} autoComplete="off" inert={!composerOpen}>
           <div className="input-wrap" ref={inputWrapRef}>
             <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder={placeholder} />
-            {/* 메뉴를 link 버튼과 한 묶음으로 둬서 link 의 가운데에 맞춰 세운다 */}
-            <div className="link-anchor">
-              {/* link 를 누르면 아래쪽 버튼부터 차례로 올라오고, 닫을 때는 위쪽 버튼부터 사라진다
+            {/* 메뉴를 + 버튼과 한 묶음으로 둬서 버튼 가운데에 맞춰 세운다 */}
+            <div className="menu-anchor">
+              {/* + 를 누르면 아래쪽 버튼부터 차례로 올라오고, 닫을 때는 위쪽 버튼부터 사라진다
                   (--d: 나타나는 순서, --c: 사라지는 순서) */}
               <div id={quickMenuId} className={"quick-menu" + (quickMenuOpen ? " open" : "")} inert={!quickMenuOpen}>
                 {QUICK_MENUS.map((menu, i) => (
@@ -1294,20 +1294,23 @@ export function OrderChatbot() {
                   </button>
                 ))}
               </div>
+              {/* 열리면 + 가 45도 돌아 × 모양이 된다 (CSS) */}
               <button
-                className="link-toggle"
+                className="menu-toggle"
                 type="button"
-                aria-label="link 메뉴"
+                aria-label="메뉴"
                 aria-expanded={quickMenuOpen}
                 aria-controls={quickMenuId}
                 onClick={() => setMenuOpen((open) => !open)}
               >
-                link
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                  <path d="M8 3v10M3 8h10" {...ICON} strokeWidth={2} />
+                </svg>
               </button>
             </div>
           </div>
-          <button className="send" type="submit" aria-label="ON 전송" disabled={!input.trim()}>
-            ON
+          <button className="send" type="submit" aria-label="Say 전송" disabled={!input.trim()}>
+            Say
           </button>
         </form>
       </div>

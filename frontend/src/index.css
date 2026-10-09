@@ -52,9 +52,12 @@ header {
   background: var(--header-bg);
   flex-shrink: 0;
 }
-/* 로고의 "link" 글자가 흰색이라 헤더는 어두운 배경이어야 보인다 */
-header .title { margin: 0; line-height: 0; }
-header .title img { height: 20px; width: auto; }
+/* 글자 로고 "Saylo": Say 는 흰색, lo 는 브랜드 파란색. 흰 글자라 헤더는 어두운 배경이어야 보인다 */
+header .title {
+  margin: 0; line-height: 1;
+  font-size: 22px; font-weight: 900; letter-spacing: -.03em; color: #fff;
+}
+header .title .accent { color: var(--accent); }
 /* 헤더 오른쪽: 읽어 주기 · 마이크 아이콘, 그 옆에 새 대화 */
 .header-tools { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .icon-btn {
@@ -398,7 +401,7 @@ form input {
   flex: 1; min-width: 0; height: 46px;
   border: 1.5px solid transparent; border-radius: 999px;
   background: var(--surface); color: var(--text);
-  padding: 0 66px 0 18px; font-size: 15px; outline: none;
+  padding: 0 48px 0 18px; font-size: 15px; outline: none;
   font-family: inherit; letter-spacing: inherit;
   transition: background .15s, border-color .15s;
 }
@@ -428,32 +431,30 @@ form .send:not(:disabled)::before { opacity: 1; }
 form .send:not(:disabled):hover { filter: brightness(1.08); }
 form .send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* 입력창 안 오른쪽 끝: link 버튼과 그 위 빠른 메뉴를 묶는 기준점 */
-.link-anchor {
-  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+/* 입력창 안 오른쪽 끝: + 버튼과 그 위 빠른 메뉴를 묶는 기준점 */
+.menu-anchor {
+  position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
   display: flex;
 }
-/* link 버튼(로고의 "link"). 배경 없이 글자만 두고, 열리면 글자에 파란 빛이 번진다 */
-.link-toggle {
-  height: 32px; padding: 0 8px;
-  border: none; border-radius: 8px; background: none;
-  color: var(--header-bg);
-  font-size: 17px; font-weight: 900; letter-spacing: .01em;
+/* 빠른 메뉴를 여는 + 버튼. 열리면 파랗게 채워지고 + 가 돌아 × 가 된다 */
+.menu-toggle {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: #fff; color: var(--text);
   cursor: pointer;
-  transition: color .2s, text-shadow .2s, opacity .2s;
+  transition: background .2s, border-color .2s, color .2s;
 }
-.link-toggle:hover { opacity: .75; }
-.link-toggle[aria-expanded="true"] {
-  opacity: 1;
-  text-shadow: 0 0 8px rgba(0, 124, 252, .7), 0 0 18px rgba(0, 124, 252, .45);
-}
-.link-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.menu-toggle svg { transition: transform .25s; }
+.menu-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.menu-toggle[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.menu-toggle[aria-expanded="true"] svg { transform: rotate(45deg); }
+.menu-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* 빠른 메뉴: link 버튼 가운데에 맞춰 세로로 쌓이고, 열릴 때 아래 버튼부터 --d 순서로 튀어 오른다.
-   bottom 18px = link 버튼 위 여백(7px) + 입력창과의 간격(11px) */
+/* 빠른 메뉴: + 버튼 가운데에 맞춰 세로로 쌓이고, 열릴 때 아래 버튼부터 --d 순서로 튀어 오른다.
+   bottom 18px = + 버튼 위 여백(7px) + 입력창과의 간격(11px) */
 .quick-menu {
   position: absolute; left: 50%; bottom: calc(100% + 18px); z-index: 5;
-  width: max-content; /* 기준점(link 버튼)이 좁아도 메뉴 자기 너비로 가운데를 잡는다 */
+  width: max-content; /* 기준점(+ 버튼)이 좁아도 메뉴 자기 너비로 가운데를 잡는다 */
   transform: translateX(-50%);
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   pointer-events: none;

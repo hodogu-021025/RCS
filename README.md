@@ -1,4 +1,4 @@
-# link ON — 주문 챗봇
+# Saylo — 주문 챗봇
 
 채팅·버튼·음성으로 배달 주문, 식당 예약, 쇼핑, 티켓 예매를 끝까지 진행하는 단일 페이지 챗봇입니다.
 백엔드 없이 브라우저에서만 동작하는 정적 사이트이고, 결제와 매장·상품 데이터는 모두 화면 확인용 데모입니다.
@@ -22,7 +22,7 @@ npm run dev        # http://localhost:5173
 | `npm test` | 테스트 전체 실행 |
 | `npm run lint` | 린트 |
 | `npm run build` | 타입 검사 후 배포용 빌드 → `frontend/dist/` |
-| `npm run build:html` | 로고·영상까지 넣은 **HTML 한 파일** → 저장소 루트의 `link-on.html` (더블클릭으로 열림) |
+| `npm run build:html` | 로고·영상까지 넣은 **HTML 한 파일** → 저장소 루트의 `saylo.html` (더블클릭으로 열림) |
 
 ### Docker로 띄우기 (저장소 루트에서)
 
@@ -53,7 +53,7 @@ frontend/
       orderChatKnowledge.ts   배달 메뉴·식당·예약 규칙, 문장 해석(수량·날짜·시간·결제수단), 주문서 모델
       shoppingKnowledge.ts    쇼핑: 종류·상품·사이즈·배송지·배송비
       ticketKnowledge.ts      예매: 종류·작품·회차·좌석
-      quickMenu.ts            link 버튼으로 여는 빠른 메뉴 (배달·식당·쇼핑·예매)
+      quickMenu.ts            입력창 + 버튼으로 여는 빠른 메뉴 (배달·식당·쇼핑·예매)
       PaymentSheet.tsx        결제 팝업 (신용카드·카카오페이·토스페이, 데모)
       CalendarPicker.tsx      날짜 달력
       TimePicker.tsx, Wheel.tsx   오전/오후·시·분 휠

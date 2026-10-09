@@ -107,7 +107,7 @@ describe("식당 찾기", () => {
     expect(withObjectParticle("장락반점")).toBe("장락반점을");
     expect(withObjectParticle("하소 피자키친")).toBe("하소 피자키친을");
     expect(withObjectParticle("장락 떡볶이")).toBe("장락 떡볶이를");
-    expect(withObjectParticle("link ON")).toBe("link ON을");
+    expect(withObjectParticle("Saylo")).toBe("Saylo를");
     expect(withTopicParticle("러닝화 260")).toBe("러닝화 260은");
     expect(withTopicParticle("후드티 S")).toBe("후드티 S는");
     expect(withObjectParticle("2마리")).toBe("2마리를");
