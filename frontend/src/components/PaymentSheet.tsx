@@ -1,12 +1,19 @@
-import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type CSSProperties, type MouseEvent, type Ref } from "react";
 import { orderSummaryRows, won, type Order, type PaymentMethod } from "./orderChatKnowledge";
 import { Select, type SelectOption } from "./Select";
+
+// 음성으로 "결제" · "취소" 라고 했을 때 밖에서 누르는 손잡이
+export interface PaymentSheetHandle {
+  pay(): void;
+  cancel(): void;
+}
 
 interface Props {
   method: PaymentMethod;
   order: Order;
   onCancel: () => void;
   onPaid: () => void;
+  ref?: Ref<PaymentSheetHandle>;
 }
 
 type Phase = "form" | "processing" | "done";
@@ -17,7 +24,7 @@ const DONE_MS = 1100;
 
 // 결제수단별 데모 결제 화면. 아래에서 올라오는 시트로 띄우고, 결제가 끝나거나 취소되면 닫힘 애니메이션 뒤에 콜백을 부른다.
 // 실제 결제는 하지 않는다 (카드·잔액 정보도 화면용 예시 값).
-export function PaymentSheet({ method, order, onCancel, onPaid }: Props) {
+export function PaymentSheet({ method, order, onCancel, onPaid, ref }: Props) {
   const [visible, setVisible] = useState(false);
   const [phase, setPhase] = useState<Phase>("form");
   const [agreed, setAgreed] = useState(true);
@@ -76,6 +83,9 @@ export function PaymentSheet({ method, order, onCancel, onPaid }: Props) {
   function onOverlayClick(e: MouseEvent<HTMLDivElement>) {
     if (e.target === e.currentTarget) cancel();
   }
+
+  // 결제 동의가 켜져 있고 아직 결제 전일 때만 음성 "결제" 가 통한다 (화면의 결제하기 버튼과 같은 조건)
+  useImperativeHandle(ref, () => ({ pay: () => phase === "form" && agreed && pay(), cancel }));
 
   const themeVars = { "--theme": method.theme, "--theme-text": method.themeText } as CSSProperties;
 

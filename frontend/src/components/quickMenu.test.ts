@@ -14,7 +14,11 @@ describe("quickMenuReply", () => {
     expect(FALLBACK_PROMPT.choices?.map((c) => c.value)).toEqual(["배달", "식당", "쇼핑", "예매"]);
   });
 
-  it("메뉴 이름과 정확히 같을 때만 반응한다", () => {
+  it("메뉴 이름 뒤에 말투가 붙은 정도는 받고, 문장 속에 들어 있는 건 메뉴 선택으로 보지 않는다", () => {
+    expect(quickMenuReply("배달이요")).toMatchObject({ next: "menu" });
+    expect(quickMenuReply("쇼핑할래요")).toMatchObject({ next: "shopCategory" });
+    expect(quickMenuReply("예매 해줘.")).toMatchObject({ next: "tkCategory" });
     expect(quickMenuReply("치킨 배달해줘")).toBeUndefined();
+    expect(quickMenuReply("배달 주문")).toBeUndefined();
   });
 });

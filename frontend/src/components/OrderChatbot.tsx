@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import backgroundVideo from "../image/linkon_background.mp4";
 import logo from "../image/linkon_logo.png";
-import { PaymentSheet } from "./PaymentSheet";
+import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
+import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
@@ -195,6 +196,53 @@ function DirectInputIcon({ picker }: { picker?: BotPrompt["picker"] }) {
   );
 }
 
+// 읽어 주기용 문장. 화면의 카드·버튼을 말로 풀어 쓴다 (선택지는 끝에 나열해서 말로 고를 수 있게)
+function spokenText(m: Message): string {
+  if (m.role === "user") return "";
+  const line = (s: string) => s.replace(/\n/g, " ");
+  switch (m.kind) {
+    case "text":
+      return m.choices?.length ? `${line(m.text)} ${m.choices.map((c) => c.label).join(", ")} 중에서 말씀해 주세요.` : line(m.text);
+    case "confirm":
+      return "";
+    case "order":
+      return `${orderCardTitle(m.order)} ${orderCardRows(m.order).map((r) => `${r.label} ${r.value}`).join(", ")}. ${orderCardQuestion(m.order)}`;
+    case "payment":
+      return `결제 수단을 말씀해 주세요. 총 결제금액 ${won(m.order.price)}. ${PAYMENTS.map((p) => p.label).join(", ")}.`;
+    case "restaurants":
+      return `근처 ${m.foodLabel} 식당이에요. ${m.list.map((r) => `${r.name} ${km(r.distanceKm)}`).join(", ")}. 원하는 곳을 말씀해 주세요.`;
+    case "restaurantPicked":
+      return `${withObjectParticle(m.restaurant.name)} 선택했어요.`;
+    case "reservation": {
+      const r = m.reservation;
+      return `예약 내용을 확인해 주세요. ${r.restaurant.name}, ${formatDate(r.date)} ${r.time}, ${r.people}명. 예약할까요?`;
+    }
+    case "people":
+      return `${m.lead ? `${m.lead} ` : ""}${PEOPLE_QUESTION}`;
+    case "qty":
+      return line(m.text);
+    case "products":
+      return `${m.categoryLabel} 상품이에요. ${m.list.map((p) => `${p.name} ${won(p.price)}`).join(", ")}. 원하는 상품을 말씀해 주세요.`;
+    case "shows":
+      return `예매할 수 있는 ${m.categoryLabel}이에요. ${m.list.map((s) => `${s.title} ${won(s.price)}`).join(", ")}. 원하는 작품을 말씀해 주세요.`;
+  }
+}
+
+// 헤더 아이콘 (선으로 그린 마이크·스피커)
+const ICON = { stroke: "currentColor", strokeWidth: 1.5, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" } as const;
+const MicIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <rect x="5.5" y="1.5" width="5" height="8" rx="2.5" {...ICON} />
+    <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" {...ICON} />
+  </svg>
+);
+const SpeakerIcon = ({ muted }: { muted: boolean }) => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <path d="M2.5 6h2.5l3-2.5v9l-3-2.5H2.5z" {...ICON} />
+    {muted ? <path d="M10.5 6l3 4M13.5 6l-3 4" {...ICON} /> : <path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9" {...ICON} />}
+  </svg>
+);
+
 // 마지막으로 나온 해당 종류 메시지의 id. 버튼은 가장 최근 말풍선에서만 누를 수 있다
 function lastIdOf(messages: Message[], kinds: string[]): number | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -222,11 +270,35 @@ export function OrderChatbot() {
   const [manualInputFor, setManualInputFor] = useState<number | null>(null);
   // 날짜·시간 질문에서 "직접 입력"으로 펼친 달력·시간 고르기의 말풍선 id
   const [pickerOpenFor, setPickerOpenFor] = useState<number | null>(null);
+  // 음성 입력에 대한 짧은 안내 ("답하는 중이에요" 등). 잠시 보였다가 사라진다
+  const [notice, setNotice] = useState<string | null>(null);
   const quickMenuId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputWrapRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
+  const sheetRef = useRef<PaymentSheetHandle>(null);
+
+  // 말로 입력: 들은 문장을 글자로 입력한 것과 똑같이 처리한다 (입력창이 접혀 있어도 된다)
+  const voice = useVoiceInput(handleVoice);
+  const tts = useSpeechOutput();
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+
+  // 읽어 주기가 켜져 있으면 새로 온 봇 말풍선을 읽는다 (한 번에 여러 개가 오면 이어서)
+  const spokenUpTo = useRef(0);
+  const { speak } = tts;
+  useEffect(() => {
+    const fresh = messages.filter((m) => m.id > spokenUpTo.current);
+    if (fresh.length === 0) return;
+    spokenUpTo.current = fresh[fresh.length - 1].id;
+    const text = fresh.map(spokenText).filter(Boolean).join(" ");
+    if (text) speak(text);
+  }, [messages, speak]);
 
   // 가장 최근 봇 말풍선이 버튼으로 답하는 질문(선택지·인원/수량 카운터)이면, "직접 입력" 을 누르기 전까지 입력창을 접어 둔다
   // (카운터에는 직접 입력이 없어 버튼으로만 답한다)
@@ -607,6 +679,22 @@ export function OrderChatbot() {
       }
       startCheckout(makeTicketOrder(chosen, ticket.date, ticket.time, qty));
     }
+  }
+
+  // 음성으로 들은 문장. 결제 화면이 떠 있으면 "결제"·"취소"만 받고, 그 밖에는 글자 입력과 같다
+  function handleVoice(text: string) {
+    if (stage === "paying") {
+      if (isNo(text)) sheetRef.current?.cancel();
+      else if (isYes(text) || text.includes("결제")) sheetRef.current?.pay();
+      else setNotice('결제 화면에서는 "결제" 또는 "취소"라고 말씀해 주세요.');
+      return;
+    }
+    if (thinking) {
+      setNotice("답하는 중이에요. 잠시 뒤 다시 말씀해 주세요.");
+      return;
+    }
+    setMenuOpen(false);
+    handle(text);
   }
 
   function handle(raw: string) {
@@ -1102,6 +1190,31 @@ export function OrderChatbot() {
         <h1 className="title">
           <img src={logo} alt="link ON" />
         </h1>
+        <div className="header-tools">
+          {tts.supported && (
+            <button
+              className={"icon-btn" + (tts.enabled ? " on" : "")}
+              type="button"
+              aria-pressed={tts.enabled}
+              aria-label={tts.enabled ? "답 읽어 주기 끄기" : "답 읽어 주기 켜기"}
+              title={tts.enabled ? "답 읽어 주기 끄기" : "답 읽어 주기 켜기"}
+              onClick={tts.toggle}
+            >
+              <SpeakerIcon muted={!tts.enabled} />
+            </button>
+          )}
+          <button
+            className={"icon-btn mic" + (voice.listening ? " on" : "")}
+            type="button"
+            aria-pressed={voice.listening}
+            aria-label={voice.listening ? "듣기 멈추기" : "말로 입력"}
+            title={voice.supported ? (voice.listening ? "듣기 멈추기" : "말로 입력") : "이 브라우저는 음성 인식을 지원하지 않아요"}
+            disabled={!voice.supported}
+            onClick={voice.toggle}
+          >
+            <MicIcon />
+          </button>
+        </div>
         <button className="new-chat" type="button" onClick={reset} disabled={stage === "paying"}>
           <svg viewBox="0 0 16 16" width="12.6" height="12.6" aria-hidden="true">
             <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none" />
@@ -1143,6 +1256,23 @@ export function OrderChatbot() {
         </div>
       </div>
 
+      {/* 음성 상태 띠: 듣는 동안은 중간 인식 결과, 아니면 오류·안내 문구 */}
+      {(voice.listening || voice.error || notice) && (
+        <div className={"voice-bar" + (voice.listening ? "" : " note")} role="status" aria-live="polite">
+          {voice.listening ? (
+            <>
+              <span className="voice-dot" aria-hidden="true" />
+              <span className="voice-text">{voice.interim || "듣고 있어요. 말씀해 주세요."}</span>
+              <button type="button" onClick={voice.stop}>
+                멈추기
+              </button>
+            </>
+          ) : (
+            <span className="voice-text">{voice.error ?? notice}</span>
+          )}
+        </div>
+      )}
+
       {/* 선택지 질문이 떠 있으면 입력창을 접어 두고, "직접 입력" 을 누르면 올라온다 */}
       <div className={"composer" + (composerOpen ? "" : " collapsed")}>
         <form onSubmit={onSubmit} autoComplete="off" inert={!composerOpen}>
@@ -1182,7 +1312,9 @@ export function OrderChatbot() {
         </form>
       </div>
 
-      {payMethod && order && <PaymentSheet method={payMethod} order={order} onCancel={onPayCancel} onPaid={onPaid} />}
+      {payMethod && order && (
+        <PaymentSheet ref={sheetRef} method={payMethod} order={order} onCancel={onPayCancel} onPaid={onPaid} />
+      )}
     </div>
   );
 }

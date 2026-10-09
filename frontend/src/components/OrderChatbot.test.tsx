@@ -564,3 +564,183 @@ describe("OrderChatbot", () => {
     expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });
 });
+
+// ---- 음성 입력·읽어 주기 ----
+// 브라우저의 SpeechRecognition 대신 쓰는 가짜. say() 로 말을 넣어 준다
+class FakeRecognition {
+  static instances: FakeRecognition[] = [];
+  lang = "";
+  interimResults = false;
+  continuous = false;
+  maxAlternatives = 1;
+  onresult: ((e: { resultIndex: number; results: { isFinal: boolean; 0: { transcript: string } }[] }) => void) | null = null;
+  onerror: ((e: { error: string }) => void) | null = null;
+  onend: (() => void) | null = null;
+  started = false;
+  constructor() {
+    FakeRecognition.instances.push(this);
+  }
+  start() {
+    this.started = true;
+  }
+  stop() {
+    this.onend?.();
+  }
+  abort() {
+    this.onend?.();
+  }
+  say(text: string, final = true) {
+    this.onresult?.({ resultIndex: 0, results: [{ isFinal: final, 0: { transcript: text } }] });
+    if (final) this.onend?.();
+  }
+  static latest() {
+    return FakeRecognition.instances[FakeRecognition.instances.length - 1];
+  }
+}
+
+const speakSpy = vi.fn();
+class FakeUtterance {
+  lang = "";
+  rate = 1;
+  text: string;
+  constructor(text: string) {
+    this.text = text;
+  }
+}
+
+function installSpeech() {
+  const w = window as unknown as Record<string, unknown>;
+  w.SpeechRecognition = FakeRecognition;
+  w.speechSynthesis = { cancel: vi.fn(), speak: speakSpy };
+  w.SpeechSynthesisUtterance = FakeUtterance;
+}
+function uninstallSpeech() {
+  const w = window as unknown as Record<string, unknown>;
+  delete w.SpeechRecognition;
+  delete w.speechSynthesis;
+  delete w.SpeechSynthesisUtterance;
+}
+
+// 마이크를 누르고 한 문장을 말한다
+function speakInto(text: string) {
+  fireEvent.click(screen.getByRole("button", { name: "말로 입력" }));
+  act(() => FakeRecognition.latest().say(text));
+}
+
+describe("음성", () => {
+  beforeEach(() => {
+    FakeRecognition.instances = [];
+    speakSpy.mockClear();
+    installSpeech();
+  });
+  afterEach(uninstallSpeech);
+
+  it("마이크를 누르고 말하면 글자로 입력한 것과 똑같이 처리된다", () => {
+    render(<OrderChatbot />);
+    const mic = screen.getByRole("button", { name: "말로 입력" });
+    expect(mic).toBeEnabled();
+
+    fireEvent.click(mic);
+    expect(FakeRecognition.latest().lang).toBe("ko-KR");
+    expect(screen.getByRole("status")).toHaveTextContent("듣고 있어요");
+    expect(screen.getByRole("button", { name: "듣기 멈추기" })).toHaveAttribute("aria-pressed", "true");
+
+    // 중간 인식 결과가 띠에 보인다
+    act(() => FakeRecognition.latest().say("간장치킨", false));
+    expect(screen.getByRole("status")).toHaveTextContent("간장치킨");
+
+    act(() => FakeRecognition.latest().say("간장치킨 2마리 시켜줘"));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("간장치킨 2마리 시켜줘")).toBeInTheDocument();
+    wait(1000);
+    expect(screen.getByText("간장치킨 2마리")).toBeInTheDocument();
+    expect(screen.getByText("40,000원")).toBeInTheDocument();
+  });
+
+  it("선택지가 떠서 입력창이 접혀 있어도 말로 답할 수 있다", () => {
+    render(<OrderChatbot />);
+    speakInto("식당이요");
+    wait(700);
+    expect(screen.getByText(/어떤 음식을 원하세요\?/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ON 전송" }).closest("form")).toHaveAttribute("inert");
+
+    speakInto("한식");
+    wait(900);
+    expect(screen.getByText(/근처 한식 식당이에요/)).toBeInTheDocument();
+
+    speakInto("장락 할매국밥");
+    wait(700);
+    expect(screen.getByText(/장락 할매국밥 예약을 도와드릴게요/)).toBeInTheDocument();
+  });
+
+  it("결제 화면이 떠 있을 때 '결제'라고 말하면 결제가 진행되고, '취소'는 닫는다", () => {
+    render(<OrderChatbot />);
+    orderAndConfirm();
+    fireEvent.click(screen.getByRole("button", { name: /카카오페이/ }));
+    wait(300);
+    const dialog = screen.getByRole("dialog", { name: "카카오페이" });
+
+    speakInto("아니 취소");
+    wait(250 + 400);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/결제를 취소했어요/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /토스페이/ }));
+    wait(300);
+    speakInto("결제해줘");
+    expect(within(screen.getByRole("dialog", { name: "토스페이" })).getByText("결제 진행 중…")).toBeInTheDocument();
+    expect(dialog).not.toBeInTheDocument();
+  });
+
+  it("봇이 답하는 중에 말하면 안내만 하고 버린다", () => {
+    render(<OrderChatbot />);
+    send("배달");
+    speakInto("옛날통닭");
+    expect(screen.getByRole("status")).toHaveTextContent("답하는 중이에요");
+    expect(screen.queryByText("옛날통닭")).not.toBeInTheDocument();
+    wait(3500);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("말소리를 못 들으면 안내가 잠시 보였다가 사라진다", () => {
+    render(<OrderChatbot />);
+    fireEvent.click(screen.getByRole("button", { name: "말로 입력" }));
+    act(() => {
+      FakeRecognition.latest().onerror?.({ error: "no-speech" });
+      FakeRecognition.latest().onend?.();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("말소리를 듣지 못했어요");
+    wait(4000);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("읽어 주기를 켜면 새 봇 답을 선택지까지 읽어 준다 (켜기 전 것은 안 읽는다)", () => {
+    render(<OrderChatbot />);
+    expect(speakSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "답 읽어 주기 켜기" }));
+    expect(speakSpy).not.toHaveBeenCalled();
+
+    send("배달");
+    wait(700);
+    expect(speakSpy).toHaveBeenCalledTimes(1);
+    const utterance = speakSpy.mock.calls[0][0] as FakeUtterance;
+    expect(utterance.lang).toBe("ko-KR");
+    expect(utterance.text).toContain("어떤 음식을 배달해 드릴까요?");
+    expect(utterance.text).toContain("옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이 중에서 말씀해 주세요.");
+
+    fireEvent.click(screen.getByRole("button", { name: "답 읽어 주기 끄기" }));
+    send("옛날통닭");
+    wait(700);
+    expect(speakSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("음성 미지원 브라우저", () => {
+  it("마이크 버튼이 비활성화되고 이유를 알려 주며, 스피커 버튼은 없다", () => {
+    render(<OrderChatbot />);
+    const mic = screen.getByRole("button", { name: "말로 입력" });
+    expect(mic).toBeDisabled();
+    expect(mic).toHaveAttribute("title", "이 브라우저는 음성 인식을 지원하지 않아요");
+    expect(screen.queryByRole("button", { name: /읽어 주기/ })).not.toBeInTheDocument();
+  });
+});

@@ -38,6 +38,14 @@ describe("쇼핑", () => {
     expect(findSize("2600", ["240", "250", "260"])).toBeUndefined();
   });
 
+  it("음성 인식이 소리 나는 대로 적은 사이즈도 알아듣는다", () => {
+    const sizes = ["S", "M", "L", "XL"];
+    expect(findSize("엠", sizes)).toBe("M");
+    expect(findSize("엑스엘로 주세요", sizes)).toBe("XL");
+    expect(findSize("라지", sizes)).toBe("L");
+    expect(findSize("에스 사이즈", sizes)).toBe("S");
+  });
+
   it("수량 질문은 상품·사이즈·단위에 맞춘다", () => {
     expect(shopQuantityQuestion(product("에어플로우 러닝화"), "260")).toBe(
       "에어플로우 러닝화 260은 1켤레에 89,000원이에요.\n몇 켤레 주문할까요?",

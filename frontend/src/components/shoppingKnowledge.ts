@@ -68,8 +68,14 @@ export function findProduct(text: string, list: Product[]): Product | undefined 
 }
 
 // 사이즈는 버튼 글자 그대로("M", "260") 오거나 문장 속에 들어 있어도 찾는다
+// 음성 인식은 "엠", "엑스엘" 처럼 소리 나는 대로 적어 주므로 글자로 바꿔 준다 (긴 말부터 바꿔야 "엑스엘"이 "엘"로 깨지지 않는다)
+const SPOKEN_SIZES: [string, string][] = [
+  ["엑스라지", "XL"], ["엑스엘", "XL"], ["라지", "L"], ["미디엄", "M"], ["스몰", "S"], ["에스", "S"], ["엠", "M"], ["엘", "L"],
+];
+
 export function findSize(text: string, sizes: string[]): string | undefined {
-  const typed = squash(text).toUpperCase();
+  let typed = squash(text).toUpperCase();
+  for (const [spoken, letter] of SPOKEN_SIZES) typed = typed.replaceAll(spoken, letter);
   return sizes.find((s) => typed === s || new RegExp(`(^|[^0-9A-Z])${s}([^0-9A-Z]|$)`).test(typed));
 }
 

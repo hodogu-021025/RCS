@@ -12,8 +12,12 @@ export interface QuickMenuReply extends BotPrompt {
   next: "menu" | "food" | "shopCategory" | "tkCategory";
 }
 
+// "배달", "배달이요", "쇼핑할래요" 처럼 메뉴 이름으로 시작하고 뒤에 말투만 붙은 말.
+// ("간장치킨 배달해줘" 는 주문이지 메뉴 선택이 아니므로 includes 로 보지 않는다)
+const MENU_ONLY = new RegExp(`^(${QUICK_MENUS.join("|")})\\s*(이요|요|할래요?|할게요?|해\\s?줘|하고\\s?싶어요?|부탁해요?)?[.!]?$`);
+
 export function quickMenuReply(text: string): QuickMenuReply | undefined {
-  const menu = QUICK_MENUS.find((m) => m === text.trim());
+  const menu = QUICK_MENUS.find((m) => m === MENU_ONLY.exec(text.trim())?.[1]);
   if (menu === "배달") return { ...DELIVERY_PROMPT, next: "menu" };
   if (menu === "식당") return { ...FOOD_PROMPT, next: "food" };
   if (menu === "쇼핑") return { ...SHOP_PROMPT, next: "shopCategory" };
