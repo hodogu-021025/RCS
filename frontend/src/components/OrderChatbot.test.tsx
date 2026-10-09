@@ -650,7 +650,7 @@ describe("음성", () => {
     expect(screen.getByRole("status")).toHaveTextContent("간장치킨");
 
     act(() => FakeRecognition.latest().say("간장치킨 2마리 시켜줘"));
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(document.querySelector(".voice-bar")).not.toHaveClass("show"); // 카드는 남아서 내려가는 중
     expect(screen.getByText("간장치킨 2마리 시켜줘")).toBeInTheDocument();
     wait(1000);
     expect(screen.getByText("간장치킨 2마리")).toBeInTheDocument();
@@ -699,7 +699,7 @@ describe("음성", () => {
     expect(screen.getByRole("status")).toHaveTextContent("답하는 중이에요");
     expect(screen.queryByText("옛날통닭")).not.toBeInTheDocument();
     wait(3500);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(document.querySelector(".voice-bar")).not.toHaveClass("show"); // 카드는 남아서 내려가는 중
   });
 
   it("말소리를 못 들으면 안내가 잠시 보였다가 사라진다", () => {
@@ -711,7 +711,7 @@ describe("음성", () => {
     });
     expect(screen.getByRole("status")).toHaveTextContent("말소리를 듣지 못했어요");
     wait(4000);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(document.querySelector(".voice-bar")).not.toHaveClass("show"); // 카드는 남아서 내려가는 중
   });
 
   it("읽어 주기를 켜면 새 봇 답을 선택지까지 읽어 준다 (켜기 전 것은 안 읽는다)", () => {

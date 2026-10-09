@@ -146,6 +146,12 @@ type Message =
 
 type NewMessage = Message extends infer M ? (M extends Message ? Omit<M, "id"> : never) : never;
 
+// 대화 영역 아래에 겹쳐 뜨는 음성 카드의 내용
+interface VoiceBar {
+  kind: "listening" | "note";
+  text: string;
+}
+
 const GREETING = "안녕하세요! Saylo예요.\n무엇을 주문해 드릴까요?";
 
 let nextId = 1;
@@ -287,6 +293,16 @@ export function OrderChatbot() {
     const t = window.setTimeout(() => setNotice(null), 3500);
     return () => window.clearTimeout(t);
   }, [notice]);
+
+  // 음성 카드에 보일 내용. 없어질 때도 카드가 내려가는 동안 마지막 내용을 보여 줘야 하므로 마지막 값을 기억한다
+  // (렌더 중에 상태를 맞추는 React 의 파생 상태 방식)
+  const voiceBar: VoiceBar | null = voice.listening
+    ? { kind: "listening", text: voice.interim }
+    : voice.error || notice
+      ? { kind: "note", text: voice.error ?? notice ?? "" }
+      : null;
+  const [shownBar, setShownBar] = useState<VoiceBar | null>(voiceBar);
+  if (voiceBar && (voiceBar.kind !== shownBar?.kind || voiceBar.text !== shownBar.text)) setShownBar(voiceBar);
 
   // 읽어 주기가 켜져 있으면 새로 온 봇 말풍선을 읽는다 (한 번에 여러 개가 오면 이어서)
   const spokenUpTo = useRef(0);
@@ -1252,24 +1268,30 @@ export function OrderChatbot() {
             </div>
           )}
         </div>
-      </div>
 
-      {/* 음성 상태 띠: 듣는 동안은 중간 인식 결과, 아니면 오류·안내 문구 */}
-      {(voice.listening || voice.error || notice) && (
-        <div className={"voice-bar" + (voice.listening ? "" : " note")} role="status" aria-live="polite">
-          {voice.listening ? (
-            <>
-              <span className="voice-dot" aria-hidden="true" />
-              <span className="voice-text">{voice.interim || "듣고 있어요. 말씀해 주세요."}</span>
-              <button type="button" onClick={voice.stop}>
-                멈추기
-              </button>
-            </>
-          ) : (
-            <span className="voice-text">{voice.error ?? notice}</span>
-          )}
-        </div>
-      )}
+        {/* 음성 카드: 대화 영역 위에 겹쳐서 아래에서 올라오고(show) 내려간다. 내려가는 동안은 마지막 내용을 그대로 보여 준다.
+            듣는 동안은 중간 인식 결과, 아니면 오류·안내 문구 */}
+        {shownBar && (
+          <div
+            className={"voice-bar" + (voiceBar ? " show" : "") + (shownBar.kind === "note" ? " note" : "")}
+            role="status"
+            aria-live="polite"
+            inert={!voiceBar}
+          >
+            {shownBar.kind === "listening" ? (
+              <>
+                <span className="voice-dot" aria-hidden="true" />
+                <span className="voice-text">{shownBar.text || "듣고 있어요. 말씀해 주세요."}</span>
+                <button type="button" onClick={voice.stop}>
+                  멈추기
+                </button>
+              </>
+            ) : (
+              <span className="voice-text">{shownBar.text}</span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* 선택지 질문이 떠 있으면 입력창을 접어 두고, "직접 입력" 을 누르면 올라온다 */}
       <div className={"composer" + (composerOpen ? "" : " collapsed")}>
