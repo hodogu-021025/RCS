@@ -2,6 +2,8 @@ import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type 
 import backgroundVideo from "../image/saylo_background.mp4";
 import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
+import { useSession } from "../auth/auth";
+import { addOrder, addReservation } from "../data/db";
 import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
@@ -41,7 +43,7 @@ import {
 import {
   ADDRESS,
   DEFAULT_PEOPLE,
-  DELIVERY_PROMPT,
+  deliveryPrompt,
   FOOD_PROMPT,
   MAX_DAYS_AHEAD,
   MAX_PEOPLE,
@@ -287,6 +289,8 @@ export function OrderChatbot() {
   // 말로 입력: 들은 문장을 글자로 입력한 것과 똑같이 처리한다 (입력창이 접혀 있어도 된다)
   const voice = useVoiceInput(handleVoice);
   const tts = useSpeechOutput();
+  // 로그인한 소비자면 주문·예약 기록에 이름이 남고, 아니면 비회원으로 남는다
+  const session = useSession();
 
   useEffect(() => {
     if (!notice) return;
@@ -509,6 +513,11 @@ export function OrderChatbot() {
     if (stage === "rsvConfirm" && draft.date && draft.time && draft.people) {
       if (isYes(text)) {
         const done = reservationDoneText({ restaurant, date: draft.date, time: draft.time, people: draft.people });
+        // 사장님·관리자 화면에서 보이도록 기록한다
+        addReservation(
+          { restaurantId: restaurant.id, restaurantName: restaurant.name, date: draft.date, time: draft.time, people: draft.people },
+          session,
+        );
         setRsv(null);
         setStage("idle");
         botReply(() => push(botText(done)), 900);
@@ -794,7 +803,7 @@ export function OrderChatbot() {
         return;
       }
       if (!quickMenuReply(text)) {
-        botReply(() => push(botPrompt({ ...DELIVERY_PROMPT, text: "지금은 아래 메뉴를 배달할 수 있어요.\n골라 주시거나 메뉴 이름을 입력해 주세요." })));
+        botReply(() => push(botPrompt({ ...deliveryPrompt(), text: "지금은 아래 메뉴를 배달할 수 있어요.\n골라 주시거나 메뉴 이름을 입력해 주세요." })));
         return;
       }
     }
@@ -856,6 +865,8 @@ export function OrderChatbot() {
   function onPaid() {
     if (!order || !payMethod) return;
     const text = completionText(order, payMethod);
+    // 사장님·관리자 화면에서 보이도록 기록한다
+    addOrder(order, payMethod.label, session);
     setPayMethod(null);
     setOrder(null);
     setStage("done");
@@ -1205,6 +1216,18 @@ export function OrderChatbot() {
         {/* 글자 로고 */}
         <h1 className="title">Saylo</h1>
         <div className="header-tools">
+          {/* 계정: 비로그인은 로그인 페이지로, 로그인 상태면 내 주문 페이지로 (해시 주소라 링크만으로 이동한다) */}
+          <a
+            className={"icon-btn" + (session ? " on" : "")}
+            href={session ? "#/me" : "#/login"}
+            aria-label={session ? `${session.name} · 내 주문` : "로그인"}
+            title={session ? `${session.name} · 내 주문` : "로그인"}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <circle cx="8" cy="5.5" r="3" {...ICON} />
+              <path d="M2.5 14.5a5.5 5.5 0 0 1 11 0" {...ICON} />
+            </svg>
+          </a>
           {tts.supported && (
             <button
               className={"icon-btn" + (tts.enabled ? " on" : "")}

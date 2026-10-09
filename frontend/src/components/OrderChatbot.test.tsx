@@ -611,7 +611,7 @@ class FakeUtterance {
 function installSpeech() {
   const w = window as unknown as Record<string, unknown>;
   w.SpeechRecognition = FakeRecognition;
-  w.speechSynthesis = { cancel: vi.fn(), speak: speakSpy };
+  w.speechSynthesis = { cancel: vi.fn(), speak: speakSpy, getVoices: () => [{ name: "Microsoft Heami - Korean", lang: "ko-KR" }, { name: "Microsoft SunHi Online (Natural) - Korean (Korea)", lang: "ko-KR" }] };
   w.SpeechSynthesisUtterance = FakeUtterance;
 }
 function uninstallSpeech() {
@@ -725,6 +725,8 @@ describe("음성", () => {
     expect(speakSpy).toHaveBeenCalledTimes(1);
     const utterance = speakSpy.mock.calls[0][0] as FakeUtterance;
     expect(utterance.lang).toBe("ko-KR");
+    expect((utterance as unknown as { voice: { name: string } }).voice.name).toContain("SunHi"); // 자연 음성이 있으면 그걸 고른다
+    expect((utterance as unknown as { pitch: number }).pitch).toBeGreaterThan(1);
     expect(utterance.text).toContain("어떤 음식을 배달해 드릴까요?");
     expect(utterance.text).toContain("옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이 중에서 말씀해 주세요.");
 

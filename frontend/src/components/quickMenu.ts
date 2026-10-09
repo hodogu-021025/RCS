@@ -1,6 +1,6 @@
 // 입력창의 + 버튼으로 여는 빠른 메뉴와, 무슨 말인지 모를 때의 안내.
 // 배달·식당·쇼핑·예매 각각의 첫 질문으로 이어진다.
-import { DELIVERY_PROMPT, FOOD_PROMPT, type BotPrompt } from "./orderChatKnowledge";
+import { FOOD_PROMPT, deliveryPrompt, type BotPrompt } from "./orderChatKnowledge";
 import { SHOP_PROMPT } from "./shoppingKnowledge";
 import { TICKET_PROMPT } from "./ticketKnowledge";
 
@@ -18,7 +18,7 @@ const MENU_ONLY = new RegExp(`^(${QUICK_MENUS.join("|")})\\s*(이요|요|할래�
 
 export function quickMenuReply(text: string): QuickMenuReply | undefined {
   const menu = QUICK_MENUS.find((m) => m === MENU_ONLY.exec(text.trim())?.[1]);
-  if (menu === "배달") return { ...DELIVERY_PROMPT, next: "menu" };
+  if (menu === "배달") return { ...deliveryPrompt(), next: "menu" };
   if (menu === "식당") return { ...FOOD_PROMPT, next: "food" };
   if (menu === "쇼핑") return { ...SHOP_PROMPT, next: "shopCategory" };
   if (menu === "예매") return { ...TICKET_PROMPT, next: "tkCategory" };

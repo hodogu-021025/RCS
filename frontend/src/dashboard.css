@@ -1,0 +1,168 @@
+/* 로그인 · 사장님 · 관리자 · 내 주문 페이지. 챗봇(index.css)과 같은 변수·평면 디자인을 쓴다 */
+.dash {
+  align-self: stretch; width: 100%; min-height: 100dvh;
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--text);
+}
+.dash-center { justify-content: center; align-items: center; padding: 24px 16px; }
+.dash-head {
+  display: flex; align-items: center; gap: 14px;
+  height: 56px; padding: 0 20px;
+  background: var(--header-bg); color: #fff;
+  flex-shrink: 0;
+}
+.dash-logo { font-size: 22px; font-weight: 900; letter-spacing: -.03em; color: #fff; text-decoration: none; }
+.dash-logo.dark { color: var(--accent); display: block; margin-bottom: 4px; }
+.dash-title { font-weight: 700; opacity: .9; }
+.dash-user { margin-left: auto; font-size: 13px; opacity: .85; white-space: nowrap; }
+.dash-logout {
+  height: 29px; padding: 0 11px; border: 1px solid rgba(255, 255, 255, .3); border-radius: 999px;
+  background: rgba(255, 255, 255, .08); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.dash-logout:hover { background: rgba(255, 255, 255, .22); }
+.dash-main { width: 100%; max-width: 960px; margin: 0 auto; padding: 20px 16px 48px; }
+
+.dash-card {
+  width: 100%; max-width: 420px; padding: 28px 24px;
+  background: var(--panel); border: 1px solid rgba(15, 23, 42, .06); border-radius: 24px;
+}
+.dash-card h1 { margin: 0 0 18px; font-size: 22px; }
+.dash-card h2 { margin: 0 0 8px; font-size: 18px; }
+.dash-card p { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+.dash-card label, .form-grid label { display: block; margin-bottom: 12px; }
+.dash-card label > span, .form-grid label > span, .field-row label > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.dash input:not([type="checkbox"]), .dash select {
+  width: 100%; height: 46px; padding: 0 14px;
+  border: 1.5px solid transparent; border-radius: 12px;
+  background: var(--surface); color: var(--text); font: inherit; letter-spacing: inherit; outline: none;
+  transition: background .15s, border-color .15s;
+}
+.dash input:not([type="checkbox"]):focus, .dash select:focus { background: #fff; border-color: var(--accent); }
+.dash input[type="time"], .dash input[type="number"] { width: auto; }
+.form-error { margin: 0 0 12px; color: #e5484d; font-size: 13px; font-weight: 600; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: 999px;
+  background: #fff; color: var(--text); font: inherit; font-size: 14px; font-weight: 600;
+  text-decoration: none; cursor: pointer;
+  transition: background .15s, border-color .15s, filter .15s;
+}
+.btn:hover { background: var(--surface); border-color: #cbd5e1; }
+.btn.primary { border-color: transparent; background: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
+.btn.wide { width: 100%; margin-top: 4px; margin-bottom: 8px; }
+.btn.small { height: 30px; padding: 0 10px; font-size: 12px; }
+.btn:disabled { opacity: .4; cursor: default; }
+.dash-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.demo-accounts { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; }
+.demo-accounts > span { width: 100%; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.demo-accounts button {
+  height: 30px; padding: 0 12px; border: 1px dashed #cbd5e1; border-radius: 999px;
+  background: #fff; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.demo-accounts button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 탭 */
+.dash-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.dash-tabs button {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 42px; padding: 0 14px; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  background: none; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.dash-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.badge {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 11.5px; font-weight: 700;
+  display: inline-grid; place-items: center;
+}
+
+.dash-section { margin-bottom: 24px; padding: 18px; background: var(--panel); border: 1px solid rgba(15, 23, 42, .06); border-radius: 18px; }
+.dash-section h2 { margin: 0 0 12px; font-size: 16px; }
+.section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.section-head h2 { margin: 0; flex: 1; }
+.empty { margin: 0; color: var(--muted); font-size: 14px; }
+.hint { margin: 8px 0 0; color: var(--muted); font-size: 12.5px; }
+.muted { color: var(--muted); }
+.search { max-width: 260px; height: 38px !important; border-radius: 999px !important; }
+
+/* 필터 칩·종류 칩 */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; height: 28px; padding: 0 11px;
+  border: 1px solid var(--line); border-radius: 999px; background: #fff;
+  color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.chip.active { border-color: var(--accent); background: var(--accent-weak); color: var(--accent); }
+.chip.kind-delivery, .chip.kind-shop, .chip.kind-ticket, .chip.kind-reservation { cursor: default; background: var(--surface); border-color: transparent; }
+
+/* 주문·예약 한 건 */
+.record-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.record { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.record.pending { border-color: var(--accent); background: var(--accent-weak); }
+.record-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14.5px; }
+.record-head b { flex: 1; min-width: 0; }
+.record dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; font-size: 13.5px; }
+.record dl > div { display: flex; gap: 8px; }
+.record dt { color: var(--muted); flex-shrink: 0; }
+.record dd { margin: 0; font-weight: 600; }
+.record .price { color: var(--accent); font-weight: 700; }
+.record-actions { display: flex; gap: 6px; margin-top: 10px; }
+.record-actions .btn { height: 34px; padding: 0 14px; font-size: 13px; }
+
+/* 상태 표시: 글자와 같이 쓴다 (색만으로 구분하지 않는다) */
+.status { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.s-접수, .s-예약\ 확정 { background: var(--accent-weak); color: var(--accent); }
+.s-준비\ 중 { background: #fff4e5; color: #b45309; }
+.s-완료, .s-방문\ 완료 { background: #e8f7ee; color: #15803d; }
+.s-취소 { background: #f1f5f9; color: var(--muted); }
+
+/* 새 주문 알림 */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 20;
+  padding: 12px 18px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 14px; font-weight: 700;
+  animation: pop .2s ease-out;
+}
+
+/* 매장·메뉴 */
+.field-row { display: flex; flex-wrap: wrap; gap: 16px; }
+.menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.menu-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.menu-list li b { flex: 1; min-width: 120px; }
+.menu-list li.sold-out b { color: var(--muted); text-decoration: line-through; }
+.price-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.price-field input { width: 110px !important; height: 38px !important; }
+.toggle { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+/* 숫자 타일 */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tile { padding: 14px; background: var(--surface); border-radius: 14px; }
+.tile span { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+.tile b { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+
+/* 표 */
+.table-wrap { overflow-x: auto; }
+.dash-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.dash-table th { text-align: left; padding: 8px 10px; color: var(--muted); font-size: 12.5px; font-weight: 600; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.dash-table td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.dash-table tr:last-child td { border-bottom: none; }
+
+/* 가로 막대: 한 색, 값은 글자로 */
+.bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.bars li { display: grid; grid-template-columns: 72px 1fr 48px; align-items: center; gap: 10px; font-size: 13px; }
+.bar-label { color: var(--muted); }
+.bar-track { height: 10px; background: var(--surface); border-radius: 999px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s; }
+.bar-value { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; align-items: end; }
+.form-grid .form-error, .form-grid .btn { grid-column: 1 / -1; justify-self: start; }
+
+@media (max-width: 520px) {
+  .dash-head { padding: 0 14px; gap: 10px; }
+  .dash-title { display: none; }
+  .record dl { grid-template-columns: 1fr; }
+}

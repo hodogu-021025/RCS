@@ -125,6 +125,7 @@ export function makeTicketOrder(show: Show, date: Date, time: string, qty: numbe
   return {
     kind: "ticket",
     store: { name: show.venue },
+    storeId: `venue:${show.venue}`,
     item: show.title,
     option: `${formatDate(date)} ${time}`,
     qty,

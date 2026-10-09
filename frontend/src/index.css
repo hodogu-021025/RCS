@@ -8,7 +8,8 @@
   --accent: #007cfc;       /* 로고 "ON" 의 파란색 */
   --accent-weak: #eaf4ff;
   --accent-gradient: linear-gradient(135deg, #38bdf8 0%, var(--accent) 55%, #4f46e5 100%); /* 배경 구체 톤 */
-  --header-bg: #0f172a;
+  /* 헤더: 브랜드 파란색에서 남보라로 이어지는 그라데이션 (배경 구체·전송 버튼과 같은 계열, 흰 글자가 읽히게 밝은 하늘색은 뺐다) */
+  --header-bg: linear-gradient(135deg, #007cfc 0%, #2f63f0 55%, #4f46e5 100%);
   --radius-bubble: 18px;
   --radius-item: 12px;
 }
@@ -52,7 +53,7 @@ header {
   background: var(--header-bg);
   flex-shrink: 0;
 }
-/* 글자 로고 "Saylo": 흰 글자 하나로. 흰 글자라 헤더는 어두운 배경이어야 보인다 */
+/* 글자 로고 "Saylo": 파란 헤더 위의 흰 글자 하나 */
 header .title {
   margin: 0; line-height: 1;
   font-size: 22px; font-weight: 900; letter-spacing: -.03em; color: #fff;
@@ -67,14 +68,15 @@ header .title {
   cursor: pointer;
   transition: background .15s, border-color .15s, color .15s;
 }
-.icon-btn:hover:not(:disabled) { background: rgba(0, 124, 252, .2); border-color: rgba(0, 124, 252, .6); color: #fff; }
-.icon-btn.on, .icon-btn.on:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 파란 헤더 위라 켜진 상태는 흰 바탕 + 파란 아이콘으로 구분한다 */
+.icon-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .22); border-color: rgba(255, 255, 255, .5); color: #fff; }
+.icon-btn.on, .icon-btn.on:hover { background: #fff; border-color: #fff; color: var(--accent); }
 .icon-btn:disabled { opacity: .35; cursor: default; }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 듣는 동안 마이크에서 고리가 퍼져 나간다 */
 .icon-btn.mic.on::after {
   content: ""; position: absolute; inset: -1px; border-radius: 50%;
-  border: 2px solid var(--accent);
+  border: 2px solid #fff;
   animation: mic-ping 1.4s ease-out infinite;
 }
 @keyframes mic-ping { from { transform: scale(1); opacity: .8; } to { transform: scale(1.9); opacity: 0; } }
@@ -116,7 +118,7 @@ header .title {
 }
 .new-chat svg { opacity: .85; }
 .new-chat:hover:not(:disabled) {
-  background: rgba(0, 124, 252, .2); border-color: rgba(0, 124, 252, .6); color: #fff;
+  background: rgba(255, 255, 255, .22); border-color: rgba(255, 255, 255, .5); color: #fff;
 }
 .new-chat:active:not(:disabled) { transform: scale(.96); }
 .new-chat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -395,7 +397,7 @@ header .title {
 @media (prefers-reduced-motion: reduce) {
   .composer, .composer > form { transition: none; }
 }
-form {
+.composer form {
   display: flex; gap: 8px;
   padding: 10px 12px 14px;
   background: var(--panel);
@@ -404,7 +406,7 @@ form {
 }
 .input-wrap { flex: 1; min-width: 0; position: relative; display: flex; }
 /* 테두리 대신 채운 면. 포커스하면 흰 면 + 파란 테두리 */
-form input {
+.composer form input {
   flex: 1; min-width: 0; height: 46px;
   border: 1.5px solid transparent; border-radius: 999px;
   background: var(--surface); color: var(--text);
@@ -412,11 +414,11 @@ form input {
   font-family: inherit; letter-spacing: inherit;
   transition: background .15s, border-color .15s;
 }
-form input::placeholder { color: #94a3b8; }
-form input:focus { background: #fff; border-color: var(--accent); }
+.composer form input::placeholder { color: #94a3b8; }
+.composer form input:focus { background: #fff; border-color: var(--accent); }
 /* 전송 버튼 "ON": 입력이 비면 꺼져 있다가, 글자를 쓰면 배경 구체 같은 그라데이션이 켜진다.
    그라데이션은 transition 이 안 되므로 ::before 층의 opacity 로 켜고 끈다 */
-form .send {
+.composer form .send {
   position: relative; isolation: isolate; overflow: hidden;
   min-width: 58px; height: 46px; padding: 0 16px;
   border: none; border-radius: 999px;
@@ -425,7 +427,7 @@ form .send {
   cursor: default;
   transition: color .25s, filter .15s;
 }
-form .send::before {
+.composer form .send::before {
   content: "";
   position: absolute; inset: 0; z-index: -1;
   background: var(--accent-gradient);
@@ -433,10 +435,10 @@ form .send::before {
   transition: opacity .25s;
 }
 /* 그림자·하이라이트 없이 평면으로 둔다. 마우스를 올리면 색만 살짝 밝아진다 */
-form .send:not(:disabled) { color: #fff; cursor: pointer; }
-form .send:not(:disabled)::before { opacity: 1; }
-form .send:not(:disabled):hover { filter: brightness(1.08); }
-form .send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.composer form .send:not(:disabled) { color: #fff; cursor: pointer; }
+.composer form .send:not(:disabled)::before { opacity: 1; }
+.composer form .send:not(:disabled):hover { filter: brightness(1.08); }
+.composer form .send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* 입력창 안 오른쪽 끝: + 버튼과 그 위 빠른 메뉴를 묶는 기준점 */
 .menu-anchor {

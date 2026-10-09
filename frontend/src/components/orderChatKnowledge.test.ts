@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DELIVERY_MENU,
-  DELIVERY_PROMPT,
+  deliveryPrompt,
   RESTAURANTS,
   bookableTimes,
   checkVisitTime,
@@ -42,7 +42,7 @@ describe("isYes / isNo", () => {
 
 describe("배달 메뉴", () => {
   it("배달·식당 어디에도 황금올리브는 없고, 배달 예시는 다른 메뉴들이다", () => {
-    expect(DELIVERY_PROMPT.choices?.map((c) => c.label)).toEqual(["옛날통닭", "간장치킨", "마르게리따 피자", "국물떡볶이"]);
+    expect(deliveryPrompt().choices?.map((c) => c.label)).toEqual(["옛날통닭", "간장치킨", "마르게리따 피자", "국물떡볶이"]);
     expect(DELIVERY_MENU.some((d) => d.name.includes("황금올리브"))).toBe(false);
     expect(RESTAURANTS.some((r) => r.signature.includes("황금올리브") || r.name.includes("BBQ"))).toBe(false);
   });

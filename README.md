@@ -1,10 +1,24 @@
 # Saylo — 주문 챗봇
 
-채팅·버튼·음성으로 배달 주문, 식당 예약, 쇼핑, 티켓 예매를 끝까지 진행하는 단일 페이지 챗봇입니다.
-백엔드 없이 브라우저에서만 동작하는 정적 사이트이고, 결제와 매장·상품 데이터는 모두 화면 확인용 데모입니다.
+채팅·버튼·음성으로 배달 주문, 식당 예약, 쇼핑, 티켓 예매를 끝까지 진행하는 소비자 챗봇에, 로그인으로 나뉘는 사장님·관리자 페이지가 붙어 있습니다.
+백엔드 없이 브라우저에서만 동작하는 정적 사이트이고, 결제·매장·상품 데이터와 로그인 계정은 모두 화면 확인용 데모입니다.
 
 - 기술: React 19, TypeScript, Vite, Vitest (테스트), oxlint (린트)
 - 공개 도메인: sayloorder.com (도메인·호스팅 연결은 별도 담당자)
+
+## 역할과 페이지
+
+| 주소 | 누가 | 내용 |
+|---|---|---|
+| `#/` | 누구나 | 소비자 챗봇 (로그인 없이 사용 가능, 로그인하면 주문에 이름이 남음) |
+| `#/login` | — | 로그인 |
+| `#/me` | 로그인한 사람 | 내 주문·예약 내역 |
+| `#/owner` | 사장님 | 내 매장의 주문·예약 접수(상태 변경, 새 주문 알림), 영업시간·메뉴 가격·품절 관리, 매출 요약 |
+| `#/admin` | 관리자 | 전체 주문·예약 현황, 매장별 사장님 계정 관리, 통계, 사용자 목록 |
+
+데모 계정 (비밀번호는 모두 `1234`): 소비자 `user`, 사장님 `owner`(청전 치킨공방), 관리자 `admin`. 관리자 페이지에서 다른 매장의 사장님 계정을 더 만들 수 있습니다.
+
+주문·예약 내역, 사장님이 바꾼 매장 설정, 추가한 계정은 **브라우저(localStorage)** 에 저장됩니다. 같은 브라우저 안에서는 소비자가 주문하면 사장님 화면에 바로 뜨지만, 다른 기기와는 공유되지 않습니다(서버를 붙이면 `src/data/db.ts` 하나만 API 호출로 바꾸면 됩니다). 처음 열면 보기용 기록이 몇 건 들어가고, 지우려면 브라우저 저장소를 비우면 됩니다.
 
 ## 실행
 
@@ -39,7 +53,7 @@ docker compose --profile tunnel down          # 터널까지 모두 중지
 
 - 빌드 명령: `npm --prefix frontend run build` (저장소 루트 기준) 또는 `cd frontend && npm run build`
 - 결과물: `frontend/dist`
-- 클라이언트 라우팅이 없어서 별도 리라이트 설정은 필요 없습니다.
+- 페이지 이동은 해시 주소(`#/owner`)를 써서 별도 리라이트 설정이 필요 없습니다.
 - `frontend/Dockerfile` + `deploy/nginx.conf`는 같은 결과물을 nginx 이미지로 만듭니다 (빌드 컨텍스트는 저장소 루트).
 - 음성 인식은 HTTPS(또는 localhost)에서만 마이크가 열립니다.
 
@@ -61,7 +75,13 @@ frontend/
       Select.tsx              결제 팝업 드롭다운
       useSpeech.ts            음성 입력(말 → 글자)과 읽어 주기(글자 → 말)
       *.test.ts(x)            같은 이름 파일의 테스트
-    index.css                 스타일 전체 (평면 디자인, 브랜드 파란색 #007cfc)
+    auth/auth.ts              데모 로그인(계정·세션)
+    data/db.ts                주문·예약·매장 설정·계정 저장소 (localStorage)
+    data/seed.ts              처음 열 때 넣는 보기용 기록
+    pages/                    LoginPage, OwnerPage(사장님), AdminPage(관리자), MyOrdersPage(내 주문), RequireRole(역할 검사)
+    App.tsx                   주소별 페이지 연결 (HashRouter)
+    index.css                 챗봇 스타일 (평면 디자인, 브랜드 파란색 #007cfc)
+    dashboard.css             로그인·사장님·관리자 페이지 스타일
     image/                    로고, 배경 영상
   scripts/build-html.mjs      HTML 한 파일 만들기
   Dockerfile
@@ -73,6 +93,7 @@ docker-compose.yml            로컬 Docker (+ 터널)
 
 - 매장·메뉴·가격, 식당 목록, 상품, 작품: 각 `*Knowledge.ts`의 배열을 고치면 화면에 바로 반영됩니다.
 - 배달지 기본 주소: `orderChatKnowledge.ts`의 `ADDRESS`
+- 데모 계정: `auth/auth.ts`의 `DEMO_ACCOUNTS`
 - 색·여백: `index.css` 맨 위의 CSS 변수
 
 ## 대화 흐름 요약

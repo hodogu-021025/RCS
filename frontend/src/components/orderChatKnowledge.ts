@@ -1,4 +1,5 @@
 // 주문 챗봇의 데모 데이터와 문장 해석 규칙. 실제 매장 검색·결제 API를 붙일 때 이 파일만 바꾸면 된다.
+import { getStoreSettings } from "../data/db";
 
 export interface Store {
   name: string;
@@ -21,6 +22,7 @@ export interface Order {
   shippingFee?: number;
   address?: string; // 배달지·배송지 (예매는 없음)
   seats?: string; // 예매 좌석
+  storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (배달은 식당 id)
 }
 
 export type PaymentId = "card" | "kakao" | "toss";
@@ -101,7 +103,15 @@ export function matchFood(text: string): FoodCategory | undefined {
 
 // 해당 음식을 다루는 식당을 가까운 순으로
 export function nearbyRestaurants(food: FoodKey): Restaurant[] {
-  return RESTAURANTS.filter((r) => r.food === food).sort((a, b) => a.distanceKm - b.distanceKm);
+  return RESTAURANTS.filter((r) => r.food === food)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .map(withStoreSettings);
+}
+
+// 사장님이 사장님 화면에서 바꾼 값(영업시간)을 덮어쓴 식당
+export function withStoreSettings(r: Restaurant): Restaurant {
+  const hours = getStoreSettings(r.id).hours;
+  return hours ? { ...r, hours } : r;
 }
 
 // 띄어쓰기·대소문자를 무시하고 비교할 때
@@ -113,7 +123,7 @@ export function findRestaurant(text: string, list: Restaurant[]): Restaurant | u
   return list.find((r) => typed.includes(squash(r.name)));
 }
 
-const restaurantById = (id: string) => RESTAURANTS.find((r) => r.id === id)!;
+export const restaurantById = (id: string) => withStoreSettings(RESTAURANTS.find((r) => r.id === id)!);
 
 export const km = (distanceKm: number) => `${distanceKm.toFixed(1)}km`;
 
@@ -159,11 +169,21 @@ export const DELIVERY_MENU: DeliveryItem[] = [
 export const MAX_QTY = 10;
 
 // 메뉴 이름이 그대로 들어 있으면 그 메뉴 하나, 아니면 키워드에 걸리는 메뉴 전부
+// 사장님이 바꾼 가격을 입히고, 품절 메뉴는 뺀 배달 메뉴
+export function availableDeliveryMenu(): DeliveryItem[] {
+  return DELIVERY_MENU.flatMap((d) => {
+    const s = getStoreSettings(d.restaurantId).items?.[d.id];
+    if (s?.soldOut) return [];
+    return [s?.price ? { ...d, price: s.price } : d];
+  });
+}
+
 export function findDeliveryItems(text: string): DeliveryItem[] {
   const typed = squash(text);
-  const exact = DELIVERY_MENU.filter((d) => typed.includes(squash(d.name)));
-  if (exact.length > 0) return exact;
-  return DELIVERY_MENU.filter((d) => d.keywords.some((k) => typed.includes(k)));
+  const menu = availableDeliveryMenu();
+  // 메뉴 이름을 그대로 말했는데 품절이면, 비슷한 다른 메뉴로 바꿔치기하지 않고 못 찾은 것으로 본다
+  if (DELIVERY_MENU.some((d) => typed.includes(squash(d.name)))) return menu.filter((d) => typed.includes(squash(d.name)));
+  return menu.filter((d) => d.keywords.some((k) => typed.includes(k)));
 }
 
 const deliveryChoices = (items: DeliveryItem[]): Choice[] => items.map((d) => ({ label: d.name, value: d.name }));
@@ -198,6 +218,7 @@ export function makeOrder(item: DeliveryItem, qty: number): Order {
   return {
     kind: "delivery",
     store: { name: store.name, distance: km(store.distanceKm) },
+    storeId: store.id,
     item: item.name,
     qty,
     unit: item.unit,
@@ -389,15 +410,16 @@ export const FOOD_PROMPT: BotPrompt = {
   placeholder: "먹고 싶은 음식을 입력하세요",
 };
 
-export const DELIVERY_PROMPT: BotPrompt = {
+// 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 한다
+export const deliveryPrompt = (): BotPrompt => ({
   text: "어떤 음식을 배달해 드릴까요?",
-  choices: deliveryChoices(DELIVERY_MENU),
+  choices: deliveryChoices(availableDeliveryMenu()),
   placeholder: "예) 간장치킨",
-};
+});
 
 // 여러 메뉴에 걸리는 말이면 그 메뉴들 중에서 고르게 한다
 export const pickDeliveryPrompt = (items: DeliveryItem[]): BotPrompt => ({
-  ...DELIVERY_PROMPT,
+  ...deliveryPrompt(),
   text: "어떤 메뉴로 할까요?",
   choices: deliveryChoices(items),
 });

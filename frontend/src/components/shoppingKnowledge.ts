@@ -123,6 +123,7 @@ export function makeShopOrder(product: Product, size: string | undefined, qty: n
   return {
     kind: "shop",
     store: { name: product.brand },
+    storeId: `brand:${product.brand}`,
     item: product.name,
     option: size,
     qty,

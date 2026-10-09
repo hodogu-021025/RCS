@@ -122,6 +122,19 @@ export function useVoiceInput(onResult: (text: string) => void) {
 }
 
 // 챗봇 답을 소리로 읽어 준다. 켜져 있을 때만 읽고, 새 답이 오면 읽던 것을 끊고 새 답을 읽는다
+// 기기에 있는 한국어 목소리 중 자연스러운 젊은 여성 목소리를 앞에서부터 찾는다
+// (Edge: SunHi 자연 음성, iPhone·Mac: Yuna, 안드로이드 Chrome: Google 한국어, Windows 기본: Heami)
+const PREFERRED_VOICES = ["SunHi", "Yuna", "Google 한국의", "ko-KR-Wavenet", "Heami"];
+
+function pickKoreanVoice(): SpeechSynthesisVoice | undefined {
+  const voices = window.speechSynthesis.getVoices().filter((v) => v.lang.replace("_", "-").toLowerCase().startsWith("ko"));
+  for (const name of PREFERRED_VOICES) {
+    const found = voices.find((v) => v.name.includes(name));
+    if (found) return found;
+  }
+  return voices[0];
+}
+
 export function useSpeechOutput() {
   const supported = useMemo(() => typeof window !== "undefined" && "speechSynthesis" in window, []);
   const [enabled, setEnabled] = useState(false);
@@ -133,7 +146,11 @@ export function useSpeechOutput() {
       synth.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = "ko-KR";
-      utterance.rate = 1.05;
+      const voice = pickKoreanVoice();
+      if (voice) utterance.voice = voice;
+      // 조금 빠르고 살짝 높게: 같은 목소리라도 더 젊고 밝게 들린다
+      utterance.rate = 1.08;
+      utterance.pitch = 1.15;
       synth.speak(utterance);
     },
     [enabled, supported],
