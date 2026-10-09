@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DELIVERY_MENU,
   DELIVERY_PROMPT,
-  FALLBACK_PROMPT,
-  FOOD_PROMPT,
   RESTAURANTS,
+  bookableTimes,
   checkVisitTime,
   completionText,
   findDeliveryItems,
@@ -12,6 +11,7 @@ import {
   findRestaurant,
   formatDate,
   isNo,
+  isBookableDate,
   isWithinHours,
   isYes,
   km,
@@ -21,8 +21,7 @@ import {
   parseQuantity,
   parseVisitDate,
   parseVisitTime,
-  quantityPrompt,
-  quickMenuReply,
+  quantityQuestion,
   reservationDoneText,
   timeChoices,
   withObjectParticle,
@@ -67,11 +66,10 @@ describe("배달 메뉴", () => {
     expect(parseQuantity("네 주세요")).toBeUndefined();
   });
 
-  it("수량 질문은 단위에 맞춰 묻고 1~3 단위를 선택지로 준다", () => {
-    const prompt = quantityPrompt(item("국물떡볶이"));
-    expect(prompt.text).toBe("국물떡볶이는 장락 떡볶이에서 1인분 6,000원이에요.\n몇 인분 주문할까요?");
-    expect(prompt.choices?.map((c) => c.label)).toEqual(["1인분", "2인분", "3인분"]);
-    expect(quantityPrompt(item("옛날통닭")).text).toContain("옛날통닭은 장락 옛날통닭에서 1마리 18,000원이에요.");
+  it("수량 질문은 매장·1단위 가격을 알려 주고 단위에 맞춰 묻는다", () => {
+    expect(quantityQuestion(item("국물떡볶이"))).toBe("국물떡볶이는 장락 떡볶이에서 1인분 6,000원이에요.\n몇 인분 주문할까요?");
+    expect(quantityQuestion(item("옛날통닭"))).toContain("옛날통닭은 장락 옛날통닭에서 1마리 18,000원이에요.");
+    expect(quantityQuestion(item("간장치킨"), "수량을 잘 모르겠어요.")).toBe("수량을 잘 모르겠어요.\n몇 마리 주문할까요?");
   });
 });
 
@@ -81,20 +79,6 @@ describe("findPayment", () => {
     expect(findPayment("토스페이")?.id).toBe("toss");
     expect(findPayment("카드로 해줘")?.id).toBe("card");
     expect(findPayment("현금")).toBeUndefined();
-  });
-});
-
-describe("quickMenuReply", () => {
-  it("배달은 주문 예시로, 식당은 음식 질문으로 안내하고, 나머지는 준비 중이라고 답한다", () => {
-    expect(quickMenuReply("배달")?.text).toContain("어떤 음식을 배달해 드릴까요?");
-    expect(quickMenuReply("식당")).toEqual({ ...FOOD_PROMPT, next: "food" });
-    expect(FOOD_PROMPT.choices?.map((c) => c.label)).toEqual(["한식", "중식", "일식", "치킨", "피자", "고기", "분식"]);
-    expect(FALLBACK_PROMPT.choices?.map((c) => c.value)).toEqual(["배달", "식당", "쇼핑", "예매"]);
-    expect(quickMenuReply("예매")?.text).toContain("예매 서비스는 준비 중이에요");
-  });
-
-  it("메뉴 이름과 정확히 같을 때만 반응한다", () => {
-    expect(quickMenuReply("치킨 배달해줘")).toBeUndefined();
   });
 });
 
@@ -123,7 +107,12 @@ describe("식당 찾기", () => {
     expect(withObjectParticle("장락반점")).toBe("장락반점을");
     expect(withObjectParticle("하소 피자키친")).toBe("하소 피자키친을");
     expect(withObjectParticle("장락 떡볶이")).toBe("장락 떡볶이를");
-    expect(withObjectParticle("link ON")).toBe("link ON을(를)");
+    expect(withObjectParticle("link ON")).toBe("link ON을");
+    expect(withTopicParticle("러닝화 260")).toBe("러닝화 260은");
+    expect(withTopicParticle("후드티 S")).toBe("후드티 S는");
+    expect(withObjectParticle("2마리")).toBe("2마리를");
+    expect(withObjectParticle("1판")).toBe("1판을");
+    expect(withObjectParticle("메뉴!")).toBe("메뉴!을(를)");
     expect(withTopicParticle("간장치킨")).toBe("간장치킨은");
     expect(withTopicParticle("마르게리따 피자")).toBe("마르게리따 피자는");
     expect(km(0.5)).toBe("0.5km");
@@ -155,6 +144,9 @@ describe("식당 예약", () => {
     expect(parseVisitTime("저녁 7시 반")).toBe("19:30");
     expect(parseVisitTime("오전 11시")).toBe("11:00");
     expect(parseVisitTime("12시 15분")).toBe("12:15");
+    expect(parseVisitTime("오후 12:30")).toBe("12:30");
+    expect(parseVisitTime("오전 12:30")).toBe("00:30");
+    expect(parseVisitTime("오후 7:30")).toBe("19:30");
     expect(parseVisitTime("아무 때나")).toBeUndefined();
   });
 
@@ -177,6 +169,20 @@ describe("식당 예약", () => {
     expect(timeChoices(restaurant("장락반점"), today, new Date(2026, 9, 1, 20, 30))).toEqual([]);
   });
 
+  it("고르기 화면용: 10분 단위 예약 가능 시각과 달력에서 고를 수 있는 날", () => {
+    const chinese = restaurant("장락반점"); // 11:00 - 21:00
+    const tomorrow = new Date(2026, 9, 2);
+    const times = bookableTimes(chinese, tomorrow, now);
+    expect(times[0]).toBe("11:00");
+    expect(times.at(-1)).toBe("20:00");
+    expect(times).toContain("19:30");
+    // 오늘 20:30 이후면 남은 시각이 없어 달력에서 막힌다
+    expect(isBookableDate(chinese, new Date(2026, 9, 1), new Date(2026, 9, 1, 20, 30))).toBe(false);
+    expect(isBookableDate(chinese, new Date(2026, 9, 31), now)).toBe(true);
+    expect(isBookableDate(chinese, new Date(2026, 10, 1), now)).toBe(false);
+    expect(isBookableDate(chinese, new Date(2026, 8, 30), now)).toBe(false);
+  });
+
   it("인원은 수량과 같은 규칙으로 읽는다", () => {
     expect(parseQuantity("2명")).toBe(2);
     expect(parseQuantity("두 명")).toBe(2);
@@ -194,7 +200,7 @@ describe("식당 예약", () => {
 describe("makeOrder / completionText", () => {
   it("메뉴의 매장·단위로 주문서를 만들고 수량만큼 가격을 계산한다", () => {
     const order = makeOrder(item("간장치킨"), 2);
-    expect(order).toMatchObject({ food: "간장치킨", qty: 2, unit: "마리", price: 40000 });
+    expect(order).toMatchObject({ kind: "delivery", item: "간장치킨", qty: 2, unit: "마리", price: 40000 });
     expect(order.store).toEqual({ name: "청전 치킨공방", distance: "1.8km" });
     expect(won(40000)).toBe("40,000원");
   });

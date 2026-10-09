@@ -2,18 +2,25 @@
 
 export interface Store {
   name: string;
-  distance: string;
+  distance?: string;
 }
 
 export type Unit = "마리" | "판" | "인분";
 
+// 결제까지 가는 주문서. 배달·쇼핑·예매가 같은 확인 → 결제 흐름을 쓴다
+export type OrderKind = "delivery" | "shop" | "ticket";
+
 export interface Order {
-  store: Store;
-  food: string;
+  kind: OrderKind;
+  store: Store; // 배달은 매장, 쇼핑은 판매처(브랜드), 예매는 공연장
+  item: string; // 메뉴·상품·작품 이름
+  option?: string; // 쇼핑은 사이즈, 예매는 관람 일시
   qty: number;
-  unit: Unit;
-  price: number;
-  address: string;
+  unit: string; // 마리·판·인분 / 벌·켤레·개·권 / 매
+  price: number; // 결제 금액 (쇼핑은 배송비 포함)
+  shippingFee?: number;
+  address?: string; // 배달지·배송지 (예매는 없음)
+  seats?: string; // 예매 좌석
 }
 
 export type PaymentId = "card" | "kakao" | "toss";
@@ -97,7 +104,8 @@ export function nearbyRestaurants(food: FoodKey): Restaurant[] {
   return RESTAURANTS.filter((r) => r.food === food).sort((a, b) => a.distanceKm - b.distanceKm);
 }
 
-const squash = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+// 띄어쓰기·대소문자를 무시하고 비교할 때
+export const squash = (s: string) => s.replace(/\s+/g, "").toLowerCase();
 
 // 목록 버튼을 누르거나 식당 이름을 입력하면 고른 것으로 본다 (띄어쓰기는 무시)
 export function findRestaurant(text: string, list: Restaurant[]): Restaurant | undefined {
@@ -109,11 +117,20 @@ const restaurantById = (id: string) => RESTAURANTS.find((r) => r.id === id)!;
 
 export const km = (distanceKm: number) => `${distanceKm.toFixed(1)}km`;
 
-// 받침에 따라 조사를 고른다 (을/를, 은/는). 마지막 글자가 한글이 아니면 둘 다 적는다
+// 숫자·영문으로 끝나면 읽는 소리로 받침을 정한다: 0 영, 1 일, 3 삼, 6 육, 7 칠, 8 팔 / L 엘, M 엠, N 엔, R 알
+const ENDS_WITH_BATCHIM = new Set(["0", "1", "3", "6", "7", "8", "L", "M", "N", "R"]);
+const ENDS_WITHOUT_BATCHIM = new Set([..."2459", ..."ABCDEFGHIJKOPQSTUVWXYZ"]);
+
+// 받침에 따라 조사를 고른다 (을/를, 은/는). 판단할 수 없는 글자로 끝나면 둘 다 적는다
 function withParticle(word: string, afterConsonant: string, afterVowel: string): string {
-  const code = word.charCodeAt(word.length - 1) - 0xac00;
-  if (code < 0 || code > 11171) return `${word}${afterConsonant}(${afterVowel})`;
-  return word + (code % 28 === 0 ? afterVowel : afterConsonant);
+  const last = word.trim().slice(-1).toUpperCase();
+  const code = last.charCodeAt(0) - 0xac00;
+  let batchim: boolean | undefined;
+  if (code >= 0 && code <= 11171) batchim = code % 28 !== 0;
+  else if (ENDS_WITH_BATCHIM.has(last)) batchim = true;
+  else if (ENDS_WITHOUT_BATCHIM.has(last)) batchim = false;
+  if (batchim === undefined) return `${word}${afterConsonant}(${afterVowel})`;
+  return word + (batchim ? afterConsonant : afterVowel);
 }
 export const withObjectParticle = (word: string) => withParticle(word, "을", "를");
 export const withTopicParticle = (word: string) => withParticle(word, "은", "는");
@@ -169,22 +186,19 @@ export function parseQuantity(text: string): number | undefined {
   return undefined;
 }
 
-// 메뉴를 고른 뒤 수량 질문. 1~3 단위를 버튼으로 주고, 그 밖은 직접 입력
-export function quantityPrompt(item: DeliveryItem, lead?: string): BotPrompt {
+// 메뉴를 고른 뒤 수량 질문. 수량은 화면에서 −/+ 카운터 버튼으로 고른다 (1 ~ MAX_QTY)
+export function quantityQuestion(item: DeliveryItem, lead?: string): string {
   const store = restaurantById(item.restaurantId);
   const info = `${withTopicParticle(item.name)} ${store.name}에서 1${item.unit} ${won(item.price)}이에요.`;
-  return {
-    text: `${lead ?? info}\n몇 ${item.unit} 주문할까요?`,
-    choices: [1, 2, 3].map((n) => ({ label: `${n}${item.unit}`, value: `${n}${item.unit}` })),
-    placeholder: `예) 4${item.unit}`,
-  };
+  return `${lead ?? info}\n몇 ${item.unit} 주문할까요?`;
 }
 
 export function makeOrder(item: DeliveryItem, qty: number): Order {
   const store = restaurantById(item.restaurantId);
   return {
+    kind: "delivery",
     store: { name: store.name, distance: km(store.distanceKm) },
-    food: item.name,
+    item: item.name,
     qty,
     unit: item.unit,
     price: item.price * qty,
@@ -207,11 +221,11 @@ export const MAX_PEOPLE = 20;
 const TIME_SLOTS = ["12:00", "13:00", "18:00", "19:00", "20:00", "21:00"];
 const WEEKDAYS = "일월화수목금토";
 
-const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-const daysBetween = (a: Date, b: Date) => Math.round((startOfDay(b).getTime() - startOfDay(a).getTime()) / 86_400_000);
+export const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+export const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+export const daysBetween = (a: Date, b: Date) => Math.round((startOfDay(b).getTime() - startOfDay(a).getTime()) / 86_400_000);
 const pad2 = (n: number) => String(n).padStart(2, "0");
-const toMinutes = (hhmm: string) => {
+export const toMinutes = (hhmm: string) => {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
 };
@@ -264,6 +278,7 @@ export function parseVisitTime(text: string): string | undefined {
   const am = /오전|아침/.test(text);
   const pm = /오후|저녁|밤/.test(text);
   if ((pm && h < 12) || (!am && h >= 1 && h <= 9)) h += 12;
+  if (am && h === 12) h = 0; // 오전 12시 = 자정
   if (h > 23 || m > 59) return undefined;
   return `${pad2(h)}:${pad2(m)}`;
 }
@@ -289,20 +304,40 @@ export function checkVisitTime(restaurant: Restaurant, date: Date, time: string,
   return "ok";
 }
 
+// 그날 예약할 수 있는 모든 시각 (10분 단위). 시간 고르기 화면과 "그날 남은 시간이 있는지" 판단에 쓴다
+export const TIME_STEP_MINUTES = 10;
+export function bookableTimes(restaurant: Restaurant, date: Date, now: Date): string[] {
+  const times: string[] = [];
+  for (let t = 0; t < 24 * 60; t += TIME_STEP_MINUTES) {
+    const hhmm = `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`;
+    if (checkVisitTime(restaurant, date, hhmm, now) === "ok") times.push(hhmm);
+  }
+  return times;
+}
+
+// 달력에서 고를 수 있는 날: 오늘부터 MAX_DAYS_AHEAD 일 안이면서 예약할 시간이 남은 날
+export function isBookableDate(restaurant: Restaurant, date: Date, now: Date): boolean {
+  const ahead = daysBetween(now, date);
+  return ahead >= 0 && ahead <= MAX_DAYS_AHEAD && bookableTimes(restaurant, date, now).length > 0;
+}
+
+export const lastBookableDate = (now: Date) => addDays(startOfDay(now), MAX_DAYS_AHEAD);
+
 export function datePrompt(restaurant: Restaurant, now: Date, lead?: string): BotPrompt {
   const today = startOfDay(now);
   const labels = ["오늘", "내일", "모레"];
   return {
     text: `${lead ?? `${restaurant.name} 예약을 도와드릴게요.`}\n언제 방문하실 건가요?`,
-    choices: labels.map((label, i) => {
+    // 시간이 다 지난 오늘은 빼고 보여 준다
+    choices: labels.flatMap((label, i) => {
       const d = addDays(today, i);
-      return { label: `${label} (${d.getMonth() + 1}/${d.getDate()})`, value: label };
+      return isBookableDate(restaurant, d, now) ? [{ label: `${label} (${d.getMonth() + 1}/${d.getDate()})`, value: label }] : [];
     }),
-    placeholder: "예) 10월 3일",
+    picker: "date",
   };
 }
 
-// 고른 날짜에 예약할 수 있는 시간 버튼. 하나도 없으면(오늘 영업이 끝나 감) 빈 배열
+// 고른 날짜에 바로 누를 수 있는 대표 시간 버튼. 다른 시각은 "직접 입력"의 시간 고르기 화면에서
 export function timeChoices(restaurant: Restaurant, date: Date, now: Date): Choice[] {
   return TIME_SLOTS.filter((t) => checkVisitTime(restaurant, date, t, now) === "ok").map((t) => ({ label: t, value: t }));
 }
@@ -311,7 +346,7 @@ export function timePrompt(restaurant: Restaurant, date: Date, now: Date, lead?:
   return {
     text: `${lead ?? formatDate(date)}\n몇 시에 방문하실 건가요?\n영업시간 ${restaurant.hours}`,
     choices: timeChoices(restaurant, date, now),
-    placeholder: "예) 저녁 7시 30분",
+    picker: "time",
   };
 }
 
@@ -342,6 +377,10 @@ export interface BotPrompt {
   text: string;
   choices?: Choice[];
   placeholder?: string;
+  // "직접 입력"을 눌렀을 때 글자 입력창 대신 펼칠 고르기 화면 (날짜는 달력, 시간은 시:분)
+  picker?: "date" | "time";
+  directLabel?: string; // "직접 입력" 대신 쓸 버튼 글자 (예: "다른 주소 입력")
+  noDirect?: boolean; // 정해진 선택지 중에서만 고르는 질문 (사이즈, 상영 회차)
 }
 
 export const FOOD_PROMPT: BotPrompt = {
@@ -363,29 +402,7 @@ export const pickDeliveryPrompt = (items: DeliveryItem[]): BotPrompt => ({
   choices: deliveryChoices(items),
 });
 
-// ---- 빠른 메뉴 ----
-// 입력창의 link 버튼으로 여는 빠른 메뉴. 배달은 주문 흐름, 식당은 식당 찾기로 이어지고 나머지는 준비 중이다
-export const QUICK_MENUS = ["배달", "식당", "쇼핑", "예매"] as const;
-export type QuickMenu = (typeof QUICK_MENUS)[number];
-
-export interface QuickMenuReply extends BotPrompt {
-  // 다음 입력을 무엇으로 받을지: 배달은 메뉴 이름, 식당은 음식 종류
-  next?: "menu" | "food";
-}
-
-export function quickMenuReply(text: string): QuickMenuReply | undefined {
-  const menu = QUICK_MENUS.find((m) => m === text.trim());
-  if (!menu) return undefined;
-  if (menu === "배달") return { ...DELIVERY_PROMPT, next: "menu" };
-  if (menu === "식당") return { ...FOOD_PROMPT, next: "food" };
-  return { text: `${menu} 서비스는 준비 중이에요.\n지금은 배달 주문과 식당 찾기를 도와드릴 수 있어요.` };
-}
-
-// 무슨 말인지 모를 때: 할 수 있는 서비스를 선택지로 보여 준다
-export const FALLBACK_PROMPT: BotPrompt = {
-  text: "죄송해요, 잘 이해하지 못했어요.\n원하는 서비스를 골라 주세요.",
-  choices: QUICK_MENUS.map((m) => ({ label: m, value: m })),
-};
+// (빠른 메뉴 — 배달·식당·쇼핑·예매 — 는 quickMenu.ts 에 있다)
 
 const has = (text: string, words: string[]) => {
   const low = text.toLowerCase();
@@ -408,14 +425,95 @@ export function findPayment(text: string): PaymentMethod | undefined {
 
 export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 
+// 쇼핑 상품은 이틀 뒤 도착으로 안내한다
+export const SHIPPING_DAYS = 2;
+
+const itemWithOption = (o: Order) => (o.option ? `${o.item} (${o.option})` : o.item);
+
 export function completionText(order: Order, method: PaymentMethod, now = new Date()): string {
-  const orderNo = "ON" + String(now.getTime()).slice(-6);
+  const digits = String(now.getTime()).slice(-6);
+  const head = `${method.label}로 ${won(order.price)} 결제가 완료되었어요!\n\n`;
+  if (order.kind === "shop") {
+    return (
+      head +
+      `주문번호: S${digits}\n` +
+      `${order.store.name} ${itemWithOption(order)} ${order.qty}${order.unit}\n` +
+      `배송지: ${order.address}\n` +
+      `도착 예정: ${formatDate(addDays(now, SHIPPING_DAYS))}`
+    );
+  }
+  if (order.kind === "ticket") {
+    return (
+      head +
+      `예매번호: T${digits}\n` +
+      `${order.item}\n` +
+      `${order.option} · ${order.store.name}\n` +
+      `${order.qty}${order.unit}${order.seats ? ` · ${order.seats}` : ""}\n` +
+      `입장 10분 전까지 도착해 주세요.`
+    );
+  }
   const eta = new Date(now.getTime() + 40 * 60_000);
-  const hhmm = `${String(eta.getHours()).padStart(2, "0")}:${String(eta.getMinutes()).padStart(2, "0")}`;
+  const hhmm = `${pad2(eta.getHours())}:${pad2(eta.getMinutes())}`;
   return (
-    `${method.label}로 ${won(order.price)} 결제가 완료되었어요!\n\n` +
-    `주문번호: ${orderNo}\n` +
-    `${order.store.name}에서 ${order.food} ${withObjectParticle(`${order.qty}${order.unit}`)} 준비 중이에요.\n` +
+    head +
+    `주문번호: ON${digits}\n` +
+    `${order.store.name}에서 ${order.item} ${withObjectParticle(`${order.qty}${order.unit}`)} 준비 중이에요.\n` +
     `도착 예정: 약 40분 후 (${hhmm})`
   );
 }
+
+// 채팅의 주문서 카드에 들어갈 줄들. emphasis 는 파랗게 강조할 금액
+export interface OrderRow {
+  label: string;
+  value: string;
+  emphasis?: boolean;
+}
+
+export function orderCardRows(order: Order): OrderRow[] {
+  if (order.kind === "shop") {
+    const fee = order.shippingFee ?? 0;
+    return [
+      { label: "판매처", value: order.store.name },
+      { label: "상품", value: `${itemWithOption(order)} ${order.qty}${order.unit}` },
+      { label: "상품 금액", value: won(order.price - fee) },
+      { label: "배송비", value: fee === 0 ? "무료" : won(fee) },
+      { label: "결제 금액", value: won(order.price), emphasis: true },
+      { label: "배송지", value: order.address ?? "" },
+    ];
+  }
+  if (order.kind === "ticket") {
+    return [
+      { label: "작품", value: order.item },
+      { label: "장소", value: order.store.name },
+      { label: "일시", value: order.option ?? "" },
+      { label: "매수", value: `${order.qty}${order.unit}${order.seats ? ` · ${order.seats}` : ""}` },
+      { label: "결제 금액", value: won(order.price), emphasis: true },
+    ];
+  }
+  return [
+    { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
+    { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
+    { label: "가격", value: won(order.price), emphasis: true },
+    { label: "위치", value: order.address ?? "" },
+  ];
+}
+
+// 결제 팝업 요약 칸
+export function orderSummaryRows(order: Order): OrderRow[] {
+  if (order.kind === "ticket") {
+    return [
+      { label: "작품", value: `${order.item} ${order.qty}${order.unit}` },
+      { label: "일시", value: order.option ?? "" },
+      { label: "장소", value: order.store.name },
+    ];
+  }
+  return [
+    { label: "상품", value: `${itemWithOption(order)} ${order.qty}${order.unit}` },
+    { label: order.kind === "shop" ? "판매처" : "매장", value: order.store.name },
+    { label: order.kind === "shop" ? "배송지" : "배달지", value: order.address ?? "" },
+  ];
+}
+
+// 주문서 카드 위아래 문구
+export const orderCardTitle = (order: Order) => (order.kind === "ticket" ? "예매 내역을 확인해 주세요." : "주문 내역을 확인해 주세요.");
+export const orderCardQuestion = (order: Order) => (order.kind === "ticket" ? "예매할까요?" : "주문할까요?");

@@ -2,17 +2,56 @@ import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type 
 import backgroundVideo from "../image/linkon_background.mp4";
 import logo from "../image/linkon_logo.png";
 import { PaymentSheet } from "./PaymentSheet";
-import { PeoplePicker } from "./PeoplePicker";
+import { CalendarPicker } from "./CalendarPicker";
+import { CountPicker } from "./CountPicker";
+import { TimePicker } from "./TimePicker";
+import { FALLBACK_PROMPT, QUICK_MENUS, quickMenuReply } from "./quickMenu";
 import {
+  MAX_SHOP_QTY,
+  SHOP_PROMPT,
+  addressPrompt,
+  categoryOf,
+  findProduct,
+  findSize,
+  keepsAddress,
+  looksLikeAddress,
+  makeShopOrder,
+  matchShopCategory,
+  productsOf,
+  shopQuantityQuestion,
+  sizePrompt,
+  type Product,
+} from "./shoppingKnowledge";
+import {
+  MAX_TICKETS,
+  MAX_TICKET_DAYS,
+  TICKET_PROMPT,
+  findShow,
+  isShowDate,
+  lastShowDate,
+  makeTicketOrder,
+  matchTicketCategory,
+  sessionPrompt,
+  sessionsOn,
+  showDatePrompt,
+  showsOf,
+  ticketQuantityQuestion,
+  type Show,
+} from "./ticketKnowledge";
+import {
+  ADDRESS,
+  DEFAULT_PEOPLE,
   DELIVERY_PROMPT,
-  FALLBACK_PROMPT,
   FOOD_PROMPT,
   MAX_DAYS_AHEAD,
   MAX_PEOPLE,
   MAX_QTY,
   PAYMENTS,
-  QUICK_MENUS,
   checkVisitTime,
+  daysBetween,
+  orderCardQuestion,
+  orderCardRows,
+  orderCardTitle,
   completionText,
   datePrompt,
   findDeliveryItems,
@@ -30,10 +69,11 @@ import {
   parseVisitTime,
   PEOPLE_QUESTION,
   pickDeliveryPrompt,
-  quantityPrompt,
-  quickMenuReply,
+  quantityQuestion,
   reservationDoneText,
-  timeChoices,
+  bookableTimes,
+  isBookableDate,
+  lastBookableDate,
   timePrompt,
   withObjectParticle,
   won,
@@ -50,17 +90,46 @@ import {
 // 배달: idle → menu(메뉴 대기) → qty(수량 대기) → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
 // 식당: idle → food(음식 종류 대기) → restaurant(식당 목록에서 선택 대기)
 //      → rsvDate(날짜) → rsvTime(시간) → rsvPeople(인원) → rsvConfirm(예약 확인) → idle
+// 쇼핑: idle → shopCategory(종류) → shopProduct(상품) → shopSize(사이즈) → shopQty(수량) → shopAddress(배송지) → confirm → pay …
+// 예매: idle → tkCategory(종류) → tkShow(작품) → tkDate(날짜) → tkTime(회차) → tkQty(매수) → confirm → pay …
 type Stage =
   | "idle" | "menu" | "qty" | "confirm" | "pay" | "paying" | "done"
-  | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm";
+  | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm"
+  | "shopCategory" | "shopProduct" | "shopSize" | "shopQty" | "shopAddress"
+  | "tkCategory" | "tkShow" | "tkDate" | "tkTime" | "tkQty";
+
+const SHOP_STAGES: Stage[] = ["shopCategory", "shopProduct", "shopSize", "shopQty", "shopAddress"];
+const TICKET_STAGES: Stage[] = ["tkCategory", "tkShow", "tkDate", "tkTime", "tkQty"];
 
 // 예약 정보는 날짜 → 시간 → 인원 순으로 채워진다
 type ReservationDraft = Partial<Reservation> & { restaurant: Restaurant };
+// 쇼핑은 상품 → 사이즈 → 수량, 예매는 작품 → 날짜 → 회차 순으로 채워진다
+interface ShopDraft {
+  product?: Product;
+  size?: string;
+  qty?: number;
+}
+interface TicketDraft {
+  show?: Show;
+  date?: Date;
+  time?: string;
+}
 
 type Message =
   | { id: number; role: "user"; text: string }
   // choices 가 있으면 선택 버튼 + "직접 입력" 을 붙인다. picked: 누른 선택지의 value
-  | { id: number; role: "bot"; kind: "text"; text: string; choices?: Choice[]; placeholder?: string; picked?: string }
+  | {
+      id: number;
+      role: "bot";
+      kind: "text";
+      text: string;
+      choices?: Choice[];
+      placeholder?: string;
+      picker?: BotPrompt["picker"];
+      directLabel?: string;
+      noDirect?: boolean;
+      picked?: string;
+    }
   | { id: number; role: "bot"; kind: "order"; order: Order }
   | { id: number; role: "bot"; kind: "confirm" }
   | { id: number; role: "bot"; kind: "payment"; order: Order; selected?: PaymentId }
@@ -68,7 +137,12 @@ type Message =
   | { id: number; role: "bot"; kind: "restaurantPicked"; restaurant: Restaurant }
   | { id: number; role: "bot"; kind: "reservation"; reservation: Reservation }
   // 예약 인원 카운터. lead: 다시 물을 때 앞에 붙일 이유, picked: 고른 인원
-  | { id: number; role: "bot"; kind: "people"; lead?: string; picked?: number };
+  | { id: number; role: "bot"; kind: "people"; lead?: string; picked?: number }
+  // 수량 카운터: 배달(마리·판·인분)·쇼핑(벌·켤레·개·권)·예매(매)
+  | { id: number; role: "bot"; kind: "qty"; text: string; unit: string; max: number; priceEach: number; picked?: number }
+  // 쇼핑 상품 목록, 예매 작품 목록
+  | { id: number; role: "bot"; kind: "products"; categoryLabel: string; list: Product[]; selected?: string }
+  | { id: number; role: "bot"; kind: "shows"; categoryLabel: string; list: Show[]; selected?: string };
 
 type NewMessage = Message extends infer M ? (M extends Message ? Omit<M, "id"> : never) : never;
 
@@ -76,9 +150,50 @@ const GREETING = "안녕하세요! link ON이에요.\n무엇을 주문해 드릴
 
 let nextId = 1;
 const botText = (text: string): NewMessage => ({ role: "bot", kind: "text", text });
-const botPrompt = ({ text, choices, placeholder }: BotPrompt): NewMessage => ({ role: "bot", kind: "text", text, choices, placeholder });
+const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect }: BotPrompt): NewMessage => ({
+  role: "bot",
+  kind: "text",
+  text,
+  choices,
+  placeholder,
+  picker,
+  directLabel,
+  noDirect,
+});
 const DEFAULT_PLACEHOLDER = "메시지를 입력하세요";
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
+
+// 배달 수량 카운터 말풍선
+const deliveryQty = (item: DeliveryItem, lead?: string): NewMessage => ({
+  role: "bot",
+  kind: "qty",
+  text: quantityQuestion(item, lead),
+  unit: item.unit,
+  max: MAX_QTY,
+  priceEach: item.price,
+});
+
+// "직접 입력" 버튼 아이콘: 글자 입력은 연필, 날짜는 달력, 시간은 시계
+function DirectInputIcon({ picker }: { picker?: BotPrompt["picker"] }) {
+  const common = { stroke: "currentColor", strokeWidth: 1.5, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" } as const;
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      {picker === "date" ? (
+        <>
+          <rect x="2.5" y="3.5" width="11" height="10" rx="2" {...common} />
+          <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" {...common} />
+        </>
+      ) : picker === "time" ? (
+        <>
+          <circle cx="8" cy="8" r="5.5" {...common} />
+          <path d="M8 5v3.2l2 1.3" {...common} />
+        </>
+      ) : (
+        <path d="M10.5 2.5l3 3L6 13H3v-3l7.5-7.5z" {...common} />
+      )}
+    </svg>
+  );
+}
 
 // 마지막으로 나온 해당 종류 메시지의 id. 버튼은 가장 최근 말풍선에서만 누를 수 있다
 function lastIdOf(messages: Message[], kinds: string[]): number | undefined {
@@ -95,25 +210,31 @@ export function OrderChatbot() {
   const [order, setOrder] = useState<Order | null>(null);
   // 메뉴를 고르고 수량을 기다리는 중인 배달 메뉴
   const [pendingItem, setPendingItem] = useState<DeliveryItem | null>(null);
-  // 진행 중인 식당 예약
+  // 진행 중인 식당 예약 · 쇼핑 · 예매
   const [rsv, setRsv] = useState<ReservationDraft | null>(null);
+  const [shop, setShop] = useState<ShopDraft>({});
+  const [ticket, setTicket] = useState<TicketDraft>({});
   const [payMethod, setPayMethod] = useState<PaymentMethod | null>(null);
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   // "직접 입력" 을 누른 선택지 말풍선의 id. 그 말풍선이 최신 질문인 동안만 입력창이 열려 있다
   const [manualInputFor, setManualInputFor] = useState<number | null>(null);
+  // 날짜·시간 질문에서 "직접 입력"으로 펼친 달력·시간 고르기의 말풍선 id
+  const [pickerOpenFor, setPickerOpenFor] = useState<number | null>(null);
   const quickMenuId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputWrapRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
 
-  // 가장 최근 봇 말풍선이 버튼으로 답하는 질문(선택지·인원 카운터)이면, "직접 입력" 을 누르기 전까지 입력창을 접어 둔다
-  // (인원 카운터에는 직접 입력이 없어 버튼으로만 답한다)
+  // 가장 최근 봇 말풍선이 버튼으로 답하는 질문(선택지·인원/수량 카운터)이면, "직접 입력" 을 누르기 전까지 입력창을 접어 둔다
+  // (카운터에는 직접 입력이 없어 버튼으로만 답한다)
   const lastBot = messages.findLast((m) => m.role === "bot");
   const activePrompt =
-    lastBot?.role === "bot" && ((lastBot.kind === "text" && lastBot.choices) || lastBot.kind === "people") ? lastBot : undefined;
+    lastBot?.role === "bot" && ((lastBot.kind === "text" && lastBot.choices) || lastBot.kind === "people" || lastBot.kind === "qty")
+      ? lastBot
+      : undefined;
   const composerOpen = !activePrompt || manualInputFor === activePrompt.id;
   // 선택 버튼은 그 질문이 대화의 마지막이고 봇이 답하는 중이 아닐 때만 누를 수 있다
   const activeChoicesId = activePrompt && messages.at(-1)?.id === activePrompt.id && !thinking ? activePrompt.id : undefined;
@@ -122,10 +243,11 @@ export function OrderChatbot() {
   // 빠른 메뉴는 입력창 안에 있으므로 입력창이 접히면 같이 숨는다
   const quickMenuOpen = menuOpen && composerOpen;
 
+  // 새 메시지가 오거나 달력·시간 고르기가 펼쳐지면 맨 아래로
   useEffect(() => {
     const list = listRef.current;
     if (list) list.scrollTop = list.scrollHeight;
-  }, [messages, thinking]);
+  }, [messages, thinking, pickerOpenFor]);
 
   // 입력창이 열리면 바로 쓸 수 있게 포커스한다
   useEffect(() => {
@@ -177,16 +299,17 @@ export function OrderChatbot() {
     setMessages((prev) => prev.map((m) => (m.id === target && m.role === "bot" && m.kind === "payment" ? { ...m, selected } : m)));
   }
 
-  function markRestaurant(selected: string) {
-    const target = lastIdOf(messages, ["restaurants"]);
-    setMessages((prev) => prev.map((m) => (m.id === target && m.role === "bot" && m.kind === "restaurants" ? { ...m, selected } : m)));
+  // 목록 말풍선(식당·상품·작품)에서 고른 항목 표시
+  function markPicked(kind: "restaurants" | "products" | "shows", selected: string) {
+    const target = lastIdOf(messages, [kind]);
+    setMessages((prev) => prev.map((m) => (m.id === target && m.role === "bot" && m.kind === kind ? ({ ...m, selected } as Message) : m)));
   }
 
-  // 가장 최근에 보여 준 식당 목록
-  function latestRestaurantList(): Restaurant[] {
-    const target = lastIdOf(messages, ["restaurants"]);
+  // 가장 최근에 보여 준 목록
+  function latestList<K extends "restaurants" | "products" | "shows">(kind: K) {
+    const target = lastIdOf(messages, [kind]);
     const m = messages.find((msg) => msg.id === target);
-    return m && m.role === "bot" && m.kind === "restaurants" ? m.list : [];
+    return (m && m.role === "bot" && m.kind === kind ? m.list : []) as Extract<Message, { kind: K }>["list"];
   }
 
   function showRestaurants(foodLabel: string, list: Restaurant[]) {
@@ -223,7 +346,7 @@ export function OrderChatbot() {
     }
     setPendingItem(item);
     setStage("qty");
-    botReply(() => push(botPrompt(quantityPrompt(item, qty !== undefined ? rangeLead(item) : undefined))));
+    botReply(() => push(deliveryQty(item, qty !== undefined ? rangeLead(item) : undefined)));
     return true;
   }
 
@@ -253,7 +376,7 @@ export function OrderChatbot() {
         botReply(() => push(botPrompt(datePrompt(restaurant, now, lead))));
         return;
       }
-      if (timeChoices(restaurant, date, now).length === 0) {
+      if (bookableTimes(restaurant, date, now).length === 0) {
         botReply(() => push(botPrompt(datePrompt(restaurant, now, `${formatDate(date)}은 예약할 수 있는 시간이 지났어요.`))));
         return;
       }
@@ -308,6 +431,184 @@ export function OrderChatbot() {
     }
   }
 
+  // 쇼핑·예매에서 주문서까지 왔을 때: 확인 카드 → (응) → 결제수단 → 결제 팝업은 배달과 같다
+  function startCheckout(next: Order) {
+    setOrder(next);
+    setShop({});
+    setTicket({});
+    setStage("confirm");
+    botReply(() => push({ role: "bot", kind: "order", order: next }), 900);
+  }
+
+  function endFlow(message: string) {
+    setStage("idle");
+    setShop({});
+    setTicket({});
+    botReply(() => push(botText(message)));
+  }
+
+  const shopQty = (product: Product, size?: string): NewMessage => ({
+    role: "bot",
+    kind: "qty",
+    text: shopQuantityQuestion(product, size),
+    unit: categoryOf(product).unit,
+    max: MAX_SHOP_QTY,
+    priceEach: product.price,
+  });
+
+  const ticketQty = (show: Show, date: Date, time: string): NewMessage => ({
+    role: "bot",
+    kind: "qty",
+    text: ticketQuantityQuestion(show, date, time),
+    unit: "매",
+    max: MAX_TICKETS,
+    priceEach: show.price,
+  });
+
+  // 쇼핑 단계별 처리: 종류 → 상품 → (사이즈) → 수량 → 배송지 → 주문서
+  function continueShopping(text: string) {
+    if (isNo(text)) {
+      endFlow("쇼핑을 그만할게요. 다른 게 필요하면 말씀해 주세요!");
+      return;
+    }
+
+    // 상품 목록이 떠 있으면 상품 이름부터 본다
+    const product = stage === "shopProduct" ? findProduct(text, latestList("products")) : undefined;
+    if (product) {
+      markPicked("products", product.id);
+      setShop({ product });
+      if (categoryOf(product).sizes) {
+        setStage("shopSize");
+        botReply(() => push(botPrompt(sizePrompt(product))));
+      } else {
+        setStage("shopQty");
+        botReply(() => push(shopQty(product)));
+      }
+      return;
+    }
+    if (stage === "shopCategory" || stage === "shopProduct") {
+      const category = matchShopCategory(text);
+      if (category) {
+        setShop({});
+        setStage("shopProduct");
+        botReply(() => push({ role: "bot", kind: "products", categoryLabel: category.label, list: productsOf(category.key) }), 900);
+        return;
+      }
+      const hint = stage === "shopProduct" ? "목록에서 상품을 고르거나, 다른 종류를 골라 주세요." : "아래에서 고르거나 직접 입력해 주세요.";
+      botReply(() => push(botPrompt({ ...SHOP_PROMPT, text: `어떤 상품인지 잘 모르겠어요.\n${hint}` })));
+      return;
+    }
+
+    const chosen = shop.product;
+    if (!chosen) return;
+
+    if (stage === "shopSize") {
+      const size = findSize(text, categoryOf(chosen).sizes ?? []);
+      if (!size) {
+        botReply(() => push(botPrompt(sizePrompt(chosen, "사이즈를 잘 모르겠어요."))));
+        return;
+      }
+      setShop({ product: chosen, size });
+      setStage("shopQty");
+      botReply(() => push(shopQty(chosen, size)));
+      return;
+    }
+
+    if (stage === "shopQty") {
+      const qty = parseQuantity(text);
+      if (qty === undefined || qty < 1 || qty > MAX_SHOP_QTY) {
+        botReply(() => push(shopQty(chosen, shop.size)));
+        return;
+      }
+      setShop({ ...shop, qty });
+      setStage("shopAddress");
+      botReply(() => push(botPrompt(addressPrompt(ADDRESS))));
+      return;
+    }
+
+    if (stage === "shopAddress" && shop.qty) {
+      const address = keepsAddress(text) || isYes(text) ? ADDRESS : looksLikeAddress(text) ? text.trim() : undefined;
+      if (!address) {
+        botReply(() => push(botPrompt(addressPrompt(ADDRESS, "주소를 잘 모르겠어요. 시·구·동이나 도로명까지 적어 주세요."))));
+        return;
+      }
+      startCheckout(makeShopOrder(chosen, shop.size, shop.qty, address));
+    }
+  }
+
+  // 예매 단계별 처리: 종류 → 작품 → 날짜 → 회차 → 매수 → 주문서
+  function continueTicketing(text: string) {
+    if (isNo(text)) {
+      endFlow("예매를 그만할게요. 다른 게 필요하면 말씀해 주세요!");
+      return;
+    }
+    const now = new Date();
+
+    const show = stage === "tkShow" ? findShow(text, latestList("shows")) : undefined;
+    if (show) {
+      markPicked("shows", show.id);
+      setTicket({ show });
+      setStage("tkDate");
+      botReply(() => push(botPrompt(showDatePrompt(show, now))));
+      return;
+    }
+    if (stage === "tkCategory" || stage === "tkShow") {
+      const category = matchTicketCategory(text);
+      if (category) {
+        setTicket({});
+        setStage("tkShow");
+        botReply(() => push({ role: "bot", kind: "shows", categoryLabel: category.label, list: showsOf(category.key) }), 900);
+        return;
+      }
+      const hint = stage === "tkShow" ? "목록에서 작품을 고르거나, 다른 종류를 골라 주세요." : "아래에서 고르거나 직접 입력해 주세요.";
+      botReply(() => push(botPrompt({ ...TICKET_PROMPT, text: `무엇을 예매할지 잘 모르겠어요.\n${hint}` })));
+      return;
+    }
+
+    const chosen = ticket.show;
+    if (!chosen) return;
+
+    if (stage === "tkDate") {
+      const date = parseVisitDate(text, now);
+      let lead: string | undefined;
+      if (date === "past") lead = "이미 지난 날짜예요.";
+      else if (date === "far" || (date instanceof Date && daysBetween(now, date) > MAX_TICKET_DAYS))
+        lead = `오늘부터 ${MAX_TICKET_DAYS + 1}일 안에서만 예매할 수 있어요.`;
+      else if (!(date instanceof Date)) lead = "날짜를 잘 모르겠어요.";
+      else if (!isShowDate(chosen, date, now)) lead = `${formatDate(date)}은 남은 회차가 없어요.`;
+      if (lead || !(date instanceof Date)) {
+        botReply(() => push(botPrompt(showDatePrompt(chosen, now, lead))));
+        return;
+      }
+      setTicket({ show: chosen, date });
+      setStage("tkTime");
+      botReply(() => push(botPrompt(sessionPrompt(chosen, date, now))));
+      return;
+    }
+
+    if (stage === "tkTime" && ticket.date) {
+      const date = ticket.date;
+      const time = parseVisitTime(text);
+      if (!time || !sessionsOn(chosen, date, now).includes(time)) {
+        botReply(() => push(botPrompt(sessionPrompt(chosen, date, now, "그 시간에는 회차가 없어요."))));
+        return;
+      }
+      setTicket({ ...ticket, time });
+      setStage("tkQty");
+      botReply(() => push(ticketQty(chosen, date, time)));
+      return;
+    }
+
+    if (stage === "tkQty" && ticket.date && ticket.time) {
+      const qty = parseQuantity(text);
+      if (qty === undefined || qty < 1 || qty > MAX_TICKETS) {
+        botReply(() => push(ticketQty(chosen, ticket.date!, ticket.time!)));
+        return;
+      }
+      startCheckout(makeTicketOrder(chosen, ticket.date, ticket.time, qty));
+    }
+  }
+
   function handle(raw: string) {
     const text = raw.trim();
     if (!text || thinking || stage === "paying") return;
@@ -317,12 +618,13 @@ export function OrderChatbot() {
       if (isNo(text)) {
         setStage("idle");
         setOrder(null);
-        botReply(() => push(botText("주문을 취소했어요. 다른 메뉴가 필요하면 말씀해 주세요!")));
+        const cancelled = order.kind === "ticket" ? "예매를 취소했어요." : "주문을 취소했어요.";
+        botReply(() => push(botText(`${cancelled} 다른 게 필요하면 말씀해 주세요!`)));
       } else if (isYes(text)) {
         setStage("pay");
         botReply(() => push({ role: "bot", kind: "payment", order }));
       } else {
-        botReply(() => push(botText("주문을 진행할까요? '응' 또는 '취소'로 답해 주세요."), { role: "bot", kind: "confirm" }));
+        botReply(() => push(botText(`${orderCardQuestion(order)} '응' 또는 '취소'로 답해 주세요.`), { role: "bot", kind: "confirm" }));
       }
       return;
     }
@@ -352,12 +654,23 @@ export function OrderChatbot() {
       setRsv(null);
     }
 
+    // 쇼핑·예매 중. 마찬가지로 빠른 메뉴를 고르면 진행 중인 것을 접고 아래로 넘어간다
+    if (SHOP_STAGES.includes(stage) || TICKET_STAGES.includes(stage)) {
+      if (!quickMenuReply(text)) {
+        if (SHOP_STAGES.includes(stage)) continueShopping(text);
+        else continueTicketing(text);
+        return;
+      }
+      setShop({});
+      setTicket({});
+    }
+
     // 배달 수량: 숫자만 오면 그 수량으로 주문서를 만든다. 다른 메뉴를 말하면 아래 일반 처리에서 메뉴부터 다시 받는다
     if (stage === "qty" && pendingItem) {
       const qty = parseQuantity(text);
       if (qty !== undefined && findDeliveryItems(text).length === 0) {
         if (qty >= 1 && qty <= MAX_QTY) startOrder(pendingItem, qty);
-        else botReply(() => push(botPrompt(quantityPrompt(pendingItem, rangeLead(pendingItem)))));
+        else botReply(() => push(deliveryQty(pendingItem, rangeLead(pendingItem))));
         return;
       }
       if (isNo(text)) {
@@ -365,7 +678,7 @@ export function OrderChatbot() {
         return;
       }
       if (!quickMenuReply(text) && findDeliveryItems(text).length === 0) {
-        botReply(() => push(botPrompt(quantityPrompt(pendingItem, "수량을 잘 모르겠어요."))));
+        botReply(() => push(deliveryQty(pendingItem, "수량을 잘 모르겠어요.")));
         return;
       }
     }
@@ -385,10 +698,10 @@ export function OrderChatbot() {
 
     // 식당 찾기 중에는 식당 이름 → 음식 종류 순으로 먼저 본다. 둘 다 아니면 아래 일반 처리로 넘어간다
     if (stage === "food" || stage === "restaurant") {
-      const picked = stage === "restaurant" ? findRestaurant(text, latestRestaurantList()) : undefined;
+      const picked = stage === "restaurant" ? findRestaurant(text, latestList("restaurants")) : undefined;
       if (picked) {
         // 식당을 고르면 예약으로 이어진다
-        markRestaurant(picked.id);
+        markPicked("restaurants", picked.id);
         setRsv({ restaurant: picked });
         setStage("rsvDate");
         botReply(() =>
@@ -416,7 +729,10 @@ export function OrderChatbot() {
     const quickReply = quickMenuReply(text);
     if (quickReply) {
       setPendingItem(null);
-      setStage(quickReply.next ?? "idle");
+      setRsv(null);
+      setShop({});
+      setTicket({});
+      setStage(quickReply.next);
       botReply(() => push(botPrompt(quickReply)));
       return;
     }
@@ -451,8 +767,11 @@ export function OrderChatbot() {
     setOrder(null);
     setThinking(false);
     setManualInputFor(null);
+    setPickerOpenFor(null);
     setPendingItem(null);
     setRsv(null);
+    setShop({});
+    setTicket({});
     inputRef.current?.focus();
   }
 
@@ -470,17 +789,50 @@ export function OrderChatbot() {
     handle(choice.value);
   }
 
-  function pickPeople(promptId: number, people: number) {
+  // 카운터(예약 인원·배달 수량)에서 고른 수. "3명", "2마리"처럼 입력한 것으로 처리한다
+  function pickCount(promptId: number, count: number, unit: string) {
     setMessages((prev) =>
-      prev.map((m) => (m.id === promptId && m.role === "bot" && m.kind === "people" ? { ...m, picked: people } : m)),
+      prev.map((m) =>
+        m.id === promptId && m.role === "bot" && (m.kind === "people" || m.kind === "qty") ? { ...m, picked: count } : m,
+      ),
     );
-    handle(`${people}명`);
+    handle(`${count}${unit}`);
   }
 
   // 접혀 있던 입력창을 연다. 이미 열려 있으면 포커스만 옮긴다
   function openManualInput(promptId: number) {
     setManualInputFor(promptId);
     inputRef.current?.focus();
+  }
+
+  function togglePicker(promptId: number) {
+    setPickerOpenFor((open) => (open === promptId ? null : promptId));
+  }
+
+  // 날짜·시간 고르기 화면. 고른 값은 사용자가 그렇게 입력한 것처럼 처리한다
+  // 달력은 식당 예약(영업일·30일)과 공연 예매(남은 회차·14일)에서 함께 쓰고, 고를 수 있는 날만 다르다
+  function renderPicker(picker: "date" | "time") {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const pickDate = (d: Date) => handle(`${d.getMonth() + 1}월 ${d.getDate()}일`);
+    if (picker === "date" && stage === "tkDate" && ticket.show) {
+      const show = ticket.show;
+      return <CalendarPicker today={today} lastDate={lastShowDate(now)} active isSelectable={(d) => isShowDate(show, d, now)} onPick={pickDate} />;
+    }
+    if (!rsv) return null;
+    if (picker === "date") {
+      return (
+        <CalendarPicker
+          today={today}
+          lastDate={lastBookableDate(now)}
+          active
+          isSelectable={(d) => isBookableDate(rsv.restaurant, d, now)}
+          onPick={pickDate}
+        />
+      );
+    }
+    if (!rsv.date) return null;
+    return <TimePicker times={bookableTimes(rsv.restaurant, rsv.date, now)} active onPick={(t) => handle(t)} />;
   }
 
   function pickQuickMenu(menu: string) {
@@ -494,6 +846,8 @@ export function OrderChatbot() {
     stage === "confirm" || stage === "rsvConfirm" ? lastIdOf(messages, ["order", "reservation", "confirm"]) : undefined;
   const activePaymentId = stage === "pay" ? lastIdOf(messages, ["payment"]) : undefined;
   const activeRestaurantsId = stage === "restaurant" ? lastIdOf(messages, ["restaurants"]) : undefined;
+  const activeProductsId = stage === "shopProduct" ? lastIdOf(messages, ["products"]) : undefined;
+  const activeShowsId = stage === "tkShow" ? lastIdOf(messages, ["shows"]) : undefined;
 
   function confirmActions(id: number) {
     const active = id === activeConfirmId;
@@ -514,7 +868,8 @@ export function OrderChatbot() {
       case "text": {
         if (!m.choices) return m.text;
         const active = m.id === activeChoicesId;
-        const manual = manualInputFor === m.id;
+        // 날짜·시간 질문은 "직접 입력"이 글자 입력창 대신 달력·시간 고르기를 펼친다
+        const manual = m.picker ? pickerOpenFor === m.id : manualInputFor === m.id;
         return (
           <>
             {m.text}
@@ -530,25 +885,21 @@ export function OrderChatbot() {
                   {c.label}
                 </button>
               ))}
-              <button
-                type="button"
-                className={"direct" + (manual ? " selected" : "")}
-                disabled={!active}
-                aria-pressed={manual}
-                onClick={() => openManualInput(m.id)}
-              >
-                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                  <path
-                    d="M10.5 2.5l3 3L6 13H3v-3l7.5-7.5z"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinejoin="round"
-                    fill="none"
-                  />
-                </svg>
-                직접 입력
-              </button>
+              {!m.noDirect && (
+                <button
+                  type="button"
+                  className={"direct" + (manual ? " selected" : "")}
+                  disabled={!active}
+                  aria-pressed={manual}
+                  aria-expanded={m.picker ? manual : undefined}
+                  onClick={() => (m.picker ? togglePicker(m.id) : openManualInput(m.id))}
+                >
+                  <DirectInputIcon picker={m.picker} />
+                  {m.directLabel ?? "직접 입력"}
+                </button>
+              )}
             </div>
+            {active && manual && m.picker && renderPicker(m.picker)}
           </>
         );
       }
@@ -557,25 +908,19 @@ export function OrderChatbot() {
       case "order":
         return (
           <>
-            주문 내역을 확인해 주세요.
+            {orderCardTitle(m.order)}
             <div>
               <div className="card">
                 <dl>
-                  <dt>매장</dt>
-                  <dd>
-                    {m.order.store.name} · {m.order.store.distance}
-                  </dd>
-                  <dt>음식</dt>
-                  <dd>
-                    {m.order.food} {m.order.qty}{m.order.unit}
-                  </dd>
-                  <dt>가격</dt>
-                  <dd className="price">{won(m.order.price)}</dd>
-                  <dt>위치</dt>
-                  <dd>{m.order.address}</dd>
+                  {orderCardRows(m.order).map((row) => (
+                    <Fragment key={row.label}>
+                      <dt>{row.label}</dt>
+                      <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
+                    </Fragment>
+                  ))}
                 </dl>
               </div>
-              <div style={{ marginTop: 10 }}>주문할까요?</div>
+              <div style={{ marginTop: 10 }}>{orderCardQuestion(m.order)}</div>
               {confirmActions(m.id)}
             </div>
           </>
@@ -649,7 +994,79 @@ export function OrderChatbot() {
         return (
           <>
             {`${m.lead ? `${m.lead}\n` : ""}${PEOPLE_QUESTION}`}
-            <PeoplePicker active={m.id === activeChoicesId} picked={m.picked} onPick={(n) => pickPeople(m.id, n)} />
+            <CountPicker
+              unit="명"
+              max={MAX_PEOPLE}
+              initial={DEFAULT_PEOPLE}
+              active={m.id === activeChoicesId}
+              picked={m.picked}
+              onPick={(n) => pickCount(m.id, n, "명")}
+            />
+          </>
+        );
+      case "qty":
+        return (
+          <>
+            {m.text}
+            <CountPicker
+              unit={m.unit}
+              max={m.max}
+              initial={1}
+              priceEach={m.priceEach}
+              active={m.id === activeChoicesId}
+              picked={m.picked}
+              onPick={(n) => pickCount(m.id, n, m.unit)}
+            />
+          </>
+        );
+      case "products":
+        return (
+          <>
+            {`${m.categoryLabel} 상품이에요.\n원하는 상품을 눌러 주세요.`}
+            <div className="places">
+              {m.list.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={m.selected === p.id ? "selected" : undefined}
+                  disabled={m.id !== activeProductsId}
+                  onClick={() => handle(p.name)}
+                >
+                  <span className="place-main">
+                    <b>{p.name}</b>
+                    <small>
+                      {p.brand} · {p.desc}
+                    </small>
+                  </span>
+                  <span className="place-distance">{won(p.price)}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        );
+      case "shows":
+        return (
+          <>
+            {`예매할 수 있는 ${m.categoryLabel}이에요.\n원하는 작품을 눌러 주세요.`}
+            <div className="places">
+              {m.list.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={m.selected === s.id ? "selected" : undefined}
+                  disabled={m.id !== activeShowsId}
+                  onClick={() => handle(s.title)}
+                >
+                  <span className="place-main">
+                    <b>{s.title}</b>
+                    <small>
+                      {s.venue} · {s.info}
+                    </small>
+                  </span>
+                  <span className="place-distance">{won(s.price)}</span>
+                </button>
+              ))}
+            </div>
           </>
         );
       case "reservation":

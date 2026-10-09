@@ -74,7 +74,8 @@ header .title img { height: 20px; width: auto; }
 .new-chat:disabled { opacity: .4; cursor: default; }
 
 /* ---- 대화 ---- */
-.chat-area { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+/* 배경 영상이 영역보다 넓어서, hidden 이면 버튼에 포커스가 갈 때 브라우저가 영역을 옆으로 밀 수 있다. clip 은 밀리지 않는다 */
+.chat-area { flex: 1; min-height: 0; position: relative; overflow: clip; }
 /* 메시지 영역 배경 영상. 스크롤과 상관없이 가운데 고정되고, 로드 전에는 패널 흰 배경이 보인다.
    영상 가장자리가 순백색이라 영역보다 작게 둬도 경계가 보이지 않는다. 크기는 height 로 조절한다 */
 .chat-bg {
@@ -143,9 +144,11 @@ header .title img { height: 20px; width: auto; }
 .card .price { color: var(--accent); font-weight: 700; }
 
 /* 선택지 질문의 버튼들. 끝의 "직접 입력" 은 점선으로 구분한다 */
+/* 줄바꿈되면 각 줄의 버튼이 남는 폭을 나눠 가져 말풍선 오른쪽에 빈 공간이 남지 않게 한다 */
 .choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .choices button {
-  display: inline-flex; align-items: center; gap: 5px;
+  flex: 1 1 auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   height: 34px; padding: 0 14px;
   border: 1px solid var(--line); border-radius: 999px;
   background: #fff; color: var(--text);
@@ -160,8 +163,12 @@ header .title img { height: 20px; width: auto; }
 .choices .direct { border-style: dashed; border-color: #cbd5e1; color: var(--muted); }
 .choices button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* 예약 인원 카운터: [ − 2명 + ] [2명 선택] */
-.people-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+/* 수 고르기 카운터 (예약 인원·배달 수량): [ − 2마리 + ] [2마리 · 40,000원]
+   카운터와 확인 버튼은 항상 한 줄: 수가 커져 금액이 길어져도 버튼이 아래로 내려가지 않고, 버튼이 남은 폭을 채운다.
+   좁은 화면에서도 한 줄에 들어가도록 이 말풍선만 조금 더 넓게 쓴다 */
+.count-picker { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; margin-top: 12px; }
+.bubble:has(.count-picker) { max-width: 92%; }
+.count-picker .stepper { flex-shrink: 0; }
 .stepper {
   display: inline-flex; align-items: center; gap: 2px;
   padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: #fff;
@@ -175,22 +182,101 @@ header .title img { height: 20px; width: auto; }
 .stepper button:hover:not(:disabled) { background: var(--accent-weak); color: var(--accent); }
 .stepper button:disabled { opacity: .35; cursor: default; }
 .stepper output { min-width: 52px; text-align: center; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.people-confirm {
-  height: 38px; padding: 0 16px;
+.count-confirm {
+  flex: 1; min-width: 0; white-space: nowrap;
+  height: 38px; padding: 0 14px;
   border: none; border-radius: 999px;
   background: var(--accent); color: #fff;
-  font-size: 13.5px; font-weight: 700; cursor: pointer;
+  font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer;
   transition: filter .15s, opacity .15s;
 }
-.people-confirm:hover:not(:disabled) { filter: brightness(1.08); }
-.people-confirm:disabled { opacity: .4; cursor: default; }
-.people-confirm.selected:disabled { opacity: 1; background: var(--accent-weak); color: var(--accent); }
-.stepper button:focus-visible, .people-confirm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.count-confirm:hover:not(:disabled) { filter: brightness(1.08); }
+.count-confirm:disabled { opacity: .4; cursor: default; }
+.count-confirm.selected:disabled { opacity: 1; background: var(--accent-weak); color: var(--accent); }
+.stepper button:focus-visible, .count-confirm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 날짜·시간 "직접 입력"으로 펼치는 고르기 화면 (말풍선 안, 한 단계 들어간 면) */
+.picker {
+  margin-top: 10px; padding: 12px;
+  background: var(--surface); border-radius: var(--radius-item);
+  animation: pop .18s ease-out;
+}
+.picker button { font-family: inherit; cursor: pointer; }
+.picker button:disabled { cursor: default; }
+.picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 달력 */
+.calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.calendar-head b { font-size: 14px; font-weight: 700; }
+.calendar-head button {
+  width: 30px; height: 30px; border: none; border-radius: 50%;
+  background: #fff; color: var(--text); font-size: 18px; line-height: 1;
+}
+.calendar-head button:hover:not(:disabled) { background: var(--accent-weak); color: var(--accent); }
+.calendar-head button:disabled { opacity: .3; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 34px); gap: 2px; justify-content: center; }
+.calendar-grid .weekday { height: 24px; display: grid; place-items: center; font-size: 11.5px; color: var(--muted); }
+.calendar-grid .day {
+  width: 34px; height: 34px; border: none; border-radius: 50%;
+  background: none; color: var(--text);
+  font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+  transition: background .12s, color .12s;
+}
+.calendar-grid .sun { color: #e5484d; }
+.calendar-grid .sat { color: var(--accent); }
+.calendar-grid .day:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.calendar-grid .day.today { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.calendar-grid .day:disabled { color: #cbd5e1; font-weight: 500; }
+
+/* 시간: 오전/오후 · 시 · 분 휠 (Wheel.tsx). 한 칸 36px, 5칸 보이게 높이 180px, 위아래 여백 72px 이라
+   맨 위·아래 값도 가운데 줄(72~108px)에 멈출 수 있다. 숫자를 바꾸면 WHEEL_ITEM_HEIGHT 도 같이 바꾼다 */
+.wheel-group {
+  position: relative;
+  display: grid; grid-template-columns: 1.1fr 1fr auto 1fr; align-items: center; gap: 2px;
+  padding: 0 6px;
+}
+/* 가운데 선택 띠: 휠 뒤에 깔린다 */
+.wheel-group::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 72px; height: 36px;
+  border-radius: 10px; background: #fff; border: 1px solid var(--line);
+  pointer-events: none;
+}
+.wheel-scroll {
+  position: relative;
+  height: 180px; padding: 72px 0; overflow-y: auto;
+  scroll-snap-type: y mandatory; overscroll-behavior: contain;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent);
+  outline: none;
+}
+.wheel-scroll::-webkit-scrollbar { display: none; }
+.wheel-scroll:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 10px; }
+.wheel-item {
+  height: 36px; display: grid; place-items: center;
+  scroll-snap-align: center;
+  font-size: 17px; font-weight: 600; color: #94a3b8; font-variant-numeric: tabular-nums;
+  cursor: pointer; user-select: none;
+  transition: color .15s, font-size .15s;
+}
+.wheel-item.selected { color: var(--accent); font-size: 19px; font-weight: 800; }
+.wheel-scroll[aria-disabled="true"] .wheel-item { cursor: default; }
+.wheel-colon { position: relative; font-size: 18px; font-weight: 800; color: var(--accent); }
+.picker-confirm {
+  width: 100%; height: 38px; margin-top: 12px;
+  border: none; border-radius: 999px;
+  background: var(--accent); color: #fff;
+  font-size: 13.5px; font-weight: 700;
+  transition: filter .15s;
+}
+.picker-confirm:hover:not(:disabled) { filter: brightness(1.08); }
 
 /* 응 해줘 / 취소 */
-.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+/* 두 버튼이 같은 너비로 말풍선 가로를 꽉 채워 옆에 빈 공간이 남지 않게 한다 */
+.actions { display: flex; gap: 6px; margin-top: 12px; }
 .actions button {
-  height: 36px; padding: 0 16px;
+  flex: 1 1 0; min-width: 88px;
+  height: 38px; padding: 0 16px;
   border: 1px solid var(--line); border-radius: 999px;
   background: #fff; color: var(--text);
   font-size: 13.5px; font-weight: 600;
@@ -404,11 +490,45 @@ form .send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .summary dd { margin: 0; font-weight: 600; text-align: right; }
 .field { display: block; margin-top: 16px; }
 .field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-.field select {
-  width: 100%; height: 46px; padding: 0 12px;
+/* 드롭다운(카드 선택·할부, Select.tsx): 기본 <select> 대신 직접 그린 버튼 + 목록.
+   열리면 결제수단 색(--theme) 테두리 + 옅은 고리, 목록은 같은 모서리·테두리의 흰 패널. 그림자 없이 평면 */
+.select { position: relative; }
+.select-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.select-trigger {
+  width: 100%; height: 48px; padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
   border: 1px solid var(--line); border-radius: var(--radius-item);
-  font-size: 14.5px; font-family: inherit; color: var(--text); background: #fff;
+  background: #fff; color: var(--text);
+  font-size: 14.5px; font-weight: 600; text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
 }
+.select-trigger:hover { border-color: #cbd5e1; }
+.select-trigger:focus-visible,
+.select.open .select-trigger { outline: none; border-color: var(--theme); box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme) 16%, transparent); }
+.select-value { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.select-value small, .select-option small { color: var(--muted); font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.select-chevron { flex-shrink: 0; color: var(--muted); transition: transform .2s; }
+.select.open .select-chevron { transform: rotate(180deg); }
+.select-list {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20;
+  margin: 0; padding: 6px; list-style: none;
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius-item);
+  max-height: 240px; overflow-y: auto; outline: none;
+  animation: pop .15s ease-out;
+}
+.select-option {
+  display: flex; align-items: center; gap: 8px;
+  height: 44px; padding: 0 10px; border-radius: 8px;
+  font-size: 14.5px; font-weight: 600; cursor: pointer;
+}
+.select-option.active { background: var(--surface); }
+.select-option[aria-selected="true"] { color: var(--theme); }
+/* 오른쪽 끝: 설명(카드 번호 등) 다음에 체크. 체크는 고른 항목에만 보인다 */
+.select-option small { margin-left: auto; }
+.select-check { flex-shrink: 0; margin-left: auto; visibility: hidden; }
+.select-option small + .select-check { margin-left: 0; }
+.select-option[aria-selected="true"] .select-check { visibility: visible; }
 .opt {
   display: flex; align-items: center; gap: 10px;
   min-height: 46px; padding: 0 12px;

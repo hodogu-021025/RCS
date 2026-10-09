@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from "react";
-import { won, type Order, type PaymentMethod } from "./orderChatKnowledge";
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { orderSummaryRows, won, type Order, type PaymentMethod } from "./orderChatKnowledge";
+import { Select, type SelectOption } from "./Select";
 
 interface Props {
   method: PaymentMethod;
@@ -95,14 +96,12 @@ export function PaymentSheet({ method, order, onCancel, onPaid }: Props) {
               <div className="label">결제 금액</div>
               <div className="amount">{won(order.price)}</div>
               <dl className="summary">
-                <dt>상품</dt>
-                <dd>
-                  {order.food} {order.qty}{order.unit}
-                </dd>
-                <dt>매장</dt>
-                <dd>{order.store.name}</dd>
-                <dt>배달지</dt>
-                <dd>{order.address}</dd>
+                {orderSummaryRows(order).map((row) => (
+                  <Fragment key={row.label}>
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </Fragment>
+                ))}
               </dl>
               <MethodFields method={method} />
               <label className="agree">
@@ -140,26 +139,30 @@ export function PaymentSheet({ method, order, onCancel, onPaid }: Props) {
   );
 }
 
+const CARDS: SelectOption[] = [
+  { value: "shinhan", label: "신한카드", sub: "****-1234" },
+  { value: "kb", label: "KB국민카드", sub: "****-5678" },
+  { value: "hyundai", label: "현대카드", sub: "****-9012" },
+];
+const INSTALLMENTS: SelectOption[] = [
+  { value: "0", label: "일시불" },
+  { value: "2", label: "2개월", sub: "무이자" },
+  { value: "3", label: "3개월", sub: "무이자" },
+];
+
 function MethodFields({ method }: { method: PaymentMethod }) {
+  const [card, setCard] = useState(CARDS[0].value);
+  const [installment, setInstallment] = useState(INSTALLMENTS[0].value);
+
   if (method.id === "card") {
     return (
       <>
-        <label className="field">
-          <span>카드 선택</span>
-          <select>
-            <option>신한카드 (****-1234)</option>
-            <option>KB국민카드 (****-5678)</option>
-            <option>현대카드 (****-9012)</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>할부</span>
-          <select>
-            <option>일시불</option>
-            <option>2개월 (무이자)</option>
-            <option>3개월 (무이자)</option>
-          </select>
-        </label>
+        <div className="field">
+          <Select label="카드 선택" options={CARDS} value={card} onChange={setCard} />
+        </div>
+        <div className="field">
+          <Select label="할부" options={INSTALLMENTS} value={installment} onChange={setInstallment} />
+        </div>
       </>
     );
   }

@@ -1,6 +1,8 @@
 # 로컬 배포용 compose. 운영과 같은 이미지(frontend/Dockerfile → nginx)를 이 PC 에서 빌드해 띄운다.
-#   docker compose up -d --build   →  http://localhost:8080
-#   docker compose down            (중지)
+#   docker compose up -d --build                  →  http://localhost:8080
+#   docker compose --profile tunnel up -d         →  + 인터넷 주소(https://○○○.trycloudflare.com)로도 공개
+#   docker compose logs tunnel | grep trycloudflare   (공개 주소 확인 — 터널을 다시 켤 때마다 바뀐다)
+#   docker compose --profile tunnel down          (터널까지 모두 중지)
 # 개발할 때는 Vite 개발 서버(npm --prefix frontend run dev, :5173)를 쓰고, 이건 빌드 결과물을 확인할 때 쓴다.
 name: rcs
 
@@ -13,3 +15,12 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+
+  # Cloudflare 임시 터널(계정 불필요). 주소를 아는 누구나 접속할 수 있으니 필요할 때만 켠다
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://chatbot:80
+    depends_on:
+      - chatbot
+    restart: unless-stopped
+    profiles: ["tunnel"]
