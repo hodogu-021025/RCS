@@ -726,7 +726,10 @@ export function OrderChatbot() {
     if (!text || thinking || stage === "paying") return;
     push({ role: "user", text });
 
-    if (stage === "confirm" && order) {
+    // 주문 확인·결제수단 단계에서 빠른 메뉴(배달·식당 등)를 고르면 주문을 접고 아래 일반 처리로 넘어간다
+    const switchingMenu = (stage === "confirm" || stage === "pay") && !!quickMenuReply(text);
+
+    if (stage === "confirm" && order && !switchingMenu) {
       if (isNo(text)) {
         setStage("idle");
         setOrder(null);
@@ -741,7 +744,7 @@ export function OrderChatbot() {
       return;
     }
 
-    if (stage === "pay" && order) {
+    if (stage === "pay" && order && !switchingMenu) {
       const method = findPayment(text);
       if (method) {
         markPayment(method.id);
@@ -841,6 +844,7 @@ export function OrderChatbot() {
     const quickReply = quickMenuReply(text);
     if (quickReply) {
       setPendingItem(null);
+      setOrder(null);
       setRsv(null);
       setShop({});
       setTicket({});

@@ -194,9 +194,13 @@ const KOREAN_COUNTS: [string, number][] = [
   ["한", 1], ["두", 2], ["세", 3], ["네", 4],
 ];
 
+// 숫자 뒤에 이런 단위가 붙으면 수량이 아니다 ("10월 3일", "7시", "331호")
+const NOT_COUNT_UNIT = /^\s*(월|일|시|분|초|호|번|층|원|년|km|m|cm|kg|g|ml)/;
+
 export function parseQuantity(text: string): number | undefined {
-  const digits = text.match(/\d+/);
-  if (digits) return parseInt(digits[0], 10);
+  for (const m of text.matchAll(/\d+/g)) {
+    if (!NOT_COUNT_UNIT.test(text.slice(m.index + m[0].length))) return parseInt(m[0], 10);
+  }
   for (const [word, count] of KOREAN_COUNTS) {
     // 한·두·세·네 는 다른 말("한식", "네 주세요")과 헷갈리지 않게 단위가 붙을 때만 수량으로 본다
     const needsUnit = word.length === 1 && "한두세네".includes(word);
@@ -283,11 +287,13 @@ export function parseVisitDate(text: string, now: Date): Date | "past" | "far" |
 }
 
 // "19:30", "7시", "7시 반", "저녁 7시 30분", "오전 11시". 오전이라고 하지 않은 1~9시는 오후로 본다
+// ("07:30" 처럼 0을 붙인 24시간제는 그대로 오전이다)
 export function parseVisitTime(text: string): string | undefined {
   let h: number;
   let m: number;
   const colon = text.match(/(\d{1,2})\s*:\s*(\d{2})/);
   const korean = text.match(/(\d{1,2})\s*시(?:\s*(반|(\d{1,2})\s*분))?/);
+  const zeroPadded = !!colon && colon[1].length === 2 && colon[1].startsWith("0");
   if (colon) {
     [h, m] = [Number(colon[1]), Number(colon[2])];
   } else if (korean) {
@@ -298,7 +304,7 @@ export function parseVisitTime(text: string): string | undefined {
   }
   const am = /오전|아침/.test(text);
   const pm = /오후|저녁|밤/.test(text);
-  if ((pm && h < 12) || (!am && h >= 1 && h <= 9)) h += 12;
+  if ((pm && h < 12) || (!am && !zeroPadded && h >= 1 && h <= 9)) h += 12;
   if (am && h === 12) h = 0; // 오전 12시 = 자정
   if (h > 23 || m > 59) return undefined;
   return `${pad2(h)}:${pad2(m)}`;
@@ -336,10 +342,18 @@ export function bookableTimes(restaurant: Restaurant, date: Date, now: Date): st
   return times;
 }
 
+// 그날 예약할 수 있는 시각이 하나라도 있는지 (달력은 날마다 물어보므로 목록을 다 만들지 않고 찾는 대로 멈춘다)
+export function hasBookableTime(restaurant: Restaurant, date: Date, now: Date): boolean {
+  for (let t = 0; t < 24 * 60; t += TIME_STEP_MINUTES) {
+    if (checkVisitTime(restaurant, date, `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`, now) === "ok") return true;
+  }
+  return false;
+}
+
 // 달력에서 고를 수 있는 날: 오늘부터 MAX_DAYS_AHEAD 일 안이면서 예약할 시간이 남은 날
 export function isBookableDate(restaurant: Restaurant, date: Date, now: Date): boolean {
   const ahead = daysBetween(now, date);
-  return ahead >= 0 && ahead <= MAX_DAYS_AHEAD && bookableTimes(restaurant, date, now).length > 0;
+  return ahead >= 0 && ahead <= MAX_DAYS_AHEAD && hasBookableTime(restaurant, date, now);
 }
 
 export const lastBookableDate = (now: Date) => addDays(startOfDay(now), MAX_DAYS_AHEAD);
@@ -431,8 +445,9 @@ const has = (text: string, words: string[]) => {
   return words.some((w) => low.includes(w));
 };
 
+// "네"·"예"는 한 글자라 다른 말("예매", "네 명")에도 들어가므로 혼자 쓰였을 때만 긍정으로 본다
 export const isYes = (text: string) =>
-  has(text, ["응", "네", "예", "좋아", "해줘", "ㅇㅇ", "그래", "주문해", "콜", "ok", "yes"]);
+  has(text, ["응", "좋아", "해줘", "ㅇㅇ", "그래", "주문해", "콜", "ok", "yes"]) || /(^|\s)(네|예)(요|\s|[,.!]|$)/.test(text.trim());
 
 export const isNo = (text: string) => has(text, ["아니", "취소", "싫어", "안 해", "안해", "no"]);
 

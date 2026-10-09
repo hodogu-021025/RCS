@@ -62,9 +62,19 @@ export function getDb(): Db {
   const raw = localStorage.getItem(KEY);
   if (raw !== cacheRaw) {
     cacheRaw = raw;
-    cache = raw ? { ...EMPTY, ...(JSON.parse(raw) as Partial<Db>) } : EMPTY;
+    cache = raw ? { ...EMPTY, ...parseDb(raw) } : EMPTY;
   }
   return cache;
+}
+
+// 손상된 값(잘린 JSON 등)이 들어 있어도 화면이 죽지 않게 빈 데이터로 본다
+function parseDb(raw: string): Partial<Db> {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Partial<Db>) : {};
+  } catch {
+    return {};
+  }
 }
 
 function notify() {

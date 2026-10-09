@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { login, logout } from "../auth/auth";
 import { DELIVERY_MENU, makeOrder } from "../components/orderChatKnowledge";
-import { addOrder, addReservation, getDb, resetDb, setMenuItem } from "../data/db";
+import { addOrder, addOwner, addReservation, getDb, removeOwner, resetDb, setMenuItem, setStoreHours } from "../data/db";
 
 // App 은 해시 주소(#/owner)로 페이지를 고른다
 function open(path: string) {
@@ -47,6 +47,18 @@ describe("로그인 페이지", () => {
     login("user", "1234");
     open("#/owner");
     expect(screen.getByText(/사장님 전용이에요/)).toBeInTheDocument();
+  });
+
+  it("관리자가 지운 사장님 계정은 로그인 상태였어도 로그인 페이지로 보낸다", () => {
+    addOwner({ username: "jangrak", password: "pw1234", name: "장락반점 사장님", storeId: "c1" });
+    login("jangrak", "pw1234");
+    open("#/owner");
+    expect(screen.getByText("장락반점 · 사장님")).toBeInTheDocument();
+
+    act(() => removeOwner("jangrak"));
+    expect(window.location.hash).toBe("#/login");
+    expect(screen.getByRole("heading", { name: "로그인" })).toBeInTheDocument();
+    expect(localStorage.getItem("saylo.session")).toBeNull();
   });
 });
 
@@ -97,6 +109,18 @@ describe("사장님 페이지", () => {
     expect(getDb().storeSettings.h3.hours).toBe("16:00 - 23:00");
   });
 
+  it("자정(24:00)에 닫는 매장은 닫는 시간 칸에 00:00 으로 보인다", () => {
+    addOwner({ username: "tongdak", password: "pw1234", name: "옛날통닭 사장님", storeId: "h1" }); // 15:00 - 24:00
+    login("tongdak", "pw1234");
+    open("#/owner");
+    fireEvent.click(screen.getByRole("tab", { name: "매장·메뉴" }));
+    expect(screen.getByLabelText("여는 시간")).toHaveValue("15:00");
+    expect(screen.getByLabelText("닫는 시간")).toHaveValue("00:00");
+
+    fireEvent.change(screen.getByLabelText("여는 시간"), { target: { value: "16:00" } });
+    expect(getDb().storeSettings.h1.hours).toBe("16:00 - 00:00");
+  });
+
   it("예약은 방문 완료로 바꿀 수 있다", () => {
     addReservation({ restaurantId: "h3", restaurantName: "청전 치킨공방", date: new Date(2026, 9, 10), time: "19:00", people: 3 });
     login("owner", "1234");
@@ -122,9 +146,11 @@ describe("관리자 페이지", () => {
   });
 
   it("사장님 계정을 만들면 목록에 뜨고 그 계정으로 로그인할 수 있다", () => {
+    setStoreHours("c1", "11:00 - 18:00"); // 사장님이 바꾼 영업시간이 표에 보인다
     login("admin", "1234");
     open("#/admin");
     fireEvent.click(screen.getByRole("tab", { name: "매장·사장님" }));
+    expect(screen.getByText("11:00 - 18:00")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("아이디"), { target: { value: "jangrak" } });
     fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "pw1234" } });

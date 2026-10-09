@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../auth/auth";
-import { DELIVERY_MENU, formatDate, orderCardRows, restaurantById, won } from "../components/orderChatKnowledge";
+import { DELIVERY_MENU, formatDate, restaurantById, won } from "../components/orderChatKnowledge";
 import {
   setMenuItem,
   setOrderStatus,
@@ -138,14 +138,12 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
         <span className={"status s-" + o.status}>{o.status}</span>
       </div>
       <dl>
-        {orderCardRows(o.order)
-          .filter((r) => r.label === "위치")
-          .map((r) => (
-            <div key={r.label}>
-              <dt>배달지</dt>
-              <dd>{r.value}</dd>
-            </div>
-          ))}
+        {o.order.address && (
+          <div>
+            <dt>배달지</dt>
+            <dd>{o.order.address}</dd>
+          </div>
+        )}
         <div>
           <dt>주문자</dt>
           <dd>{o.customerName}</dd>
@@ -217,7 +215,8 @@ function ReservationRow({ record: r }: { record: ReservationRecord }) {
 // 영업시간과 배달 메뉴(가격·품절). 바꾸면 소비자 챗봇에 바로 반영된다
 function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
   const db = useDb();
-  const [open, close] = hours.split("-").map((s) => s.trim());
+  // 자정 마감은 데이터에 "24:00"으로 적혀 있지만 시간 입력칸은 "00:00"까지만 받는다 (예약 시간 계산은 둘 다 자정으로 본다)
+  const [open, close] = hours.split("-").map((s) => s.trim()).map((t) => (t === "24:00" ? "00:00" : t));
   const items = DELIVERY_MENU.filter((d) => d.restaurantId === storeId);
   const settings = db.storeSettings[storeId]?.items ?? {};
 

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { allOwners, isUsernameTaken, useSession } from "../auth/auth";
-import { RESTAURANTS, formatDate, won } from "../components/orderChatKnowledge";
+import { allOwners, isUsernameTaken } from "../auth/auth";
+import { RESTAURANTS, formatDate, withStoreSettings, won } from "../components/orderChatKnowledge";
 import { addOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
@@ -44,7 +44,6 @@ const rsvToRow = (r: ReservationRecord): Row => ({
 });
 
 export function AdminPage() {
-  useSession();
   const db = useDb();
   const [tab, setTab] = useState<Tab>("all");
   const rows = [...db.orders.map(toRow), ...db.reservations.map(rsvToRow)].sort((a, b) => b.createdAt - a.createdAt);
@@ -127,7 +126,7 @@ function AllTab({ rows }: { rows: Row[] }) {
 
 // 식당마다 사장님 계정을 보여 주고, 새 사장님 계정을 만든다 (데모 계정은 지울 수 없다)
 function StoresTab() {
-  useDb(); // 계정이 바뀌면 다시 그린다
+  useDb(); // 계정이나 매장 설정이 바뀌면 다시 그린다
   const owners = allOwners();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -168,7 +167,7 @@ function StoresTab() {
                 return (
                   <tr key={r.id}>
                     <td>{r.name}</td>
-                    <td>{r.hours}</td>
+                    <td>{withStoreSettings(r).hours}</td>
                     <td>{mine.length ? mine.map((o) => `${o.username} (${o.name})`).join(", ") : <span className="muted">없음</span>}</td>
                     <td>
                       {mine

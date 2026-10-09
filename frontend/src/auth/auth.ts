@@ -34,9 +34,19 @@ export function getSession(): Session | null {
   const raw = localStorage.getItem(KEY);
   if (raw !== cacheRaw) {
     cacheRaw = raw;
-    cache = raw ? (JSON.parse(raw) as Session) : null;
+    cache = raw ? parseSession(raw) : null;
   }
   return cache;
+}
+
+// 손상된 값이면 로그인 안 된 것으로 본다
+function parseSession(raw: string): Session | null {
+  try {
+    const s: unknown = JSON.parse(raw);
+    return s && typeof s === "object" && "username" in s && "role" in s ? (s as Session) : null;
+  } catch {
+    return null;
+  }
 }
 
 function notify() {
@@ -89,3 +99,6 @@ export function allOwners(): (OwnerAccount & { builtIn: boolean })[] {
 
 export const isUsernameTaken = (username: string) =>
   DEMO_ACCOUNTS.some((a) => a.username === username) || getDb().owners.some((o) => o.username === username);
+
+// 세션의 계정이 아직 있는지. 관리자가 지운 사장님 계정은 세션이 남아 있어도 로그인으로 치지 않는다
+export const accountExists = (session: Session) => isUsernameTaken(session.username);

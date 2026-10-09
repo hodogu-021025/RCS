@@ -38,6 +38,15 @@ describe("isYes / isNo", () => {
     expect(isNo("아니 취소할래")).toBe(true);
     expect(isNo("응 해줘")).toBe(false);
   });
+
+  it("'네'·'예'는 혼자 쓰였을 때만 긍정이다 (예매·예약·네 명은 아니다)", () => {
+    expect(isYes("네")).toBe(true);
+    expect(isYes("네, 주문할게요")).toBe(true);
+    expect(isYes("예요")).toBe(true);
+    expect(isYes("예매")).toBe(false);
+    expect(isYes("예매로 바꿀래")).toBe(false);
+    expect(isYes("예약")).toBe(false);
+  });
 });
 
 describe("배달 메뉴", () => {
@@ -64,6 +73,10 @@ describe("배달 메뉴", () => {
     // 단위 없는 한·두·세·네 는 수량으로 보지 않는다
     expect(parseQuantity("한식")).toBeUndefined();
     expect(parseQuantity("네 주세요")).toBeUndefined();
+    // 날짜·시간·호수 같은 숫자는 수량이 아니다
+    expect(parseQuantity("10월 3일에 받을게요")).toBeUndefined();
+    expect(parseQuantity("331호로 보내줘")).toBeUndefined();
+    expect(parseQuantity("7시에 2마리")).toBe(2);
   });
 
   it("수량 질문은 매장·1단위 가격을 알려 주고 단위에 맞춰 묻는다", () => {
@@ -147,6 +160,10 @@ describe("식당 예약", () => {
     expect(parseVisitTime("오후 12:30")).toBe("12:30");
     expect(parseVisitTime("오전 12:30")).toBe("00:30");
     expect(parseVisitTime("오후 7:30")).toBe("19:30");
+    expect(parseVisitTime("7:30")).toBe("19:30");
+    // 0을 붙인 24시간제는 그대로 아침이다
+    expect(parseVisitTime("07:30")).toBe("07:30");
+    expect(parseVisitTime("09:00")).toBe("09:00");
     expect(parseVisitTime("아무 때나")).toBeUndefined();
   });
 

@@ -36,6 +36,13 @@ describe("주문·예약 기록", () => {
     expect(rec).toMatchObject({ date: "2026-10-02", status: "예약 확정", restaurantId: "c1" });
   });
 
+  it("저장된 값이 손상돼 있으면 빈 데이터로 보고 죽지 않는다", () => {
+    localStorage.setItem("saylo.db", '{"orders":[{"id":"o1"');
+    expect(getDb().orders).toEqual([]);
+    const rec = addOrder(makeOrder(chicken, 1), "토스페이"); // 그 위에 새로 쓸 수 있다
+    expect(getDb().orders.map((o) => o.id)).toEqual([rec.id]);
+  });
+
   it("보기 데이터는 비어 있을 때만 들어간다", () => {
     seedDemoData(() => makeDemoRecords(new Date(2026, 9, 9, 12, 0).getTime()));
     expect(getDb().orders.length).toBe(7);

@@ -563,6 +563,29 @@ describe("OrderChatbot", () => {
     expect(screen.getByText(/주문을 취소했어요/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });
+
+  it("주문 확인에서 다른 서비스(예매)를 말하면 '응'으로 보지 않고 그 서비스로 넘어간다", () => {
+    render(<OrderChatbot />);
+    send("옛날통닭 2마리 시켜줘");
+    wait(1000);
+    send("예매");
+    wait(700);
+
+    expect(screen.getByText(/무엇을 예매할까요\?/)).toBeInTheDocument();
+    expect(screen.queryByText(/결제 수단을 선택해 주세요/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
+  });
+
+  it("배달 수량 단계에서 날짜 같은 숫자는 수량으로 보지 않는다", () => {
+    render(<OrderChatbot />);
+    send("옛날통닭 시켜줘");
+    wait(700);
+    send("10월 3일에 받을게요");
+    wait(700);
+
+    expect(screen.getByText(/수량을 잘 모르겠어요/)).toBeInTheDocument();
+    expect(screen.queryByText("옛날통닭 10마리")).not.toBeInTheDocument();
+  });
 });
 
 // ---- 음성 입력·읽어 주기 ----
