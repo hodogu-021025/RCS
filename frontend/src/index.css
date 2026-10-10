@@ -204,7 +204,7 @@ header .title {
 .voice-caption {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  padding: 24px 28px 88px; /* 아래는 음성 카드 자리 */
+  padding: 88px 28px; /* 아래는 음성 카드 자리. 위도 같게 둬야 자막이 구체(영역 가운데) 정중앙에 온다 */
   overflow-y: auto; pointer-events: none;
   animation: pop .25s ease;
 }
