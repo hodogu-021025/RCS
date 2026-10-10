@@ -3,7 +3,6 @@
 import { FOOD_PROMPT, deliveryPrompt, type BotPrompt } from "./orderChatKnowledge";
 
 export const QUICK_MENUS = ["배달", "식당"] as const;
-export type QuickMenu = (typeof QUICK_MENUS)[number];
 
 export interface QuickMenuReply extends BotPrompt {
   // 다음 입력을 무엇으로 받을지: 배달은 메뉴, 식당은 음식 종류

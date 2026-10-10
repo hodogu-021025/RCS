@@ -9,10 +9,8 @@ export interface Store {
 export type Unit = "마리" | "판" | "인분";
 
 // 결제까지 가는 배달 주문서 (확인 → 결제수단 → 결제 팝업)
-export type OrderKind = "delivery";
 
 export interface Order {
-  kind: OrderKind;
   store: Store; // 매장
   item: string; // 메뉴 이름
   qty: number;
@@ -44,7 +42,7 @@ export const PAYMENTS: PaymentMethod[] = [
 
 export type FoodKey = "korean" | "chinese" | "japanese" | "chicken" | "pizza" | "meat" | "snack";
 
-export interface FoodCategory {
+interface FoodCategory {
   key: FoodKey;
   label: string;
   keywords: string[];
@@ -218,7 +216,6 @@ export function quantityQuestion(item: DeliveryItem, lead?: string): string {
 export function makeOrder(item: DeliveryItem, qty: number): Order {
   const store = restaurantById(item.restaurantId);
   return {
-    kind: "delivery",
     store: { name: store.name, distance: km(store.distanceKm) },
     storeId: store.id,
     item: item.name,
@@ -322,7 +319,7 @@ export function isWithinHours(restaurant: Restaurant, time: string): boolean {
 const isPastTime = (date: Date, time: string, now: Date) =>
   daysBetween(now, date) === 0 && toMinutes(time) <= now.getHours() * 60 + now.getMinutes();
 
-export type TimeCheck = "ok" | "closed" | "past";
+type TimeCheck = "ok" | "closed" | "past";
 export function checkVisitTime(restaurant: Restaurant, date: Date, time: string, now: Date): TimeCheck {
   if (!isWithinHours(restaurant, time)) return "closed";
   if (isPastTime(date, time, now)) return "past";

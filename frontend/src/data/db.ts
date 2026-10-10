@@ -85,7 +85,7 @@ function parseDb(raw: string): Partial<Db> {
     if (!parsed || typeof parsed !== "object") return {};
     const db = parsed as Partial<Db>;
     // 쇼핑·예매를 없애기 전에 저장된 주문(보기용 기록 포함)은 빼고 배달 주문만 남긴다
-    if (Array.isArray(db.orders)) db.orders = db.orders.filter((o) => o?.order?.kind === "delivery");
+    if (Array.isArray(db.orders)) db.orders = db.orders.filter((o) => !["shop", "ticket"].includes((o?.order as { kind?: string } | undefined)?.kind ?? ""));
     return db;
   } catch {
     return {};
@@ -139,7 +139,7 @@ export function addOrder(order: Order, payment: string, who: Who | null = null):
     customer: w.username,
     customerName: w.name,
     payment,
-    storeId: order.storeId ?? `${order.kind}:${order.store.name}`,
+    storeId: order.storeId ?? order.store.name,
     order,
   };
   updateDb((db) => db.orders.unshift(record));

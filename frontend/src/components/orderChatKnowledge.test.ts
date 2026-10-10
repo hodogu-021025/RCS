@@ -224,7 +224,7 @@ describe("식당 예약", () => {
 describe("makeOrder / completionText", () => {
   it("메뉴의 매장·단위로 주문서를 만들고 수량만큼 가격을 계산한다", () => {
     const order = makeOrder(item("간장치킨"), 2);
-    expect(order).toMatchObject({ kind: "delivery", item: "간장치킨", qty: 2, unit: "마리", price: 40000 });
+    expect(order).toMatchObject({ item: "간장치킨", qty: 2, unit: "마리", price: 40000 });
     expect(order.store).toEqual({ name: "청전 치킨공방", distance: "1.8km" });
     expect(won(40000)).toBe("40,000원");
   });

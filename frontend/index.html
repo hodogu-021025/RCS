@@ -2,15 +2,34 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#007cfc" />
+    <meta name="description" content="채팅과 음성으로 배달 주문, 식당 예약을 끝까지 진행하는 주문 챗봇" />
     <title>Saylo</title>
-    <!-- 한글 본문 글꼴. 못 불러와도 index.css 의 대체 글꼴(Apple SD Gothic Neo, 맑은 고딕)로 보인다 -->
+
+    <!-- 아이콘과 홈 화면 추가(설치형 웹앱) 설정. 아이콘 파일은 public/ 에 있다 -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Saylo" />
+
+    <!-- 한글 본문 글꼴. 화면을 먼저 그리고 글꼴은 뒤늦게 받는다 (media="print" 로 받은 뒤 onload 에서 적용).
+         못 불러와도 index.css 의 대체 글꼴(Apple SD Gothic Neo, 맑은 고딕)로 보인다 -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+      />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

@@ -27,7 +27,7 @@ interface Row {
 const toRow = (o: OrderRecord): Row => ({
   id: o.id,
   createdAt: o.createdAt,
-  kind: o.order.kind,
+  kind: "delivery",
   what: `${o.order.item} ${o.order.qty}${o.order.unit}`,
   where: o.order.store.name,
   who: o.customerName,

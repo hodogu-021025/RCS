@@ -4,7 +4,6 @@ import { useDb } from "../data/db";
 import { DashLayout } from "./DashLayout";
 import { formatDateTime } from "./format";
 
-const KIND_LABEL = { delivery: "배달" } as const;
 
 // 로그인한 사람의 주문·예약 내역
 export function MyOrdersPage() {
@@ -22,7 +21,6 @@ export function MyOrdersPage() {
           {orders.map((o) => (
             <li key={o.id} className="record">
               <div className="record-head">
-                <span className={"chip kind-" + o.order.kind}>{KIND_LABEL[o.order.kind]}</span>
                 <b>
                   {o.order.item} {o.order.qty}
                   {o.order.unit}
