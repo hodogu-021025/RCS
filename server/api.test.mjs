@@ -421,3 +421,44 @@ describe("손님의 주문 조회·취소와 인기 통계", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("점검에서 찾은 서버 문제", () => {
+  it("풀 수 없는 글자가 든 주소(%FF)는 400 으로 답하고 서버가 죽지 않는다", async () => {
+    const res = await fetch(`${base}/api/orders/%FF/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    assert.equal(res.status, 400);
+    assert.equal((await call("GET", "/api/health")).status, 200);
+  });
+
+  it("탈퇴하면 주문 기록의 배달지·연락처·영수증 번호도 지워진다", async () => {
+    const token = await signup({ username: "leaver00002", email: "leaver2@example.com", name: "떠남" });
+    const order = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭" }, payment: "카드" }, token)).body;
+    assert.equal((await call("POST", "/api/auth/withdraw", { password: "password1" }, token)).status, 200);
+    const kept = db.orderById(order.id);
+    assert.equal(kept.order.address, undefined);
+    assert.equal(kept.order.phone, undefined);
+    assert.equal(kept.order.item, "옛날통닭");
+    assert.equal(db.orderByReceipt(order.receipt), null);
+    assert.equal((await call("POST", `/api/orders/${order.id}/cancel`, { receipt: order.receipt })).status, 403);
+  });
+
+  it("관리자 비밀번호는 이메일로 바꿀 수 없다", async () => {
+    db.createUser({ username: "adminmail01", passwordHash: hashPassword("password1"), name: "관리자", role: "admin", email: "adminmail@example.com" });
+    const r = await call("POST", "/api/auth/reset/send-code", { email: "adminmail@example.com" }, undefined, "10.7.0.1");
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /가입된 이메일이 아니에요/);
+  });
+
+  it("가입 여부를 묻는 답도 IP 별 발송 횟수에 세어, 주소를 하나씩 넣어 보며 캐낼 수 없다", async () => {
+    const ip = "10.8.0.1";
+    let last;
+    for (let i = 0; i <= 5; i++) last = await call("POST", "/api/auth/reset/send-code", { email: `probe${i}@example.com` }, undefined, ip);
+    assert.equal(last.status, 429);
+    assert.match(last.body.error, /너무 많이 요청/);
+  });
+
+  it("프록시 헤더(X-Forwarded-For)는 로컬·사설망에서 온 요청만 믿는다", async () => {
+    const { isPrivateAddress } = await import("./app.mjs");
+    for (const a of ["127.0.0.1", "::1", "::ffff:127.0.0.1", "10.2.3.4", "172.18.0.2", "192.168.0.10"]) assert.equal(isPrivateAddress(a), true, a);
+    for (const a of ["8.8.8.8", "172.32.0.1", "::ffff:203.0.113.5", "2001:db8::1", ""]) assert.equal(isPrivateAddress(a), false, a);
+  });
+});

@@ -45,6 +45,16 @@ class HttpError extends Error {
   }
 }
 const bad = (message) => new HttpError(400, message);
+
+// 로컬·사설망 주소인지 (127.x, 10.x, 172.16-31.x, 192.168.x, ::1, 그리고 IPv4 를 감싼 ::ffff: 꼴)
+export function isPrivateAddress(address) {
+  const a = String(address).replace(/^::ffff:/, "");
+  if (a === "::1" || a === "localhost") return true;
+  const m = a.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const [x, y] = [Number(m[1]), Number(m[2])];
+  return x === 127 || x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168);
+}
 const needLogin = () => new HttpError(401, "로그인이 필요해요.");
 const forbidden = () => new HttpError(403, "권한이 없어요.");
 
@@ -131,7 +141,11 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
     ["POST", "/api/email/send-code", async ({ body, ip }) => {
       if (mailer.mode === "off") throw new HttpError(503, "이메일 인증이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.");
       const email = normalizeEmail(body.email);
-      if (isValidEmail(email) && db.emailTaken(email)) throw bad("이미 가입된 이메일이에요.");
+      // "가입된 이메일인지" 답도 IP 별 발송 횟수에 세어, 주소를 하나씩 넣어 보며 가입 여부를 캐지 못하게 한다
+      if (isValidEmail(email) && db.emailTaken(email)) {
+        verifier.countAttempt(ip);
+        throw bad("이미 가입된 이메일이에요.");
+      }
       const r = await verifier.sendCode(email, ip);
       if (r.status !== 200) throw Object.assign(new HttpError(r.status, r.body.error), { extra: r.body });
       return r.body;
@@ -173,7 +187,11 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (mailer.mode === "off") throw new HttpError(503, "이메일 인증이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.");
       const email = normalizeEmail(body.email);
       if (!isValidEmail(email)) throw bad("이메일 주소를 다시 확인해 주세요.");
-      if (!db.findUserByEmail(email)) throw bad("가입된 이메일이 아니에요. 가입할 때 쓴 주소를 적어 주세요.");
+      const target = db.findUserByEmail(email);
+      if (!target || target.role === "admin") {
+        verifier.countAttempt(ip); // 위와 같은 이유로 틀린 시도도 센다
+        throw bad("가입된 이메일이 아니에요. 가입할 때 쓴 주소를 적어 주세요.");
+      }
       const r = await verifier.sendCode(email, ip);
       if (r.status !== 200) throw Object.assign(new HttpError(r.status, r.body.error), { extra: r.body });
       return r.body;
@@ -181,7 +199,7 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
     ["POST", "/api/auth/reset", ({ body }) => {
       const email = normalizeEmail(body.email);
       const user = isValidEmail(email) ? db.findUserByEmail(email) : null;
-      if (!user) throw bad("가입된 이메일이 아니에요.");
+      if (!user || user.role === "admin") throw bad("가입된 이메일이 아니에요.");
       const error = passwordError(body.password) ?? (body.password !== body.passwordConfirm ? "비밀번호가 서로 달라요." : null);
       if (error) throw bad(error);
       // 증표는 맨 마지막에 쓴다 (틀린 입력 때문에 다시 인증하지 않게)
@@ -395,13 +413,24 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
     res.end(JSON.stringify(body));
   }
 
-  // nginx·Vite 프록시 뒤에서 돌므로 실제 접속 IP 는 X-Forwarded-For 첫 값이다
-  const clientIp = (req) => String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() || req.socket.remoteAddress || "unknown";
+  // nginx·Vite 프록시 뒤에서 돌므로 실제 접속 IP 는 X-Forwarded-For 첫 값이다.
+  // 다만 그 헤더는 프록시(같은 컴퓨터·Docker 내부망)에서 온 요청일 때만 믿는다. 인터넷에 바로 열린 서버에서는
+  // 누구나 헤더를 꾸며 IP 별 제한(인증 메일·로그인)을 피할 수 있기 때문이다
+  const clientIp = (req) => {
+    const peer = req.socket.remoteAddress ?? "";
+    const forwarded = isPrivateAddress(peer) ? String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() : "";
+    return forwarded || peer || "unknown";
+  };
 
   // http.createServer 에 넘기는 요청 처리기
   return async function handle(req, res) {
-    const path = decodeURIComponent(new URL(req.url ?? "/", "http://localhost").pathname);
     try {
+      let path;
+      try {
+        path = decodeURIComponent(new URL(req.url ?? "/", "http://localhost").pathname);
+      } catch {
+        throw bad("주소가 맞지 않아요."); // %FF 처럼 풀 수 없는 글자
+      }
       const route = routes.find((r) => r.method === req.method && r.re.test(path));
       if (!route) throw new HttpError(404, "없는 주소예요.");
       const params = Object.fromEntries(route.keys.map((k, i) => [k, path.match(route.re)[i + 1]]));
@@ -411,7 +440,8 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       const result = await route.handler({ body, params, user, token, ip: clientIp(req) });
       send(res, 200, result);
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
+      // status 가 붙은 오류(verifier 의 429)도 그 상태로 답한다
+      const status = err instanceof HttpError || (typeof err?.status === "number" && err.status >= 400 && err.status < 600) ? err.status : 500;
       if (status === 500) console.error(err);
       send(res, status, { error: status === 500 ? "서버에 문제가 생겼어요." : err.message, ...(err.extra ?? {}) });
     }

@@ -89,6 +89,18 @@ export function createVerifier({
     return true;
   }
 
+  // 메일을 보내지 않는 시도(가입 여부만 알려 주는 답)도 IP 별 횟수에 센다. 한도를 넘으면 429 를 던진다
+  function countAttempt(ip = "unknown") {
+    const t = now();
+    const recent = (sendsByIp.get(ip) ?? []).filter((at) => t - at < IP_WINDOW_MS);
+    sendsByIp.set(ip, [...recent, t]);
+    if (recent.length >= IP_MAX_SENDS) {
+      const err = new Error("인증번호를 너무 많이 요청했어요. 잠시 후 다시 시도해 주세요.");
+      err.status = 429;
+      throw err;
+    }
+  }
+
   // 오래된 기록 청소 (메모리가 계속 늘지 않게)
   function sweep() {
     const t = now();
@@ -101,5 +113,5 @@ export function createVerifier({
     }
   }
 
-  return { sendCode, verifyCode, consumeProof, sweep };
+  return { sendCode, verifyCode, consumeProof, countAttempt, sweep };
 }

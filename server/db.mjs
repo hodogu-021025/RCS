@@ -118,7 +118,9 @@ export function openDb(path) {
     deleteSessionsOf: q("DELETE FROM sessions WHERE username = ?"),
     privacyConsent: q("SELECT privacy_version, privacy_agreed_at FROM users WHERE username = ?"),
     deleteUser: q("DELETE FROM users WHERE username = ?"),
-    anonymizeOrders: q("UPDATE orders SET customer = ?, customer_name = ? WHERE customer = ?"),
+    anonymizeOrders: q("UPDATE orders SET customer = ?, customer_name = ?, receipt = NULL WHERE customer = ?"),
+    ordersOf: q("SELECT id, order_json FROM orders WHERE customer = ?"),
+    setOrderJson: q("UPDATE orders SET order_json = ? WHERE id = ?"),
     anonymizeReservations: q("UPDATE reservations SET customer = ?, customer_name = ? WHERE customer = ?"),
     countRole: q("SELECT COUNT(*) AS n FROM users WHERE role = ?"),
 
@@ -183,6 +185,11 @@ export function openDb(path) {
     withdrawUser(username) {
       db.exec("BEGIN");
       try {
+        // 주문 내용 속 배달지·연락처도 지운다 (메뉴·금액 같은 거래 기록만 남긴다)
+        for (const r of stmts.ordersOf.all(username)) {
+          const { address, phone, ...rest } = JSON.parse(r.order_json);
+          if (address !== undefined || phone !== undefined) stmts.setOrderJson.run(JSON.stringify(rest), r.id);
+        }
         stmts.anonymizeOrders.run(WITHDRAWN.customer, WITHDRAWN.name, username);
         stmts.anonymizeReservations.run(WITHDRAWN.customer, WITHDRAWN.name, username);
         const deleted = stmts.deleteUser.run(username).changes > 0;
