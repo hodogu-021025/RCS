@@ -63,8 +63,9 @@
 }
 .link-quiet:hover { color: var(--accent); }
 
-/* 회원가입: 위 두 줄(로고·제목)은 가운데 */
-.dash-card.signup > .dash-logo, .dash-card.signup > h1 { text-align: center; }
+/* 로그인·회원가입 카드: 위 두 줄(로고·제목)은 가운데, 로고는 크게 */
+.dash-card.login > .dash-logo, .dash-card.login > h1 { text-align: center; }
+.dash-card.login > .dash-logo { font-size: 36px; line-height: 1.1; margin-bottom: 6px; }
 
 /* 회원가입: 고객님 / 사장님 고르기. 흰 바탕 칸(::before)이 고른 쪽으로 미끄러진다 */
 .role-switch {
