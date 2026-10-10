@@ -136,43 +136,44 @@ header .title {
   pointer-events: none;
 }
 /* ---- 말하는 효과 ----
-   봇이 소리로 말하는 동안(data-voice="talking") 구체가 말하듯 불규칙하게 커졌다 작아지고 둘레에서 물결이 퍼진다.
-   내가 음성 모드로 말하는 동안(listening)은 물결만 느리고 은은하게. 브라우저 음성은 소리 크기를 주지 않아 리듬은 정해 둔 것이다 */
-.chat-bg { transition: scale .4s ease; }
-.chat-area[data-voice="talking"] .chat-bg { animation: orb-talk 1.3s ease-in-out infinite; }
-@keyframes orb-talk {
-  0%, 100% { scale: 1; }
-  18% { scale: 1.045; }
-  32% { scale: 1.015; }
-  50% { scale: 1.06; }
-  66% { scale: 1.02; }
-  82% { scale: 1.04; }
-}
+   봇이 소리로 말하는 동안(data-voice="talking") 구체 둘레에서 물결이 퍼진다 (구체 자체는 움직이지 않는다).
+   내가 음성 모드로 말하는 동안(listening)은 물결이 느리고 은은하게 */
 .orb-waves {
   position: absolute; top: 50%; left: 50%;
   height: 40%; aspect-ratio: 1; /* 영상 속 구체 크기에 맞춘 값 (.chat-bg 높이 75% 중 구체 부분) */
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
+/* 선 대신 넓은 띠: 안쪽·바깥쪽이 투명하게 흐려지는 반투명 파란 고리라 퍼질 때 은은하다 */
 .orb-waves span {
+  --wave: 0, 124, 252;
+  --wave-alpha: .18;
   position: absolute; inset: 0;
   border-radius: 50%;
-  border: 2px solid rgba(0, 124, 252, .45);
+  background: radial-gradient(
+    closest-side,
+    rgba(var(--wave), 0) 58%,
+    rgba(var(--wave), calc(var(--wave-alpha) * .6)) 72%,
+    rgba(var(--wave), var(--wave-alpha)) 84%,
+    rgba(var(--wave), calc(var(--wave-alpha) * .5)) 93%,
+    rgba(var(--wave), 0) 100%
+  );
+  filter: blur(6px);
   opacity: 0;
 }
-.chat-area[data-voice] .orb-waves span { animation: orb-wave 1.8s cubic-bezier(.2, .6, .35, 1) infinite; }
-.chat-area[data-voice] .orb-waves span:nth-child(2) { animation-delay: .6s; }
-.chat-area[data-voice] .orb-waves span:nth-child(3) { animation-delay: 1.2s; }
-.chat-area[data-voice="listening"] .orb-waves span { animation-duration: 2.6s; border-color: rgba(0, 124, 252, .25); }
-.chat-area[data-voice="listening"] .orb-waves span:nth-child(2) { animation-delay: .87s; }
-.chat-area[data-voice="listening"] .orb-waves span:nth-child(3) { animation-delay: 1.73s; }
+.chat-area[data-voice] .orb-waves span { animation: orb-wave 2.4s cubic-bezier(.25, .6, .35, 1) infinite; }
+.chat-area[data-voice] .orb-waves span:nth-child(2) { animation-delay: .8s; }
+.chat-area[data-voice] .orb-waves span:nth-child(3) { animation-delay: 1.6s; }
+.chat-area[data-voice="listening"] .orb-waves span { --wave-alpha: .11; animation-duration: 3.2s; }
+.chat-area[data-voice="listening"] .orb-waves span:nth-child(2) { animation-delay: 1.07s; }
+.chat-area[data-voice="listening"] .orb-waves span:nth-child(3) { animation-delay: 2.13s; }
 @keyframes orb-wave {
-  0% { transform: scale(.92); opacity: 0; }
-  15% { opacity: 1; }
-  100% { transform: scale(1.65); opacity: 0; }
+  0% { transform: scale(.85); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: scale(1.9); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-area[data-voice] .chat-bg, .chat-area[data-voice] .orb-waves span { animation: none; }
+  .chat-area[data-voice] .orb-waves span { animation: none; }
 }
 
 .chat {
@@ -192,7 +193,7 @@ header .title {
   .chat { transition: none; }
 }
 
-/* 채팅창을 끈 동안 구체 가운데에 뜨는 자막 (봇이 소리로 하는 말). 한 글자씩 적히고 끝에 커서가 깜빡인다 */
+/* 채팅창을 끈 동안 구체 가운데에 뜨는 자막 (봇이 소리로 하는 말). 한 글자씩 적히고, "." 로 끝난 문장 뒤에서 줄을 바꾼다 */
 .voice-caption {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
@@ -206,12 +207,6 @@ header .title {
   font-size: 21px; font-weight: 700; line-height: 1.55; letter-spacing: -.01em; color: var(--text);
 }
 .caption-text.long { font-size: 17px; }
-.caption-caret {
-  display: inline-block; width: 2px; height: 1.05em; margin-left: 3px; vertical-align: -.15em;
-  background: var(--accent); border-radius: 1px;
-}
-.caption-caret.done { animation: caret-blink 1s step-end infinite; }
-@keyframes caret-blink { 50% { opacity: 0; } }
 .caption-dots { display: inline-flex; gap: 6px; }
 .caption-dots span {
   width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
@@ -220,7 +215,7 @@ header .title {
 .caption-dots span:nth-child(2) { animation-delay: .15s; }
 .caption-dots span:nth-child(3) { animation-delay: .3s; }
 @media (prefers-reduced-motion: reduce) {
-  .voice-caption, .caption-caret.done, .caption-dots span { animation: none; }
+  .voice-caption, .caption-dots span { animation: none; }
 }
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;

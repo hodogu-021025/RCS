@@ -25,10 +25,12 @@ function Typewriter({ text }: { text: string }) {
   return (
     <p className={"caption-text" + (chars.length > 70 ? " long" : "")} aria-hidden="true">
       {chars.slice(0, shown).join("")}
-      <span className={"caption-caret" + (done ? " done" : "")} />
     </p>
   );
 }
+
+// "." 로 끝난 문장 뒤에서 줄을 바꾼다. 숫자 속 점(1.8km)은 뒤에 띄어쓰기가 없어 그대로 둔다
+const breakAfterSentences = (text: string) => text.replace(/\.\s+/g, ".\n");
 
 interface Props {
   id: number | null; // 지금 보여 줄 봇 답의 id (바뀌면 다시 적는다)
@@ -48,7 +50,7 @@ export function VoiceCaption({ id, text, thinking }: Props) {
           <span />
         </span>
       ) : (
-        text && <Typewriter key={id} text={text} />
+        text && <Typewriter key={id} text={breakAfterSentences(text)} />
       )}
       {/* 화면 읽기 프로그램에는 한 글자씩이 아니라 문장 전체를 한 번에 알린다 */}
       <p className="sr-only" aria-live="polite">

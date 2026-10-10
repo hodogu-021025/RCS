@@ -597,16 +597,17 @@ describe("OrderChatbot", () => {
   it("채팅창이 꺼져 있으면 봇이 소리로 하는 말만 가운데에 한 글자씩 적히고, 답을 준비하는 동안은 점이 깜빡인다", () => {
     render(<OrderChatbot />);
     const caption = () => document.querySelector(".caption-text")?.textContent ?? "";
-    const full = "안녕하세요! Saylo예요. 무엇을 주문해 드릴까요?";
+    // "." 로 끝난 문장 뒤에서 줄을 바꾼다 ("!"·"?" 는 그대로)
+    const full = "안녕하세요! Saylo예요.\n무엇을 주문해 드릴까요?";
     // 처음에는 비어 있다가 한 글자씩 늘어난다
     expect(caption()).toBe("");
     wait(45 * 5);
     expect(caption()).toBe(full.slice(0, 5));
     wait(10_000);
     expect(caption()).toBe(full);
-    expect(document.querySelector(".caption-caret")).toHaveClass("done");
+    expect(document.querySelector(".caption-caret")).not.toBeInTheDocument(); // 깜빡이는 커서는 없다
     // 화면 읽기 프로그램에는 문장 전체가 한 번에 간다
-    expect(document.querySelector(".voice-caption [aria-live]")).toHaveTextContent(full);
+    expect(document.querySelector(".voice-caption [aria-live]")).toHaveTextContent("안녕하세요! Saylo예요. 무엇을 주문해 드릴까요?");
 
     send("배달");
     expect(document.querySelector(".caption-dots")).toBeInTheDocument();
@@ -616,6 +617,13 @@ describe("OrderChatbot", () => {
     wait(10_000);
     // 선택지까지 읽어 주는 문장 그대로 (사용자가 한 말은 자막에 없다)
     expect(caption()).toBe("어떤 음식을 배달해 드릴까요? 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이 중에서 말씀해 주세요.");
+
+    // 숫자 속 점(1.8km)에서는 줄을 바꾸지 않는다
+    send("간장치킨 1마리 시켜줘");
+    wait(1000);
+    wait(10_000);
+    expect(caption()).toContain("청전 치킨공방 · 1.8km");
+    expect(caption()).toContain("근처 매장을 찾았어요 주문 내역을 확인해 주세요.\n");
   });
 
   it("주문 확인에서 다른 서비스(예매)를 말하면 '응'으로 보지 않고 그 서비스로 넘어간다", () => {
