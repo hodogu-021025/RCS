@@ -75,11 +75,31 @@ docker compose --profile tunnel down          # 터널까지 모두 중지
 
 ## 배포
 
-화면은 `npm run build`로 나온 `frontend/dist/` 정적 파일이고, 로그인·주문·예약 저장과 이메일 인증은 `server/` API 서버가 맡습니다. 가장 간단한 방법은 `docker compose up -d --build` 그대로 서버에 올리는 것입니다 (화면과 API 가 같은 주소에서 동작하고, 데이터는 `saylo-data` 볼륨에 남습니다).
+화면은 `npm run build`로 나온 `frontend/dist/` 정적 파일이고, 로그인·주문·예약 저장과 이메일 인증은 `server/` API 서버가 맡습니다. **정적 호스팅(가비아 웹호스팅, Vercel, Cloudflare Pages 등)에 화면만 올리면 로그인·주문 저장·이메일 인증이 모두 동작하지 않습니다.** Docker 가 도는 리눅스 서버 한 대가 필요합니다 (가비아 클라우드, Oracle Cloud 무료 서버 등).
 
-- 올리기 전에 서버의 `.env` 에 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 와 Resend 설정을 적습니다. 관리자 계정은 서버가 처음 시작할 때 한 번 만듭니다.
-- 정적 호스팅(Vercel 등)에 화면만 올리면 로그인·주문 저장·이메일 인증이 모두 동작하지 않습니다. 그때는 API 서버를 따로 띄우고 그 호스팅에서 `/api/*` 를 API 서버로 넘기도록 설정해야 합니다.
-- 백업은 `saylo-data` 볼륨의 `saylo.db` 파일 하나를 복사하면 됩니다.
+### 서버에 올리기 (Ubuntu 기준, 처음 한 번)
+
+```bash
+# 1) Docker 설치
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER && newgrp docker
+
+# 2) 저장소 받기 (비공개 저장소라 GitHub 로그인이 필요합니다)
+git clone https://github.com/hodogu-021025/RCS.git saylo && cd saylo
+
+# 3) 설정: DOMAIN, ADMIN_USERNAME / ADMIN_PASSWORD, RESEND_API_KEY, MAIL_FROM 을 채운다
+cp .env.example .env && nano .env
+
+# 4) 띄우기 (화면 + API + HTTPS)
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+- 가비아 DNS 관리에서 `sayloorder.com` 의 **A 레코드를 이 서버의 공인 IP** 로 바꿉니다 (`www` 도 같은 IP). 서버의 **80·443 포트**를 방화벽에서 엽니다. 그러면 Caddy 가 Let's Encrypt 인증서를 자동으로 받아 HTTPS 로 서비스합니다 (`deploy/Caddyfile`).
+- 관리자 계정은 서버가 처음 시작할 때 `.env` 값으로 한 번 만듭니다. 나중에 바꾸려면 관리자 화면 대신 DB 를 지우고 다시 시작해야 하니 처음에 잘 정합니다.
+- 코드를 고친 뒤 다시 올리기: `git pull && docker compose -f docker-compose.prod.yml up -d --build`
+- 백업: `docker run --rm -v saylo_saylo-data:/data -v $PWD:/backup alpine cp /data/saylo.db /backup/saylo-$(date +%F).db`
+- 로그: `docker compose -f docker-compose.prod.yml logs -f api` (주문·오류), `… logs -f caddy` (인증서)
+- 로컬에서 운영 구성을 시험하려면 `DOMAIN=localhost docker compose -f docker-compose.prod.yml up -d --build` 뒤 https://localhost (자체 인증서라 브라우저 경고는 정상).
 - 빌드 명령: `npm --prefix frontend run build` (저장소 루트 기준) 또는 `cd frontend && npm run build`
 - 결과물: `frontend/dist`
 - 페이지 이동은 해시 주소(`#/owner`)를 써서 별도 리라이트 설정이 필요 없습니다.
@@ -124,8 +144,10 @@ server/
   mail.mjs                    Resend 메일 발송
   *.test.mjs                  서버 테스트 (node --test)
   Dockerfile
-deploy/nginx.conf             nginx 설정 (/api/ → API 서버)
-docker-compose.yml            로컬 Docker: 화면 + API (+ 터널)
+deploy/nginx.conf             화면 컨테이너의 nginx 설정 (/api/ → API 서버)
+docker-compose.yml            로컬 Docker: 화면 + API (+ 터널) → http://localhost:8080
+docker-compose.prod.yml       운영 배포: 화면 + API + Caddy(HTTPS) — 서버에서 이걸로 띄운다
+deploy/Caddyfile              HTTPS 앞단 설정 (도메인은 .env 의 DOMAIN)
 .env.example                  Resend·관리자 계정 설정 예시 (.env 로 복사해서 사용)
 ```
 

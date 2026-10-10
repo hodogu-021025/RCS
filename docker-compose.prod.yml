@@ -1,0 +1,48 @@
+# 운영 배포용 compose: 화면(nginx) + API(SQLite) + Caddy(HTTPS 자동 발급). 같은 폴더의 .env 를 읽는다.
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml logs -f caddy      (인증서 발급 로그)
+#   docker compose -f docker-compose.prod.yml down               (데이터 볼륨은 남는다)
+# 필요한 .env 값: DOMAIN(예: sayloorder.com), ADMIN_USERNAME, ADMIN_PASSWORD, RESEND_API_KEY, MAIL_FROM
+# 도메인의 A 레코드가 이 서버 IP 를 가리키고 80·443 포트가 열려 있어야 Caddy 가 Let's Encrypt 인증서를 받는다.
+# (로컬 개발용 docker-compose.yml 과는 별개 프로젝트라 같은 PC 에서도 데이터가 섞이지 않는다)
+name: saylo
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN:?DOMAIN 값이 .env 에 없습니다 - 예 sayloorder.com}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - chatbot
+    restart: unless-stopped
+
+  chatbot:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: saylo-chatbot:latest
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    build: ./server
+    image: saylo-api:latest
+    env_file:
+      - path: .env
+        required: true
+    volumes:
+      - saylo-data:/data
+    restart: unless-stopped
+
+volumes:
+  saylo-data:
+  caddy-data:
+  caddy-config:
