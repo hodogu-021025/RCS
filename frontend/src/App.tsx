@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { OrderChatbot } from "./components/OrderChatbot";
 import { RequireRole } from "./pages/RequireRole";
-import { AccountPage, AdminPage, LoginPage, MyOrdersPage, OwnerPage, PrivacyPage, SignupPage } from "./pages/routes";
+import { AccountPage, AdminPage, LoginPage, MyOrdersPage, OwnerPage, PrivacyPage, ResetPasswordPage, SignupPage } from "./pages/routes";
 
 // 화면을 받아 오는 동안 잠깐 보이는 빈 틀 (휴대폰 폭 카드 모양을 유지해 화면이 튀지 않게)
 const PageLoading = () => <div className="dash dash-mobile" aria-busy="true" />;
@@ -19,6 +19,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/reset" element={<ResetPasswordPage />} />
           <Route
             path="/me"
             element={

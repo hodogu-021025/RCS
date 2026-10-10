@@ -9,7 +9,7 @@ import { server, TEST_CODE } from "../test/setup";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
-  const [login, signup, me, owner, admin, privacy, account] = await Promise.all([
+  const [login, signup, me, owner, admin, privacy, account, reset] = await Promise.all([
     import("./LoginPage"),
     import("./SignupPage"),
     import("./MyOrdersPage"),
@@ -17,6 +17,7 @@ vi.mock("./routes", async () => {
     import("./AdminPage"),
     import("./PrivacyPage"),
     import("./AccountPage"),
+    import("./ResetPasswordPage"),
   ]);
   return {
     LoginPage: login.LoginPage,
@@ -26,6 +27,7 @@ vi.mock("./routes", async () => {
     AdminPage: admin.AdminPage,
     PrivacyPage: privacy.PrivacyPage,
     AccountPage: account.AccountPage,
+    ResetPasswordPage: reset.ResetPasswordPage,
   };
 });
 
@@ -43,7 +45,8 @@ const loginAs = async (username: string) => {
 };
 // 테스트 서버의 DB 에 기록을 바로 넣는다
 const seedOrder = (customer: { username: string; name: string }, item = chicken, qty = 1, payment = "토스페이") =>
-  server.db.addOrder({ customer: customer.username, customerName: customer.name, payment, storeId: item.restaurantId, order: makeOrder(item, qty) });
+  server.db.addOrder({ customer: customer.username, customerName: customer.name, payment, storeId: item.restaurantId, order: makeOrder(item, qty, TEST_DELIVERY) });
+const TEST_DELIVERY = { address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" };
 const GUEST = { username: "guest", name: "비회원" };
 const KIM = { username: "customer01", name: "김소비" };
 
@@ -166,6 +169,14 @@ describe("회원가입", () => {
     await waitFor(() => expect(window.location.hash).toBe("#/owner"));
     expect(await screen.findByText("장락반점 · 사장님")).toBeInTheDocument();
     expect(server.db.findUser("banjeom01")).toMatchObject({ role: "owner", storeId: "c1" });
+    // 스스로 가입한 사장님은 관리자 승인 전이라 매장 화면 대신 대기 안내가 보인다
+    expect(screen.getByText("관리자 승인을 기다리고 있어요")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /주문·예약/ })).not.toBeInTheDocument();
+
+    // 관리자가 승인한 뒤 "승인됐는지 확인"을 누르면 매장 화면이 열린다
+    (server.db as unknown as { approveOwner(u: string): boolean }).approveOwner("banjeom01");
+    await click("승인됐는지 확인");
+    expect(await screen.findByRole("tab", { name: /주문·예약/ })).toBeInTheDocument();
   });
 
   it("이메일 인증: 번호를 받으면 5분 타이머가 돌고, 틀리면 안내, 맞으면 인증 완료, 변경하면 다시 인증", async () => {
@@ -468,5 +479,65 @@ describe("계정 관리·회원 탈퇴", () => {
     await logout();
     const res = await fetch(server.base + "/api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
     expect((await res.json()).session).toBeNull();
+  });
+});
+
+describe("사장님 승인 (관리자)", () => {
+  it("승인 대기 사장님이 탭 배지와 목록에 보이고, 승인하면 서버에 반영된다", async () => {
+    server.createAccount({ username: "adminuser", name: "관리자", role: "admin" });
+    const db = server.db as unknown as { createUser(u: object): unknown; findUser(u: string): { approved?: boolean } | null };
+    db.createUser({ username: "waitboss1", passwordHash: "x", name: "대기 사장", email: "wait@example.com", role: "owner", storeId: "p2", approved: false });
+    await loginAs("adminuser");
+    open("#/admin");
+
+    fireEvent.click(await screen.findByRole("tab", { name: /매장·사장님/ }));
+    expect(await screen.findByText("승인 대기 (1)")).toBeInTheDocument();
+    expect(screen.getByText("wait@example.com")).toBeInTheDocument();
+    await click("승인");
+    await waitFor(() => expect(db.findUser("waitboss1")?.approved).toBe(true));
+    await waitFor(() => expect(screen.queryByText(/승인 대기 \(/)).not.toBeInTheDocument());
+  });
+});
+
+describe("로그인 시도 제한", () => {
+  it("같은 아이디로 5번 틀리면 잠시 로그인을 막고 안내한다", async () => {
+    server.createAccount({ ...KIM });
+    open("#/login");
+    for (let i = 0; i < 5; i++) {
+      await screen.findByRole("button", { name: "로그인" }); // 앞 시도가 끝나 버튼이 돌아온 뒤에
+      typeLogin(KIM.username, "wrongpass" + i);
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("아이디 또는 비밀번호가 맞지 않아요"));
+    }
+    await screen.findByRole("button", { name: "로그인" });
+    typeLogin(KIM.username, "password1");
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("로그인을 너무 여러 번 실패했어요"));
+    expect(window.location.hash).toBe("#/login");
+  });
+});
+
+describe("비밀번호 찾기", () => {
+  it("로그인 화면에서 들어가 가입한 이메일로 인증하면 새 비밀번호로 바뀌고 아이디를 알려 준다", async () => {
+    server.createAccount({ ...KIM, email: "kim@example.com" });
+    open("#/login");
+    expect(screen.getByRole("link", { name: "아이디·비밀번호를 잊으셨나요?" })).toHaveAttribute("href", "#/reset");
+    cleanup();
+    open("#/reset");
+
+    fill({ 이메일: "nobody@example.com" });
+    await click("인증번호 받기");
+    expect(await screen.findByText(/가입된 이메일이 아니에요/)).toBeInTheDocument();
+
+    fill({ 이메일: "KIM@example.com" });
+    await click("인증번호 받기");
+    await screen.findByLabelText("인증번호");
+    fill({ 인증번호: TEST_CODE });
+    await click("확인");
+    await screen.findByText("인증 완료");
+    fill({ "새 비밀번호": "brandnew1", "새 비밀번호 확인": "brandnew1" });
+    await click("비밀번호 바꾸기");
+
+    expect(await screen.findByRole("status")).toHaveTextContent(`아이디는 ${KIM.username}이에요`);
+    expect("error" in (await login(KIM.username, "password1"))).toBe(true);
+    expect("session" in (await login(KIM.username, "brandnew1"))).toBe(true);
   });
 });

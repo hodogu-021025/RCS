@@ -56,6 +56,9 @@ export function LoginPage() {
         <a className="btn wide" href="#/signup">
           회원가입
         </a>
+        <a className="link-forgot" href="#/reset">
+          아이디·비밀번호를 잊으셨나요?
+        </a>
         <a className="link-quiet" href="#/chat">
           로그인 없이 챗봇 쓰기
         </a>

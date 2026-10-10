@@ -95,6 +95,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 - 가비아 DNS 관리에서 `sayloorder.com` 의 **A 레코드를 이 서버의 공인 IP** 로 바꿉니다 (`www` 도 같은 IP). 서버의 **80·443 포트**를 방화벽에서 엽니다. 그러면 Caddy 가 Let's Encrypt 인증서를 자동으로 받아 HTTPS 로 서비스합니다 (`deploy/Caddyfile`).
+- 사장님이 회원가입으로 직접 가입하면 관리자 화면(매장·사장님 탭)에서 **승인**해야 매장 주문·예약을 볼 수 있습니다. 관리자가 만든 사장님 계정은 바로 쓸 수 있습니다.
 - 관리자 계정은 서버가 처음 시작할 때 `.env` 값으로 한 번 만듭니다. 나중에 바꾸려면 관리자 화면 대신 DB 를 지우고 다시 시작해야 하니 처음에 잘 정합니다.
 - 코드를 고친 뒤 다시 올리기: `git pull && docker compose -f docker-compose.prod.yml up -d --build`
 - 백업: `docker run --rm -v saylo_saylo-data:/data -v $PWD:/backup alpine cp /data/saylo.db /backup/saylo-$(date +%F).db`

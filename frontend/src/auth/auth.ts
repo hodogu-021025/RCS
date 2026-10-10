@@ -11,6 +11,7 @@ export interface Session {
   role: Role;
   name: string;
   storeId?: string; // 사장님만
+  approved?: boolean; // 사장님만: 관리자가 승인했는지 (스스로 가입하면 승인 전에는 매장 정보를 볼 수 없다)
 }
 
 export const ROLE_LABEL: Record<Role, string> = { user: "소비자", owner: "사장님", admin: "관리자" };
@@ -55,6 +56,9 @@ onUnauthorized(() => {
 export const resetAuth = () => setState({ session: null, loaded: true });
 
 // 앱이 열릴 때 한 번: 저장된 토큰으로 세션을 되살린다
+// 서버에서 세션을 다시 받아 온다 (승인 대기 중인 사장님이 승인됐는지 확인할 때)
+export const refreshSession = () => restoreSession();
+
 export async function restoreSession() {
   if (!getToken()) return setState({ session: null, loaded: true });
   try {
@@ -89,6 +93,21 @@ export async function logout() {
   setToken(null);
   setState({ session: null, loaded: true });
   if (token) await api("POST", "/api/auth/logout", {}, { token }).catch(() => {});
+}
+
+// 비밀번호 찾기: 이메일 인증 증표로 새 비밀번호를 정한다. 성공하면 그 계정의 아이디를 돌려준다
+export async function resetPassword(input: { email: string; proof: string | null; password: string; passwordConfirm: string }): Promise<{ username: string } | { error: string }> {
+  const error =
+    (!input.proof ? "이메일 인증을 마쳐 주세요." : null) ??
+    passwordError(input.password) ??
+    (input.password !== input.passwordConfirm ? "비밀번호가 서로 달라요." : null);
+  if (error) return { error };
+  try {
+    const r = await api<{ username: string }>("POST", "/api/auth/reset", { ...input, email: normalizeEmail(input.email) });
+    return { username: r.username };
+  } catch (e) {
+    return { error: (e as ApiError).message };
+  }
 }
 
 // 로그인 화면에 한 번 보여 줄 안내 (예: 탈퇴 완료). 읽으면 지운다

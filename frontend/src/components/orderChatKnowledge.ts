@@ -19,6 +19,7 @@ export interface Order {
   unit: string; // 마리·판·인분
   price: number; // 결제 금액
   address?: string; // 배달지
+  phone?: string; // 가게가 연락할 전화번호
   storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
 }
 
@@ -32,7 +33,6 @@ export interface PaymentMethod {
   themeText: string;
 }
 
-export const ADDRESS = "제천시 장락동 제천빌라 331호";
 export const PAYMENTS: PaymentMethod[] = [
   { id: "card", label: "신용카드", icon: "카드", theme: "#1f2937", themeText: "#fff" },
   { id: "kakao", label: "카카오페이", icon: "K", theme: "#fee500", themeText: "#3c1e1e" },
@@ -187,7 +187,8 @@ export function quantityQuestion(item: DeliveryItem, lead?: string): string {
   return `${lead ?? info}\n몇 ${item.unit} 주문할까요?`;
 }
 
-export function makeOrder(item: DeliveryItem, qty: number): Order {
+// delivery: 손님이 알려 준 배달지·연락처 (없으면 주문서에 비워 둔다. 챗봇은 받은 뒤에만 주문서를 만든다)
+export function makeOrder(item: DeliveryItem, qty: number, delivery?: { address: string; phone: string }): Order {
   const store = restaurantById(item.restaurantId);
   return {
     store: { name: store.name, distance: km(store.distanceKm) },
@@ -196,7 +197,7 @@ export function makeOrder(item: DeliveryItem, qty: number): Order {
     qty,
     unit: item.unit,
     price: item.price * qty,
-    address: ADDRESS,
+    ...(delivery ? { address: delivery.address, phone: delivery.phone } : {}),
   };
 }
 
@@ -491,7 +492,8 @@ export function orderCardRows(order: Order): OrderRow[] {
     { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
     { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
     { label: "가격", value: won(order.price), emphasis: true },
-    { label: "위치", value: order.address ?? "" },
+    { label: "배달지", value: order.address ?? "" },
+    ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
   ];
 }
 
@@ -501,6 +503,7 @@ export function orderSummaryRows(order: Order): OrderRow[] {
     { label: "상품", value: `${order.item} ${order.qty}${order.unit}` },
     { label: "매장", value: order.store.name },
     { label: "배달지", value: order.address ?? "" },
+    ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
   ];
 }
 

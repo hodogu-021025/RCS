@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { PRIVACY_VERSION, createApp } from "./app.mjs";
+import { LOGIN_MAX_PER_IP, LOGIN_MAX_PER_USER, LOGIN_WINDOW_MS, PRIVACY_VERSION, createApp } from "./app.mjs";
+import { normalizePhone } from "./contact.mjs";
 import { WITHDRAWN, openDb } from "./db.mjs";
 import { hashPassword } from "./auth.mjs";
 import { createVerifier } from "./verification.mjs";
@@ -11,13 +12,14 @@ let server;
 let base;
 let sent; // 가짜로 보낸 메일 [{ email, code }]
 let db;
+let clock = Date.now(); // 로그인 제한 시간을 넘길 때 앞으로 돌린다
 
 before(async () => {
   db = openDb(":memory:");
   sent = [];
   const verifier = createVerifier({ sendMail: async (email, code) => void sent.push({ email, code }), generateCode: () => "123456" });
   const mailer = { mode: "dev-console", sendMail: verifier.sendMail, describe: "test" };
-  server = http.createServer(createApp({ db, verifier, mailer }));
+  server = http.createServer(createApp({ db, verifier, mailer, now: () => clock }));
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -46,7 +48,7 @@ async function signup({ role = "user", username, email, storeId, name = "테스�
   return r.body.token;
 }
 
-const chicken = { store: { name: "청전 치킨공방", distance: "1.8km" }, storeId: "h3", item: "간장치킨", qty: 2, unit: "마리", price: 40000, address: "제천시 장락동" };
+const chicken = { store: { name: "청전 치킨공방", distance: "1.8km" }, storeId: "h3", item: "간장치킨", qty: 2, unit: "마리", price: 40000, address: "제천시 장락동", phone: "010-1234-5678" };
 
 describe("회원가입·로그인", () => {
   it("인증번호를 받고 확인한 증표로만 가입되고, 가입하면 바로 로그인된다", async () => {
@@ -104,7 +106,8 @@ describe("회원가입·로그인", () => {
     // 증표는 실패한 시도에서도 쓰였으므로 다시 인증한다
     const token = await signup({ role: "owner", username: "bossbanjeom", email: "owner2@example.com", storeId: "c1", name: "김사장" });
     const me = await call("GET", "/api/auth/me", undefined, token);
-    assert.deepEqual(me.body.session, { username: "bossbanjeom", role: "owner", name: "김사장", storeId: "c1" });
+    // 스스로 가입한 사장님은 관리자 승인 전이다
+    assert.deepEqual(me.body.session, { username: "bossbanjeom", role: "owner", name: "김사장", storeId: "c1", approved: false });
   });
 });
 
@@ -116,6 +119,7 @@ describe("주문·예약과 권한", () => {
     db.createUser({ username: "adminuser", passwordHash: (await import("./auth.mjs")).hashPassword("password1"), name: "관리자", role: "admin" });
     admin = (await call("POST", "/api/auth/login", { username: "adminuser", password: "password1" })).body.token;
     ownerH3 = await signup({ role: "owner", username: "chickenboss", email: "h3@example.com", storeId: "h3", name: "치킨 사장" });
+    db.approveOwner("chickenboss");
     customer = await signup({ username: "customer01", email: "c01@example.com", name: "김소비" });
   });
 
@@ -230,6 +234,109 @@ describe("개인정보 수집·이용 동의", () => {
   it("관리자가 만든 사장님 계정에는 동의 기록이 없다", () => {
     db.createUser({ username: "byadmin01", passwordHash: "x", name: "관리자가 만듦", role: "owner", storeId: "c2" });
     assert.deepEqual(db.privacyConsent("byadmin01"), { version: null, agreedAt: null });
+  });
+});
+
+describe("사장님 승인", () => {
+  it("스스로 가입한 사장님은 승인 전에 매장 주문·예약·설정에 접근할 수 없고, 관리자가 승인하면 열린다", async () => {
+    db.createUser({ username: "approver01", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
+    const admin = (await call("POST", "/api/auth/login", { username: "approver01", password: "password1" })).body.token;
+    const owner = await signup({ role: "owner", username: "pendingboss", email: "pending@example.com", storeId: "p2", name: "대기 사장" });
+
+    for (const [method, path, body] of [
+      ["GET", "/api/orders"],
+      ["GET", "/api/reservations"],
+      ["PATCH", "/api/stores/p2/settings", { hours: "10:00 - 22:00" }],
+    ]) {
+      const r = await call(method, path, body, owner);
+      assert.equal(r.status, 403, path);
+      assert.match(r.body.error, /관리자 승인을 기다리고 있어요/);
+    }
+    // 관리자 목록에 승인 대기로 보인다
+    const listed = (await call("GET", "/api/owners", undefined, admin)).body.find((o) => o.username === "pendingboss");
+    assert.equal(listed.approved, false);
+    assert.equal((await call("POST", "/api/owners/pendingboss/approve", {}, owner)).status, 403);
+    assert.equal((await call("POST", "/api/owners/nobody123/approve", {}, admin)).status, 404);
+
+    assert.equal((await call("POST", "/api/owners/pendingboss/approve", {}, admin)).body.approved, true);
+    assert.equal((await call("GET", "/api/orders", undefined, owner)).status, 200);
+    assert.equal((await call("GET", "/api/auth/me", undefined, owner)).body.session.approved, true);
+  });
+
+  it("관리자가 만든 사장님 계정은 바로 승인된 상태다", async () => {
+    const admin = (await call("POST", "/api/auth/login", { username: "approver01", password: "password1" })).body.token;
+    const made = await call("POST", "/api/owners", { username: "madeboss01", password: "password1", name: "만든 사장", storeId: "m1" }, admin);
+    assert.equal(made.body.approved, true);
+  });
+});
+
+describe("로그인 시도 제한", () => {
+  it("한 아이디로 5번 틀리면 맞는 비밀번호도 잠시 막고, 시간이 지나면 다시 된다", async () => {
+    db.createUser({ username: "lockeduser", passwordHash: hashPassword("password1"), name: "잠김", role: "user" });
+    for (let i = 0; i < LOGIN_MAX_PER_USER; i++) {
+      assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "wrongpass" + i }, undefined, `10.1.0.${i}`)).status, 401);
+    }
+    const locked = await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.1.1.1");
+    assert.equal(locked.status, 429);
+    assert.match(locked.body.error, /15분 뒤에 다시 시도/);
+    assert.ok(locked.body.retryAfter > 0);
+
+    clock += LOGIN_WINDOW_MS;
+    assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.1.1.1")).status, 200);
+  });
+
+  it("한 IP 가 여러 아이디로 계속 틀리면 그 IP 를 잠시 막는다", async () => {
+    for (let i = 0; i < LOGIN_MAX_PER_IP; i++) {
+      await call("POST", "/api/auth/login", { username: `guessuser${i}`, password: "wrongpass" }, undefined, "10.2.2.2");
+    }
+    assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.2.2.2")).status, 429);
+    assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.2.2.3")).status, 200);
+    clock += LOGIN_WINDOW_MS;
+  });
+});
+
+describe("비밀번호 찾기", () => {
+  it("가입된 이메일로 인증하면 새 비밀번호로 바뀌고, 아이디를 알려 주며, 다른 기기 로그인은 끊긴다", async () => {
+    const oldToken = await signup({ username: "forgetful1", email: "forget@example.com", name: "잊음" });
+    assert.match((await call("POST", "/api/auth/reset/send-code", { email: "nobody@example.com" }, undefined, "10.3.0.1")).body.error, /가입된 이메일이 아니에요/);
+
+    assert.equal((await call("POST", "/api/auth/reset/send-code", { email: "Forget@Example.com" }, undefined, "10.3.0.2")).status, 200);
+    assert.deepEqual(sent.at(-1), { email: "forget@example.com", code: "123456" });
+    const proof = (await call("POST", "/api/email/verify", { email: "forget@example.com", code: "123456" })).body.proof;
+
+    const base = { email: "forget@example.com", proof, password: "newpass99", passwordConfirm: "newpass99" };
+    assert.match((await call("POST", "/api/auth/reset", { ...base, passwordConfirm: "different" })).body.error, /서로 달라요/);
+    assert.match((await call("POST", "/api/auth/reset", { ...base, proof: "fake" })).body.error, /이메일 인증/);
+    const done = await call("POST", "/api/auth/reset", base); // 틀린 시도 뒤에도 증표는 남아 있다
+    assert.deepEqual(done.body, { ok: true, username: "forgetful1" });
+
+    assert.equal((await call("GET", "/api/auth/me", undefined, oldToken)).body.session, null);
+    assert.equal((await call("POST", "/api/auth/login", { username: "forgetful1", password: "password1" })).status, 401);
+    assert.equal((await call("POST", "/api/auth/login", { username: "forgetful1", password: "newpass99" })).status, 200);
+    assert.equal((await call("POST", "/api/auth/reset", base)).status, 400); // 증표는 한 번만
+  });
+});
+
+describe("배달 주소·연락처", () => {
+  it("주소와 전화번호가 있어야 주문되고, 전화번호는 한 모양으로 맞춘다", async () => {
+    // 앞 테스트가 간장치킨을 품절로 남겨 두므로 옛날통닭으로 주문한다
+    const tongdak = { ...chicken, storeId: "h1", item: "옛날통닭" };
+    const noAddress = await call("POST", "/api/orders", { order: { ...tongdak, address: "  " }, payment: "카드" });
+    assert.match(noAddress.body.error, /배달 받을 주소/);
+    const badPhone = await call("POST", "/api/orders", { order: { ...tongdak, phone: "12345" }, payment: "카드" });
+    assert.match(badPhone.body.error, /전화번호/);
+    const ok = await call("POST", "/api/orders", { order: { ...tongdak, phone: "01098765432" }, payment: "카드" });
+    assert.equal(ok.body.order.phone, "010-9876-5432");
+    assert.equal(ok.body.order.address, "제천시 장락동");
+  });
+
+  it("전화번호 모양 맞추기", () => {
+    assert.equal(normalizePhone("010 1234 5678"), "010-1234-5678");
+    assert.equal(normalizePhone("+82 10-1234-5678"), "010-1234-5678");
+    assert.equal(normalizePhone("0431234567"), "043-123-4567");
+    assert.equal(normalizePhone("021234567"), "02-123-4567");
+    assert.equal(normalizePhone("0212345678"), "02-1234-5678");
+    for (const bad of ["", "1234", "010-123", "abc", "0101234567890"]) assert.equal(normalizePhone(bad), null, bad);
   });
 });
 

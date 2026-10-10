@@ -4,7 +4,7 @@ function emailHtml(code) {
 <div style="max-width:420px;margin:0 auto;background:#fff;border-radius:20px;padding:32px 28px">
   <div style="font-size:24px;font-weight:900;color:#007cfc;letter-spacing:-0.03em">Saylo</div>
   <p style="margin:20px 0 8px;font-size:16px;font-weight:700">이메일 인증번호</p>
-  <p style="margin:0 0 20px;font-size:14px;color:#64748b;line-height:1.6">회원가입 화면에 아래 번호를 입력해 주세요. 번호는 5분 동안 쓸 수 있어요.</p>
+  <p style="margin:0 0 20px;font-size:14px;color:#64748b;line-height:1.6">Saylo 화면에 아래 번호를 입력해 주세요. 번호는 5분 동안 쓸 수 있어요.</p>
   <div style="padding:18px 0;border-radius:14px;background:#f3f6fb;text-align:center;font-size:32px;font-weight:800;letter-spacing:8px;color:#007cfc">${code}</div>
   <p style="margin:20px 0 0;font-size:12px;color:#94a3b8;line-height:1.6">직접 요청하지 않았다면 이 메일은 무시하셔도 됩니다.</p>
 </div></body></html>`;
@@ -23,7 +23,7 @@ export function createMailer({ apiKey = "", from = "Saylo <onboarding@resend.dev
         to: [email],
         subject: "[Saylo] 이메일 인증번호",
         html: emailHtml(code),
-        text: `Saylo 이메일 인증번호: ${code}\n회원가입 화면에 입력해 주세요. 5분 동안 쓸 수 있어요.`,
+        text: `Saylo 이메일 인증번호: ${code}\nSaylo 화면에 입력해 주세요. 5분 동안 쓸 수 있어요.`,
       }),
       signal: AbortSignal.timeout(10_000),
     });

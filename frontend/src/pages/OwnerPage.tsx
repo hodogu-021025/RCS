@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSession } from "../auth/auth";
+import { refreshSession, useSession } from "../auth/auth";
 import { DELIVERY_MENU, formatDate, restaurantById, won } from "../components/orderChatKnowledge";
 import {
   setMenuItem,
@@ -57,6 +57,33 @@ function NewOrderToast({ record }: { record: OrderRecord }) {
   );
 }
 
+// 스스로 가입한 사장님은 관리자가 승인하기 전까지 매장 정보를 볼 수 없다. 승인되면 자동으로 넘어간다 (20초마다 확인)
+function PendingApproval({ storeName }: { storeName: string }) {
+  const [checking, setChecking] = useState(false);
+  useEffect(() => {
+    const t = window.setInterval(() => void refreshSession(), 20_000);
+    return () => window.clearInterval(t);
+  }, []);
+  async function checkNow() {
+    setChecking(true);
+    await refreshSession();
+    setChecking(false);
+  }
+  return (
+    <DashLayout title={`${storeName} · 사장님`}>
+      <section className="dash-section pending-approval">
+        <h2>관리자 승인을 기다리고 있어요</h2>
+        <p>
+          {storeName}의 사장님이 맞는지 관리자가 확인하고 있어요. 승인되면 이 화면에서 바로 주문·예약을 받고 영업시간·메뉴를 관리할 수 있어요.
+        </p>
+        <button className="btn primary" type="button" onClick={checkNow} disabled={checking}>
+          {checking ? "확인하는 중…" : "승인됐는지 확인"}
+        </button>
+      </section>
+    </DashLayout>
+  );
+}
+
 export function OwnerPage() {
   const session = useSession()!;
   const db = useDb();
@@ -75,6 +102,8 @@ export function OwnerPage() {
   const isNew = seenAtOpen !== undefined && latest && latest.id !== seenAtOpen && latest.status === "접수";
 
   const shownOrders = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+
+  if (session.approved === false) return <PendingApproval storeName={store.name} />;
 
   return (
     <DashLayout title={`${store.name} · 사장님`}>

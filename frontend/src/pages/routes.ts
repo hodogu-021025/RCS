@@ -10,5 +10,6 @@ export const SignupPage = page(() => import("./SignupPage"), "SignupPage");
 export const MyOrdersPage = page(() => import("./MyOrdersPage"), "MyOrdersPage");
 export const OwnerPage = page(() => import("./OwnerPage"), "OwnerPage");
 export const AdminPage = page(() => import("./AdminPage"), "AdminPage");
+export const ResetPasswordPage = page(() => import("./ResetPasswordPage"), "ResetPasswordPage");
 export const AccountPage = page(() => import("./AccountPage"), "AccountPage");
 export const PrivacyPage = page(() => import("./PrivacyPage"), "PrivacyPage");

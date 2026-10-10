@@ -4,6 +4,19 @@ import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { useSession } from "../auth/auth";
 import { addOrder, addReservation, cancelMyOrder, fetchMyOrders, getReceipts, useDb, type OrderRecord } from "../data/db";
+import {
+  addressError,
+  addressPrompt,
+  cleanAddress,
+  deliveryChange,
+  hasDelivery,
+  isStopDelivery,
+  loadDelivery,
+  normalizePhone,
+  phonePrompt,
+  saveDelivery,
+  type DeliveryInfo,
+} from "./delivery";
 import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
@@ -90,11 +103,12 @@ import {
 // 배달: idle → menu(메뉴 대기) → qty(수량 대기) → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
 // 식당: idle → food(음식 종류 대기) → restaurant(식당 목록에서 선택 대기)
 //      → rsvDate(날짜) → rsvTime(시간) → rsvPeople(인원) → rsvConfirm(예약 확인) → idle
+// 배달지: 주소·연락처를 모르면 주문서 전에 address(주소) → phone(연락처)를 묻는다
 // 그 밖: info(어느 가게 정보인지 고르는 중), cancelConfirm(내 주문 취소 확인)
 type Stage =
   | "idle" | "menu" | "qty" | "confirm" | "pay" | "paying" | "done"
   | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm"
-  | "info" | "cancelConfirm";
+  | "info" | "cancelConfirm" | "address" | "phone";
 
 // 예약 정보는 날짜 → 시간 → 인원 순으로 채워진다
 type ReservationDraft = Partial<Reservation> & { restaurant: Restaurant };
@@ -268,6 +282,9 @@ export function OrderChatbot() {
   const [lastItem, setLastItem] = useState<DeliveryItem | null>(null);
   // 취소할지 묻고 있는 내 주문
   const [cancelTarget, setCancelTarget] = useState<OrderRecord | null>(null);
+  // 배달지·연락처 (이 브라우저에 기억해 둔 것). 모르는 동안 고른 메뉴·수량은 pendingOrder 에 두고 주소부터 묻는다
+  const [delivery, setDelivery] = useState<Partial<DeliveryInfo>>(loadDelivery);
+  const [pendingOrder, setPendingOrder] = useState<{ item: DeliveryItem; qty: number } | null>(null);
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -293,6 +310,22 @@ export function OrderChatbot() {
   const session = useSession();
   // 사장님이 바꾼 영업시간·품절과 인기 통계를 서버에서 받아 온다 (메뉴 버튼·추천 순서와 예약 시간에 반영)
   useDb(["settings", "popular"]);
+
+  // 로그인한 고객님이 이 브라우저에서 처음 주문하면, 다른 기기에서 했던 지난 주문의 배달지·연락처를 이어서 쓴다
+  const knownDelivery = hasDelivery(delivery);
+  useEffect(() => {
+    if (session?.role !== "user" || knownDelivery) return;
+    let alive = true;
+    fetchMyOrders()
+      .then((list) => {
+        const last = list.find((o) => o.order.address && o.order.phone);
+        if (alive && last) setDelivery((d) => ({ address: d.address ?? last.order.address, phone: d.phone ?? last.order.phone }));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [session?.role, session?.username, knownDelivery]);
 
   useEffect(() => {
     if (!notice) return;
@@ -436,13 +469,52 @@ export function OrderChatbot() {
     botReply(() => push(...(opts.lead ?? []), { role: "bot", kind: "restaurants", foodLabel, list, heading: opts.heading }), 900);
   }
 
-  function startOrder(item: DeliveryItem, qty: number) {
-    const next = makeOrder(item, qty);
+  // 메뉴·수량이 정해지면 주문서로. 배달지·연락처를 아직 모르면 먼저 묻고, 다 받으면 이어서 주문서를 보여 준다
+  function startOrder(item: DeliveryItem, qty: number, info: Partial<DeliveryInfo> = delivery) {
     setPendingItem(null);
     setLastItem(item);
+    if (!hasDelivery(info)) {
+      setPendingOrder({ item, qty });
+      askDelivery(info.address ? "phone" : "address");
+      return;
+    }
+    const next = makeOrder(item, qty, info);
+    setPendingOrder(null);
     setOrder(next);
     setStage("confirm");
     botReply(() => push(botText("근처 매장을 찾았어요"), { role: "bot", kind: "order", order: next }), 1000);
+  }
+
+  function askDelivery(what: "address" | "phone", lead?: string) {
+    setStage(what);
+    botReply(() => push(botPrompt(what === "address" ? addressPrompt(lead) : phonePrompt(lead))));
+  }
+
+  // 주소·연락처 답. 받은 것은 이 브라우저에 기억해 두고, 둘 다 있으면 기다리던 주문서로 넘어간다
+  function answerDelivery(text: string) {
+    if (isStopDelivery(text)) {
+      setPendingOrder(null);
+      cancelDelivery();
+      return;
+    }
+    let info: Partial<DeliveryInfo>;
+    if (stage === "address") {
+      const error = addressError(text);
+      if (error) return askDelivery("address", error);
+      info = { ...delivery, address: cleanAddress(text) };
+    } else {
+      const phone = normalizePhone(text);
+      if (!phone) return askDelivery("phone", "전화번호를 잘 모르겠어요. 숫자로 알려 주세요.");
+      info = { ...delivery, phone };
+    }
+    setDelivery(info);
+    saveDelivery(info);
+    if (!info.phone) return askDelivery("phone");
+    if (pendingOrder) startOrder(pendingOrder.item, pendingOrder.qty, info);
+    else {
+      setStage("idle");
+      botReply(() => push(botText("배달지를 저장했어요. 다음 주문부터 이 주소로 보내 드릴게요.")));
+    }
   }
 
   const rangeLead = (item: DeliveryItem) => `1${item.unit}부터 ${MAX_QTY}${item.unit}까지 주문할 수 있어요.`;
@@ -706,8 +778,11 @@ export function OrderChatbot() {
       }
       const said = parseQuantity(text);
       const qty = qtyInRange(said) ? said : last.order.qty;
+      // 지난 주문의 배달지로 보낸다 (없으면 기억해 둔 배달지, 그것도 없으면 주소부터 묻는다)
+      const info: Partial<DeliveryInfo> = last.order.address && last.order.phone ? { address: last.order.address, phone: last.order.phone } : delivery;
       return () => {
-        const next = makeOrder(item, qty);
+        if (!hasDelivery(info)) return startOrder(item, qty, info);
+        const next = makeOrder(item, qty, info);
         setLastItem(item);
         setOrder(next);
         setStage("confirm");
@@ -786,7 +861,22 @@ export function OrderChatbot() {
     // 주문 확인·결제수단 단계에서 빠른 메뉴(배달·식당 등)를 고르면 주문을 접고 아래 일반 처리로 넘어간다
     const switchingMenu = (stage === "confirm" || stage === "pay") && !!quickMenuReply(text);
 
+    // 배달지·연락처를 묻는 중
+    if (stage === "address" || stage === "phone") {
+      answerDelivery(text);
+      return;
+    }
+
     if (stage === "confirm" && order && !switchingMenu) {
+      // "주소 바꿔줘", "연락처 바꿀래": 그 항목만 다시 묻고 같은 메뉴·수량으로 주문서를 다시 만든다
+      const change = deliveryChange(text);
+      const ordered = availableDeliveryMenu().find((d) => d.restaurantId === order.storeId && d.name === order.item);
+      if (change && ordered) {
+        setPendingOrder({ item: ordered, qty: order.qty });
+        setOrder(null);
+        askDelivery(change, change === "address" ? "새 배달지로 다시 만들어 드릴게요." : "새 연락처로 다시 만들어 드릴게요.");
+        return;
+      }
       // "3마리로 해줘": 수량만 바꿔 주문서를 다시 보여 준다 ("해줘"가 들어 있어도 '응'보다 먼저 본다)
       const newQty = parseQuantity(text);
       const item = availableDeliveryMenu().find((d) => d.restaurantId === order.storeId && d.name === order.item);
@@ -1134,6 +1224,7 @@ export function OrderChatbot() {
     setRsv(null);
     setRsvSlots({});
     setCancelTarget(null);
+    setPendingOrder(null);
   }
 
   // 배달·식당의 첫 질문으로
@@ -1180,6 +1271,7 @@ export function OrderChatbot() {
     setLastPlace(null);
     setLastItem(null);
     setCancelTarget(null);
+    setPendingOrder(null);
     inputRef.current?.focus();
   }
 
@@ -1251,7 +1343,8 @@ export function OrderChatbot() {
   const activePaymentId = stage === "pay" ? lastIdOf(messages, ["payment"]) : undefined;
   const activeRestaurantsId = stage === "restaurant" || stage === "info" ? lastIdOf(messages, ["restaurants"]) : undefined;
 
-  function confirmActions(id: number) {
+  // delivery: 배달 주문서에는 "배달지 변경"도 붙인다
+  function confirmActions(id: number, delivery = false) {
     const active = id === activeConfirmId;
     return (
       <div className="actions">
@@ -1261,6 +1354,11 @@ export function OrderChatbot() {
         <button type="button" disabled={!active} onClick={() => handle("취소할게")}>
           취소
         </button>
+        {delivery && (
+          <button type="button" className="quiet" disabled={!active} onClick={() => handle("배달지 변경")}>
+            배달지 변경
+          </button>
+        )}
       </div>
     );
   }
@@ -1323,7 +1421,7 @@ export function OrderChatbot() {
                 </dl>
               </div>
               <div style={{ marginTop: 10 }}>{ORDER_CARD_QUESTION}</div>
-              {confirmActions(m.id)}
+              {confirmActions(m.id, true)}
             </div>
           </>
         );

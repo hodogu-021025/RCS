@@ -11,7 +11,7 @@ import { SIGNUP_CONSENT } from "./privacyPolicy";
 type SignupRole = SignupInput["role"];
 const ROLES: { value: SignupRole; label: string; hint: string }[] = [
   { value: "user", label: "고객님", hint: "챗봇으로 주문·예약하고 내 주문 내역을 볼 수 있어요." },
-  { value: "owner", label: "사장님", hint: "내 매장의 주문·예약을 받고 영업시간·메뉴를 관리해요." },
+  { value: "owner", label: "사장님", hint: "내 매장의 주문·예약을 받고 영업시간·메뉴를 관리해요. 가입 후 관리자가 확인하고 승인하면 시작할 수 있어요." },
 ];
 
 // 회원가입: 고객님 / 사장님 중 고르고 계정을 만든다. 가입하면 바로 로그인돼 역할에 맞는 화면으로 간다

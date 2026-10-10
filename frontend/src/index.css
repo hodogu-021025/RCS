@@ -417,7 +417,7 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 
 /* 응 해줘 / 취소 */
 /* 두 버튼이 같은 너비로 말풍선 가로를 꽉 채워 옆에 빈 공간이 남지 않게 한다 */
-.actions { display: flex; gap: 6px; margin-top: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .actions button {
   flex: 1 1 0; min-width: 88px;
   height: 38px; padding: 0 16px;
@@ -431,6 +431,9 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .actions button.primary { border-color: transparent; background: var(--accent); color: #fff; }
 .actions button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
 .actions button:disabled { opacity: .4; cursor: default; }
+/* 주문서의 "배달지 변경": 두 버튼 아래 한 줄을 차지하는 글자 버튼 */
+.actions button.quiet { flex: 1 1 100%; height: 30px; border: none; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.actions button.quiet:hover:not(:disabled) { background: none; color: var(--accent); }
 
 /* 결제수단·식당 목록: 같은 모양의 선택 항목 */
 .pay, .places { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }

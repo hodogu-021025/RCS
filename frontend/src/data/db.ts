@@ -44,6 +44,7 @@ export interface Account {
   name: string;
   email?: string;
   storeId?: string; // 사장님
+  approved?: boolean; // 사장님: 관리자 승인 여부
   createdAt: number;
 }
 
@@ -201,6 +202,12 @@ export async function setMenuItem(storeId: string, itemId: string, itemPatch: { 
 
 export async function addOwner(account: { username: string; password: string; name: string; storeId: string }) {
   await api("POST", "/api/owners", account);
+  await refresh(["accounts"]);
+}
+
+// 스스로 가입한 사장님을 승인한다 (거절은 removeOwner)
+export async function approveOwner(username: string) {
+  await api("POST", `/api/owners/${encodeURIComponent(username)}/approve`, {});
   await refresh(["accounts"]);
 }
 

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
 import { RESTAURANTS, formatDate, withStoreSettings, won } from "../components/orderChatKnowledge";
-import { addOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
+import { addOwner, approveOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
 import { PasswordField } from "./PasswordField";
@@ -45,7 +45,8 @@ const rsvToRow = (r: ReservationRecord): Row => ({
 });
 
 export function AdminPage() {
-  const db = useDb();
+  const db = useDb(["settings", "records", "accounts"]);
+  const waiting = db.owners.filter((o) => o.approved === false).length;
   const [tab, setTab] = useState<Tab>("all");
   const rows = [...db.orders.map(toRow), ...db.reservations.map(rsvToRow)].sort((a, b) => b.createdAt - a.createdAt);
 
@@ -54,7 +55,7 @@ export function AdminPage() {
       <Tabs
         tabs={[
           { key: "all", label: "전체 현황" },
-          { key: "stores", label: "매장·사장님" },
+          { key: "stores", label: "매장·사장님", badge: waiting },
           { key: "stats", label: "통계" },
           { key: "users", label: "사용자" },
         ]}
@@ -145,8 +146,47 @@ function StoresTab() {
     setError(null);
   }
 
+  const waiting = owners.filter((o) => o.approved === false);
+  const storeName = (id?: string) => RESTAURANTS.find((r) => r.id === id)?.name ?? id;
+
   return (
     <>
+      {waiting.length > 0 && (
+        <section className="dash-section">
+          <h2>승인 대기 ({waiting.length})</h2>
+          <p className="hint">스스로 가입한 사장님이에요. 그 매장의 사장님이 맞는지 확인한 뒤 승인하세요. 승인 전에는 매장 주문·예약을 볼 수 없어요.</p>
+          <ul className="record-list">
+            {waiting.map((o) => (
+              <li key={o.username} className="record pending">
+                <div className="record-head">
+                  <b>{storeName(o.storeId)}</b>
+                  <span className="status s-접수">승인 대기</span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>아이디</dt>
+                    <dd>
+                      {o.username} ({o.name})
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>이메일</dt>
+                    <dd>{o.email ?? "-"}</dd>
+                  </div>
+                </dl>
+                <div className="record-actions">
+                  <button type="button" className="btn primary small" onClick={() => void approveOwner(o.username)}>
+                    승인
+                  </button>
+                  <button type="button" className="btn small" onClick={() => void removeOwner(o.username)}>
+                    거절(삭제)
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section className="dash-section">
         <h2>매장과 사장님 계정</h2>
         <ul className="record-list">
@@ -165,7 +205,13 @@ function StoresTab() {
                   </div>
                   <div>
                     <dt>사장님</dt>
-                    <dd>{mine.length ? mine.map((o) => `${o.username} (${o.name})`).join(", ") : <span className="muted">없음</span>}</dd>
+                    <dd>
+                      {mine.length ? (
+                        mine.map((o) => `${o.username} (${o.name})${o.approved === false ? " · 승인 대기" : ""}`).join(", ")
+                      ) : (
+                        <span className="muted">없음</span>
+                      )}
+                    </dd>
                   </div>
                 </dl>
                 {removable.length > 0 && (

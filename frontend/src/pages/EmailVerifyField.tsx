@@ -6,6 +6,7 @@ interface Props {
   onEmailChange: (email: string) => void;
   verifiedEmail: string | null; // 인증을 마친 주소 (정규화된 값). 입력값과 같아야 인증된 것
   onVerified: (result: { email: string; proof: string } | null) => void; // 인증을 마친 주소와 증표 (회원가입에 같이 보낸다)
+  send?: typeof sendVerificationCode; // 인증번호를 보내는 API (기본: 회원가입용. 비밀번호 찾기는 sendResetCode)
 }
 
 const mmss = (ms: number) => {
@@ -21,7 +22,7 @@ const CheckIcon = () => (
 
 // 이메일 + 인증번호: "인증번호 받기" → 메일로 온 6자리를 적고 "확인" → 인증 완료.
 // 번호는 5분 동안 쓸 수 있고, 다시 받기는 1분 뒤부터 된다 (서버가 같은 규칙으로 막는다)
-export function EmailVerifyField({ email, onEmailChange, verifiedEmail, onVerified }: Props) {
+export function EmailVerifyField({ email, onEmailChange, verifiedEmail, onVerified, send: sendCode = sendVerificationCode }: Props) {
   const id = useId();
   const codeRef = useRef<HTMLInputElement>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -59,7 +60,7 @@ export function EmailVerifyField({ email, onEmailChange, verifiedEmail, onVerifi
     if (!isValidEmail(target)) return setNote({ text: "이메일 주소를 다시 확인해 주세요.", error: true });
     setBusy("sending");
     setNote(null);
-    const r = await sendVerificationCode(target);
+    const r = await sendCode(target);
     setBusy(null);
     const t = Date.now();
     setNow(t);

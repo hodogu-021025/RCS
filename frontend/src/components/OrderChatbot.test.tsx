@@ -6,6 +6,8 @@ import { OrderChatbot } from "./OrderChatbot";
 // 봇 응답·결제 진행이 모두 setTimeout 기반이라 가짜 타이머로 시간을 넘기며 확인한다
 beforeEach(() => {
   vi.useFakeTimers();
+  // 배달지를 이미 알려 준 손님으로 시작한다 (주소·연락처를 묻는 흐름은 chatbotUnderstanding.test 에서 본다)
+  localStorage.setItem("saylo.delivery", JSON.stringify({ address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" }));
 });
 afterEach(() => {
   vi.useRealTimers();

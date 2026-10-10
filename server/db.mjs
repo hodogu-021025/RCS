@@ -54,7 +54,15 @@ const SCHEMA = `
 const newId = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 const toUser = (r) =>
-  r && { username: r.username, name: r.name, email: r.email ?? undefined, role: r.role, storeId: r.store_id ?? undefined, createdAt: r.created_at };
+  r && {
+    username: r.username,
+    name: r.name,
+    email: r.email ?? undefined,
+    role: r.role,
+    storeId: r.store_id ?? undefined,
+    createdAt: r.created_at,
+    ...(r.role === "owner" ? { approved: r.approved !== 0 } : {}),
+  };
 
 const toOrder = (r) => ({
   id: r.id,
@@ -95,13 +103,19 @@ export function openDb(path) {
   const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
   if (!userCols.includes("privacy_version")) db.exec("ALTER TABLE users ADD COLUMN privacy_version TEXT");
   if (!userCols.includes("privacy_agreed_at")) db.exec("ALTER TABLE users ADD COLUMN privacy_agreed_at INTEGER");
+  // 사장님 승인: 스스로 가입한 사장님은 관리자가 승인하기 전까지 매장 정보를 볼 수 없다. 이 칸이 생기기 전 계정은 승인된 것으로 본다
+  if (!userCols.includes("approved")) db.exec("ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1");
   const q = (sql) => db.prepare(sql);
 
   const stmts = {
     userByName: q("SELECT * FROM users WHERE username = ?"),
     userByEmail: q("SELECT * FROM users WHERE email = ?"),
     usersByRole: q("SELECT * FROM users WHERE role = ? ORDER BY created_at"),
-    insertUser: q("INSERT INTO users (username, password_hash, name, email, role, store_id, created_at, privacy_version, privacy_agreed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+    insertUser: q("INSERT INTO users (username, password_hash, name, email, role, store_id, created_at, privacy_version, privacy_agreed_at, approved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+    approveOwner: q("UPDATE users SET approved = 1 WHERE username = ? AND role = 'owner'"),
+    userByEmail: q("SELECT * FROM users WHERE email = ?"),
+    setPassword: q("UPDATE users SET password_hash = ? WHERE username = ?"),
+    deleteSessionsOf: q("DELETE FROM sessions WHERE username = ?"),
     privacyConsent: q("SELECT privacy_version, privacy_agreed_at FROM users WHERE username = ?"),
     deleteUser: q("DELETE FROM users WHERE username = ?"),
     anonymizeOrders: q("UPDATE orders SET customer = ?, customer_name = ? WHERE customer = ?"),
@@ -145,14 +159,22 @@ export function openDb(path) {
       const r = stmts.privacyConsent.get(username);
       return r ? { version: r.privacy_version, agreedAt: r.privacy_agreed_at } : null;
     },
+    approveOwner: (username) => stmts.approveOwner.run(username).changes > 0,
+    findUserByEmail: (email) => toUser(stmts.userByEmail.get(email)) ?? null,
+    // 비밀번호를 바꾸면 다른 기기의 로그인도 모두 끊는다
+    setPassword(username, passwordHash) {
+      stmts.setPassword.run(passwordHash, username);
+      stmts.deleteSessionsOf.run(username);
+    },
     findUser: (username) => toUser(stmts.userByName.get(username)) ?? null,
     findUserWithHash: (username) => stmts.userByName.get(username) ?? null,
     emailTaken: (email) => !!stmts.userByEmail.get(email),
     listByRole: (role) => stmts.usersByRole.all(role).map(toUser),
     countByRole: (role) => stmts.countRole.get(role).n,
-    createUser({ username, passwordHash, name, email, role, storeId, privacyVersion = null }) {
+    // approved: 사장님만 의미가 있다 (스스로 가입하면 false, 관리자가 만들면 true)
+    createUser({ username, passwordHash, name, email, role, storeId, privacyVersion = null, approved = true }) {
       const now = Date.now();
-      stmts.insertUser.run(username, passwordHash, name, email ?? null, role, storeId ?? null, now, privacyVersion, privacyVersion ? now : null);
+      stmts.insertUser.run(username, passwordHash, name, email ?? null, role, storeId ?? null, now, privacyVersion, privacyVersion ? now : null, approved ? 1 : 0);
       return toUser(stmts.userByName.get(username));
     },
     deleteUser: (username) => stmts.deleteUser.run(username).changes > 0,

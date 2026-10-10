@@ -15,6 +15,9 @@ async function post<T>(path: string, body: unknown): Promise<ApiResult<T>> {
 // 인증번호 메일 보내기. expiresIn: 번호 유효 시간(초), resendIn: 다시 받기까지(초)
 export const sendVerificationCode = (email: string) => post<{ expiresIn: number; resendIn: number }>("/api/email/send-code", { email });
 
+// 비밀번호 찾기: 가입된 이메일에만 보낸다 (확인은 회원가입과 같은 confirmVerificationCode)
+export const sendResetCode = (email: string) => post<{ expiresIn: number; resendIn: number }>("/api/auth/reset/send-code", { email });
+
 export const confirmVerificationCode = (email: string, code: string) =>
   post<{ verified: true; proof: string }>("/api/email/verify", { email, code });
 

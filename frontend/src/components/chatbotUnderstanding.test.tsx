@@ -8,12 +8,16 @@ import { server } from "../test/setup";
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date(2026, 9, 10, 18, 30));
+  // 배달지를 이미 알려 준 손님으로 시작한다 (주소·연락처를 묻는 흐름은 아래 "배달지" 에서 따로 본다)
+  localStorage.setItem("saylo.delivery", JSON.stringify({ address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" }));
 });
 afterEach(() => {
   vi.useRealTimers();
 });
 
 const wait = (ms = 1200) => act(() => vi.advanceTimersByTimeAsync(ms));
+const ORDER_TITLE = "주문 내역을 확인해 주세요.";
+const inCard = (text: string) => screen.queryAllByText(text).some((el) => el.tagName === "DD");
 const find = (re: RegExp) => screen.findAllByText(re, {}, { timeout: 3000 });
 
 async function renderChat() {
@@ -272,6 +276,49 @@ describe("5. 주문한 뒤의 질문", () => {
       .getAllByRole("button")
       .map((b) => b.querySelector("b")?.textContent);
     expect(places).toEqual(["장락 떡볶이", "장락 할매국밥", "장락 옛날통닭"]);
+  });
+});
+
+describe("배달지·연락처", () => {
+  it("처음 주문하면 주소와 전화번호를 묻고, 받은 뒤 주문서를 보여 주며 다음 주문을 위해 기억한다", async () => {
+    localStorage.removeItem("saylo.delivery");
+    await renderChat();
+    await say("간장치킨 2마리 시켜줘");
+    expect(await find(/배달 받을 주소를 알려 주세요/)).toBeTruthy();
+    expect(screen.queryByText(ORDER_TITLE)).not.toBeInTheDocument();
+
+    await say("장락");
+    expect(await find(/주소를 조금 더 자세히 알려 주세요/)).toBeTruthy();
+    await say("제천시 하소동 행복아파트 101동 202호");
+    expect(await find(/가게에서 연락드릴 전화번호를 알려 주세요/)).toBeTruthy();
+    await say("12");
+    expect(await find(/전화번호를 잘 모르겠어요/)).toBeTruthy();
+    await say("010 9876 5432");
+
+    expect(await find(/^간장치킨 2마리$/)).toBeTruthy();
+    // 사용자가 보낸 말풍선에도 같은 글자가 있으므로 주문서 칸(dd)에서 찾는다
+    expect(inCard("제천시 하소동 행복아파트 101동 202호")).toBe(true);
+    expect(inCard("010-9876-5432")).toBe(true);
+    expect(JSON.parse(localStorage.getItem("saylo.delivery")!)).toEqual({ address: "제천시 하소동 행복아파트 101동 202호", phone: "010-9876-5432" });
+  });
+
+  it("주문서에서 배달지 변경을 누르면 주소만 다시 받고 같은 메뉴로 주문서를 다시 만든다", async () => {
+    await renderChat();
+    await say("옛날통닭 1마리");
+    await click("배달지 변경");
+    expect(await find(/새 배달지로 다시 만들어 드릴게요/)).toBeTruthy();
+    await say("제천시 청전동 새집 3층");
+    expect(await find(/^옛날통닭 1마리$/)).toBeTruthy();
+    expect(inCard("제천시 청전동 새집 3층")).toBe(true);
+    expect(inCard("010-1234-5678")).toBe(true); // 연락처는 그대로
+  });
+
+  it("주소를 묻는 중에 취소하면 주문을 접는다", async () => {
+    localStorage.removeItem("saylo.delivery");
+    await renderChat();
+    await say("떡볶이 2인분");
+    await say("취소할래");
+    expect(await find(/배달 주문을 그만할게요/)).toBeTruthy();
   });
 });
 

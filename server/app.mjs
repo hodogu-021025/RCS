@@ -7,9 +7,11 @@
 //   POST   /api/auth/login             { username, password }         → { token, session }
 //   POST   /api/auth/logout
 //   GET    /api/auth/me                                               → { session }  (토큰이 없거나 만료되면 null)
+//   POST   /api/auth/reset/send-code   { email }                      비밀번호 찾기: 가입된 이메일로 인증번호 (확인은 /api/email/verify)
+//   POST   /api/auth/reset             { email, proof, password, passwordConfirm } → { username }  새 비밀번호 (다른 기기 로그인은 끊긴다)
 //   POST   /api/auth/withdraw          { password }                   회원 탈퇴 (고객님·사장님). 주문·예약 기록은 이름을 지우고 남긴다
 //   GET    /api/orders                 고객: 내 것 / 사장님: 내 매장 / 관리자: 전체
-//   POST   /api/orders                 { order, payment }             로그인 없이도 가능 (비회원)
+//   POST   /api/orders                 { order, payment }             로그인 없이도 가능 (비회원). order.address·order.phone 필수
 //   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자
 //   POST   /api/orders/lookup          { receipts }                   비회원: 주문할 때 받은 영수증 번호로 내 주문 보기
 //   POST   /api/orders/:id/cancel      { receipt? }                   손님 취소 (접수 상태일 때만)
@@ -21,13 +23,15 @@
 //   PATCH  /api/stores/:id/settings    { hours? } 또는 { item: { id, patch: { price?, soldOut? } } }  그 매장 사장님·관리자
 //   GET    /api/owners                 관리자
 //   POST   /api/owners                 { username, password, name?, storeId }   관리자
-//   DELETE /api/owners/:username       관리자
+//   POST   /api/owners/:username/approve  관리자: 스스로 가입한 사장님 승인 (승인 전에는 매장 주문·예약·설정에 접근할 수 없다)
+//   DELETE /api/owners/:username       관리자 (승인 거절도 이것으로)
 //   GET    /api/users                  관리자 (가입한 고객님)
 //
 // 로그인 상태는 Authorization: Bearer <token> 헤더로 보낸다. 토큰은 서버 DB 의 sessions 에 있고 30일 뒤 만료된다.
 import { SESSION_TTL_MS, hashPassword, newToken, passwordError, usernameError, verifyPassword } from "./auth.mjs";
 import { MAX_PEOPLE, MAX_QTY, ORDER_STATUSES, RESERVATION_STATUSES, STORE_IDS, findMenuItem, restaurantName } from "./stores.mjs";
 import { isValidEmail, normalizeEmail } from "./verification.mjs";
+import { ADDRESS_MAX, ADDRESS_MIN, normalizePhone } from "./contact.mjs";
 
 const MAX_BODY = 16 * 1024;
 // 지금 개인정보 처리방침의 시행일 (frontend/src/pages/privacyPolicy.ts 의 PRIVACY_EFFECTIVE 와 같게). 가입할 때 이 버전에 동의한 것으로 남긴다
@@ -44,11 +48,60 @@ const bad = (message) => new HttpError(400, message);
 const needLogin = () => new HttpError(401, "로그인이 필요해요.");
 const forbidden = () => new HttpError(403, "권한이 없어요.");
 
-const publicSession = (u) => u && { username: u.username, role: u.role, name: u.name, ...(u.storeId ? { storeId: u.storeId } : {}) };
+const publicSession = (u) =>
+  u && { username: u.username, role: u.role, name: u.name, ...(u.storeId ? { storeId: u.storeId } : {}), ...(u.role === "owner" ? { approved: u.approved } : {}) };
+const PENDING_OWNER = "관리자 승인을 기다리고 있어요. 승인되면 매장 주문·예약을 볼 수 있어요.";
+
+// 로그인 시도 제한: 비밀번호를 계속 대입해 보는 걸 막는다 (15분 안에 아이디별 5번, IP별 20번 실패하면 잠시 막는다)
+export const LOGIN_WINDOW_MS = 15 * 60_000;
+export const LOGIN_MAX_PER_USER = 5;
+export const LOGIN_MAX_PER_IP = 20;
 const str = (v, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 // db: openDb() 결과, verifier: createVerifier() 결과, mailer: createMailer() 결과
-export function createApp({ db, verifier, mailer }) {
+// now: 시계 (테스트에서 로그인 제한 시간을 넘길 때)
+export function createApp({ db, verifier, mailer, now = Date.now }) {
+  // ---- 권한 ----
+  // 주문·예약을 볼 수 있는 범위. 승인 전 사장님은 막는다
+  function recordScope(user) {
+    if (!user) throw needLogin();
+    if (user.role === "admin") return {};
+    if (user.role === "owner") {
+      if (!user.approved) throw new HttpError(403, PENDING_OWNER);
+      return { storeId: user.storeId };
+    }
+    return { customer: user.username };
+  }
+  // 그 매장의 주문·예약·설정을 바꿀 수 있는지: 관리자, 또는 승인된 그 매장 사장님
+  function assertManages(user, storeId) {
+    if (!user) throw needLogin();
+    if (user.role === "admin") return;
+    if (user.role === "owner" && user.storeId === storeId) {
+      if (!user.approved) throw new HttpError(403, PENDING_OWNER);
+      return;
+    }
+    throw forbidden();
+  }
+
+  // ---- 로그인 시도 제한 ----
+  const loginFails = new Map(); // "u:아이디" 또는 "ip:주소" → [실패 시각…]
+  const recentFails = (key) => (loginFails.get(key) ?? []).filter((at) => now() - at < LOGIN_WINDOW_MS);
+  function checkLoginLimit(keys) {
+    for (const [key, max] of keys) {
+      const fails = recentFails(key);
+      if (fails.length < max) continue;
+      const retryAfter = Math.max(1, Math.ceil((fails[0] + LOGIN_WINDOW_MS - now()) / 1000));
+      const err = new HttpError(429, `로그인을 너무 여러 번 실패했어요. ${Math.ceil(retryAfter / 60)}분 뒤에 다시 시도해 주세요.`);
+      err.extra = { retryAfter };
+      throw err;
+    }
+  }
+  function recordLoginFail(keys) {
+    if (loginFails.size > 10_000) for (const k of loginFails.keys()) if (recentFails(k).length === 0) loginFails.delete(k);
+    for (const [key] of keys) loginFails.set(key, [...recentFails(key), now()]);
+  }
+  const userKey = (username) => `u:${String(username).toLowerCase()}`;
+
   // ---- 계정 ----
   // 입력을 검사해 정리된 값을 돌려준다. 문제가 있으면 400
   function checkAccount({ role, username, password, name, email, storeId }) {
@@ -99,12 +152,43 @@ export function createApp({ db, verifier, mailer }) {
       const account = checkAccount({ role, username: body.username, password: body.password, name: body.name, email, storeId: str(body.storeId, 10) });
       if (body.agreePrivacy !== true) throw bad("개인정보 수집·이용에 동의해 주세요.");
       if (!verifier.consumeProof(email, body.proof)) throw bad("이메일 인증을 마쳐 주세요.");
-      return startSession(db.createUser({ ...account, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION }));
+      // 스스로 가입한 사장님은 관리자가 승인해야 매장 정보를 볼 수 있다 (아무나 남의 가게 주문을 보지 못하게)
+      const user = db.createUser({ ...account, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION, approved: role !== "owner" });
+      return startSession(user);
     }],
-    ["POST", "/api/auth/login", ({ body }) => {
-      const row = db.findUserWithHash(str(body.username, 20));
-      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) throw new HttpError(401, "아이디 또는 비밀번호가 맞지 않아요.");
+    ["POST", "/api/auth/login", ({ body, ip }) => {
+      const username = str(body.username, 20);
+      const keys = [[userKey(username), LOGIN_MAX_PER_USER], [`ip:${ip}`, LOGIN_MAX_PER_IP]];
+      checkLoginLimit(keys);
+      const row = db.findUserWithHash(username);
+      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) {
+        recordLoginFail(keys);
+        throw new HttpError(401, "아이디 또는 비밀번호가 맞지 않아요.");
+      }
+      loginFails.delete(userKey(username));
       return startSession(db.findUser(row.username));
+    }],
+    // 비밀번호 찾기: 가입된 이메일로 인증번호를 보내고, 인증을 마치면 새 비밀번호로 바꾼다
+    ["POST", "/api/auth/reset/send-code", async ({ body, ip }) => {
+      if (mailer.mode === "off") throw new HttpError(503, "이메일 인증이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.");
+      const email = normalizeEmail(body.email);
+      if (!isValidEmail(email)) throw bad("이메일 주소를 다시 확인해 주세요.");
+      if (!db.findUserByEmail(email)) throw bad("가입된 이메일이 아니에요. 가입할 때 쓴 주소를 적어 주세요.");
+      const r = await verifier.sendCode(email, ip);
+      if (r.status !== 200) throw Object.assign(new HttpError(r.status, r.body.error), { extra: r.body });
+      return r.body;
+    }],
+    ["POST", "/api/auth/reset", ({ body }) => {
+      const email = normalizeEmail(body.email);
+      const user = isValidEmail(email) ? db.findUserByEmail(email) : null;
+      if (!user) throw bad("가입된 이메일이 아니에요.");
+      const error = passwordError(body.password) ?? (body.password !== body.passwordConfirm ? "비밀번호가 서로 달라요." : null);
+      if (error) throw bad(error);
+      // 증표는 맨 마지막에 쓴다 (틀린 입력 때문에 다시 인증하지 않게)
+      if (!verifier.consumeProof(email, body.proof)) throw bad("이메일 인증을 마쳐 주세요.");
+      db.setPassword(user.username, hashPassword(body.password));
+      loginFails.delete(userKey(user.username));
+      return { ok: true, username: user.username };
     }],
     ["POST", "/api/auth/logout", ({ token }) => {
       if (token) db.deleteSession(token);
@@ -115,17 +199,19 @@ export function createApp({ db, verifier, mailer }) {
       if (!user) throw needLogin();
       if (user.role === "admin") throw new HttpError(403, "관리자 계정은 탈퇴할 수 없어요.");
       // 401 은 화면이 "로그인이 풀렸다"로 받아들이므로, 비밀번호가 틀리면 400 으로 알린다
+      const keys = [[userKey(user.username), LOGIN_MAX_PER_USER]];
+      checkLoginLimit(keys);
       const row = db.findUserWithHash(user.username);
-      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) throw bad("비밀번호가 맞지 않아요.");
+      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) {
+        recordLoginFail(keys);
+        throw bad("비밀번호가 맞지 않아요.");
+      }
       db.withdrawUser(user.username);
       return { ok: true };
     }],
 
     // ---- 주문 ----
-    ["GET", "/api/orders", ({ user }) => {
-      if (!user) throw needLogin();
-      return db.listOrders(user.role === "admin" ? {} : user.role === "owner" ? { storeId: user.storeId } : { customer: user.username });
-    }],
+    ["GET", "/api/orders", ({ user }) => db.listOrders(recordScope(user))],
     ["POST", "/api/orders", ({ body, user }) => {
       const o = body.order ?? {};
       const qty = Number(o.qty);
@@ -136,6 +222,11 @@ export function createApp({ db, verifier, mailer }) {
       if (!item) throw bad("메뉴를 알 수 없어요.");
       const setting = db.allStoreSettings()[o.storeId]?.items?.[item.id] ?? {};
       if (setting.soldOut) throw bad(`${item.name}은(는) 지금 품절이에요.`);
+      // 배달지와 연락처는 꼭 받는다 (가게가 배달하고 연락할 수 있게)
+      const address = str(o.address, ADDRESS_MAX);
+      if (address.length < ADDRESS_MIN) throw bad("배달 받을 주소를 적어 주세요.");
+      const phone = normalizePhone(o.phone);
+      if (!phone) throw bad("연락받을 전화번호를 다시 확인해 주세요.");
       const order = {
         store: { name: restaurantName(o.storeId), ...(o.store?.distance ? { distance: str(o.store.distance, 20) } : {}) },
         storeId: o.storeId,
@@ -143,7 +234,8 @@ export function createApp({ db, verifier, mailer }) {
         qty,
         unit: item.unit,
         price: (setting.price ?? item.price) * qty,
-        ...(o.address ? { address: str(o.address) } : {}),
+        address,
+        phone,
       };
       const who = user ?? GUEST;
       const receipt = newToken();
@@ -170,17 +262,14 @@ export function createApp({ db, verifier, mailer }) {
       if (!user) throw needLogin();
       const rec = db.orderById(params.id);
       if (!rec) throw new HttpError(404, "없는 주문이에요.");
-      if (user.role !== "admin" && !(user.role === "owner" && user.storeId === rec.storeId)) throw forbidden();
+      assertManages(user, rec.storeId);
       if (!ORDER_STATUSES.has(body.status)) throw bad("상태 값이 맞지 않아요.");
       db.setOrderStatus(rec.id, body.status);
       return db.orderById(rec.id);
     }],
 
     // ---- 예약 ----
-    ["GET", "/api/reservations", ({ user }) => {
-      if (!user) throw needLogin();
-      return db.listReservations(user.role === "admin" ? {} : user.role === "owner" ? { storeId: user.storeId } : { customer: user.username });
-    }],
+    ["GET", "/api/reservations", ({ user }) => db.listReservations(recordScope(user))],
     ["POST", "/api/reservations", ({ body, user }) => {
       const people = Number(body.people);
       if (!STORE_IDS.has(body.restaurantId)) throw bad("식당을 알 수 없어요.");
@@ -201,7 +290,7 @@ export function createApp({ db, verifier, mailer }) {
       if (!user) throw needLogin();
       const rec = db.reservationById(params.id);
       if (!rec) throw new HttpError(404, "없는 예약이에요.");
-      if (user.role !== "admin" && !(user.role === "owner" && user.storeId === rec.restaurantId)) throw forbidden();
+      assertManages(user, rec.restaurantId);
       if (!RESERVATION_STATUSES.has(body.status)) throw bad("상태 값이 맞지 않아요.");
       db.setReservationStatus(rec.id, body.status);
       return db.reservationById(rec.id);
@@ -223,7 +312,7 @@ export function createApp({ db, verifier, mailer }) {
     ["PATCH", "/api/stores/:id/settings", ({ params, body, user }) => {
       if (!user) throw needLogin();
       if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
-      if (user.role !== "admin" && !(user.role === "owner" && user.storeId === params.id)) throw forbidden();
+      assertManages(user, params.id);
       const patch = {};
       if (body.hours !== undefined) {
         if (!/^\d{2}:\d{2} - \d{2}:\d{2}$/.test(String(body.hours))) throw bad("영업시간 형식이 맞지 않아요.");
@@ -254,6 +343,11 @@ export function createApp({ db, verifier, mailer }) {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();
       const storeId = str(body.storeId, 10);
       return createAccount({ role: "owner", username: body.username, password: body.password, name: str(body.name, 40) || "사장님", storeId });
+    }],
+    ["POST", "/api/owners/:username/approve", ({ params, user }) => {
+      if (user?.role !== "admin") throw user ? forbidden() : needLogin();
+      if (!db.approveOwner(params.username)) throw new HttpError(404, "없는 사장님 계정이에요.");
+      return db.findUser(params.username);
     }],
     ["DELETE", "/api/owners/:username", ({ params, user }) => {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();
