@@ -469,12 +469,13 @@ header .title {
 /* ---- 입력 ---- */
 /* 접고 펴는 껍데기. grid 행을 1fr ↔ 0fr 로 바꿔 높이를 부드럽게 전환한다.
    펼쳐져 있을 때는 빠른 메뉴가 위로 튀어나와야 하므로 overflow 를 접힐 때만 숨긴다 */
+/* 열은 minmax(0, 1fr): 그냥 1fr 이면 입력칸의 기본 폭만큼 줄이 넓어져 좁은 휴대폰에서 Say 버튼이 화면 밖으로 밀린다 */
 .composer {
-  display: grid; grid-template-rows: 1fr;
+  display: grid; grid-template-rows: 1fr; grid-template-columns: minmax(0, 1fr);
   flex-shrink: 0;
   transition: grid-template-rows .28s ease;
 }
-.composer > form { min-height: 0; transition: opacity .2s; }
+.composer > form { min-height: 0; min-width: 0; transition: opacity .2s; }
 .composer.collapsed { grid-template-rows: 0fr; overflow: hidden; }
 .composer.collapsed > form { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
@@ -482,7 +483,8 @@ header .title {
 }
 .composer form {
   display: flex; gap: 8px;
-  padding: 10px 12px 14px;
+  /* 아이폰 하단 홈 막대 영역만큼 더 띄운다 (viewport-fit=cover) */
+  padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px));
   background: var(--panel);
   border-top: 1px solid rgba(15, 23, 42, .06);
   flex-shrink: 0;
