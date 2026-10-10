@@ -138,12 +138,17 @@ header .title {
 /* ---- 말하는 효과 ----
    봇이 소리로 말하는 동안(data-voice="talking") 구체 둘레에서 물결이 퍼진다 (구체 자체는 움직이지 않는다).
    내가 음성 모드로 말하는 동안(listening)은 물결이 느리고 은은하게 */
+/* 켜고 끄는 건 물결 묶음 전체의 투명도로 한다. 고리는 계속 퍼지고 있어서, 말이 끝나면 퍼지던 그대로 1.6초에 걸쳐 사라진다 */
 .orb-waves {
   position: absolute; top: 50%; left: 50%;
   height: 40%; aspect-ratio: 1; /* 영상 속 구체 크기에 맞춘 값 (.chat-bg 높이 75% 중 구체 부분) */
   transform: translate(-50%, -50%);
   pointer-events: none;
+  opacity: 0;
+  /* 말이 끝나자마자 옅어지기 시작해 꼬리를 길게 끌며 사라진다 */
+  transition: opacity 1.6s cubic-bezier(.2, .6, .3, 1);
 }
+.chat-area[data-voice] .orb-waves { opacity: 1; transition-duration: .5s; }
 /* 선 대신 넓은 띠: 안쪽·바깥쪽이 투명하게 흐려지는 반투명 파란 고리라 퍼질 때 은은하다 */
 .orb-waves span {
   --wave: 0, 124, 252;
@@ -160,20 +165,22 @@ header .title {
   );
   filter: blur(6px);
   opacity: 0;
+  animation: orb-wave 2.4s cubic-bezier(.25, .6, .35, 1) infinite;
 }
-.chat-area[data-voice] .orb-waves span { animation: orb-wave 2.4s cubic-bezier(.25, .6, .35, 1) infinite; }
-.chat-area[data-voice] .orb-waves span:nth-child(2) { animation-delay: .8s; }
-.chat-area[data-voice] .orb-waves span:nth-child(3) { animation-delay: 1.6s; }
-.chat-area[data-voice="listening"] .orb-waves span { --wave-alpha: .11; animation-duration: 3.2s; }
-.chat-area[data-voice="listening"] .orb-waves span:nth-child(2) { animation-delay: 1.07s; }
-.chat-area[data-voice="listening"] .orb-waves span:nth-child(3) { animation-delay: 2.13s; }
+.orb-waves span:nth-child(2) { animation-delay: .8s; }
+.orb-waves span:nth-child(3) { animation-delay: 1.6s; }
+/* 내가 말할 때(마지막 모양이 listening)는 더 옅고 느리게. 사라지는 동안에도 이 모양을 유지한다 */
+.chat-area[data-wave="listening"] .orb-waves span { --wave-alpha: .11; animation-duration: 3.2s; }
+.chat-area[data-wave="listening"] .orb-waves span:nth-child(2) { animation-delay: 1.07s; }
+.chat-area[data-wave="listening"] .orb-waves span:nth-child(3) { animation-delay: 2.13s; }
 @keyframes orb-wave {
   0% { transform: scale(.85); opacity: 0; }
   25% { opacity: 1; }
   100% { transform: scale(1.9); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-area[data-voice] .orb-waves span { animation: none; }
+  .orb-waves span { animation: none; }
+  .orb-waves { transition: none; }
 }
 
 .chat {

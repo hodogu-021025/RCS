@@ -317,6 +317,11 @@ export function OrderChatbot() {
   const [shownBar, setShownBar] = useState<VoiceBar | null>(voiceBar);
   if (voiceBar && (voiceBar.kind !== shownBar?.kind || voiceBar.text !== shownBar.text)) setShownBar(voiceBar);
 
+  // 배경 물결: 지금 누가 말하는지, 그리고 사라지는 동안 유지할 마지막 모양 (같은 파생 상태 방식)
+  const voiceKind: "talking" | "listening" | null = tts.speaking ? "talking" : voice.listening ? "listening" : null;
+  const [waveKind, setWaveKind] = useState<"talking" | "listening">("talking");
+  if (voiceKind && voiceKind !== waveKind) setWaveKind(voiceKind);
+
   // 읽어 주기가 켜져 있으면 새로 온 봇 말풍선을 읽는다 (한 번에 여러 개가 오면 이어서)
   const spokenUpTo = useRef(0);
   const { speak } = tts;
@@ -1304,11 +1309,9 @@ export function OrderChatbot() {
       </header>
 
       {/* 메시지 영역 뒤에 영상을 고정으로 깔고, 그 위에서 메시지 목록만 스크롤한다 */}
-      {/* 누가 말하는 중인지에 따라 배경 구체가 반응한다: 봇이 소리로 말하면 talking, 내가 음성 모드로 말하면 listening */}
-      <div
-        className={"chat-area" + (chatHidden ? " chat-hidden" : "")}
-        data-voice={tts.speaking ? "talking" : voice.listening ? "listening" : undefined}
-      >
+      {/* 누가 말하는 중인지에 따라 배경 구체 둘레에 물결이 퍼진다: 봇이 소리로 말하면 talking, 내가 음성 모드로 말하면 listening.
+          data-wave 는 마지막 모양을 기억해서, 물결이 서서히 사라지는 동안 모양(속도·진하기)이 바뀌지 않게 한다 */}
+      <div className={"chat-area" + (chatHidden ? " chat-hidden" : "")} data-voice={voiceKind ?? undefined} data-wave={waveKind}>
         <video className="chat-bg" src={backgroundVideo} autoPlay muted loop playsInline aria-hidden="true" />
         {/* 구체 둘레에서 퍼져 나가는 물결 (말하는 동안만 움직인다) */}
         <div className="orb-waves" aria-hidden="true">

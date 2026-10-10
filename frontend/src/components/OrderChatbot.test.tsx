@@ -739,6 +739,9 @@ describe("음성", () => {
 
     act(() => FakeRecognition.latest().say("간장치킨 2마리 시켜줘"));
     expect(document.querySelector(".voice-bar")).not.toHaveClass("show"); // 카드는 남아서 내려가는 중
+    // 물결은 꺼지지만, 서서히 사라지는 동안 듣기 모양(옅고 느림)을 유지한다
+    expect(document.querySelector(".chat-area")).not.toHaveAttribute("data-voice");
+    expect(document.querySelector(".chat-area")).toHaveAttribute("data-wave", "listening");
     expect(screen.getByText("간장치킨 2마리 시켜줘")).toBeInTheDocument();
     wait(1000);
     expect(screen.getByText("간장치킨 2마리")).toBeInTheDocument();
