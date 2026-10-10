@@ -177,6 +177,9 @@ export function useSpeechOutput() {
   const [enabled, setEnabled] = useState(soundPreference);
   // 목소리 목록을 기다리는 중인 말 (새 말이 오면 이전 것은 버린다)
   const pendingRef = useRef<() => void>(() => {});
+  // 지금 소리를 내는 중인지 (배경 구체의 말하는 효과에 쓴다). 새 말이 이전 말을 끊으면 이전 말의 끝 신호는 무시한다
+  const [speakingNow, setSpeakingNow] = useState(false);
+  const utteranceSeq = useRef(0);
 
   useEffect(() => {
     try {
@@ -218,6 +221,13 @@ export function useSpeechOutput() {
         // 조금 빠르고 살짝 높게: 같은 목소리라도 더 젊고 밝게 들린다
         utterance.rate = 1.08;
         utterance.pitch = 1.15;
+        const seq = ++utteranceSeq.current;
+        const mark = (on: boolean) => () => {
+          if (utteranceSeq.current === seq) setSpeakingNow(on);
+        };
+        utterance.onstart = mark(true);
+        utterance.onend = mark(false);
+        utterance.onerror = mark(false); // 끊겼거나(새 말·끄기) 브라우저가 막은 경우
         synth.speak(utterance);
       });
     },
@@ -226,5 +236,6 @@ export function useSpeechOutput() {
 
   const toggle = useCallback(() => setEnabled((on) => !on), []);
 
-  return { supported, enabled, toggle, speak };
+  // 소리를 끄면 말도 멈추므로 끝 신호를 기다리지 않고 바로 말하지 않는 상태로 본다
+  return { supported, enabled, toggle, speak, speaking: enabled && speakingNow };
 }

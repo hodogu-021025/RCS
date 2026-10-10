@@ -1304,8 +1304,18 @@ export function OrderChatbot() {
       </header>
 
       {/* 메시지 영역 뒤에 영상을 고정으로 깔고, 그 위에서 메시지 목록만 스크롤한다 */}
-      <div className={"chat-area" + (chatHidden ? " chat-hidden" : "")}>
+      {/* 누가 말하는 중인지에 따라 배경 구체가 반응한다: 봇이 소리로 말하면 talking, 내가 음성 모드로 말하면 listening */}
+      <div
+        className={"chat-area" + (chatHidden ? " chat-hidden" : "")}
+        data-voice={tts.speaking ? "talking" : voice.listening ? "listening" : undefined}
+      >
         <video className="chat-bg" src={backgroundVideo} autoPlay muted loop playsInline aria-hidden="true" />
+        {/* 구체 둘레에서 퍼져 나가는 물결 (말하는 동안만 움직인다) */}
+        <div className="orb-waves" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
         <div className="chat" ref={listRef} inert={chatHidden}>
           {/* 같은 쪽이 연달아 말하면 cont 로 간격을 좁혀 한 묶음처럼 보이게 한다 */}
           {messages.map((m, i) => {

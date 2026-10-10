@@ -722,6 +722,8 @@ describe("음성", () => {
     expect(FakeRecognition.latest().lang).toBe("ko-KR");
     expect(screen.getByRole("status")).toHaveTextContent("듣고 있어요");
     expect(screen.getByRole("button", { name: "음성 모드 끄기" })).toHaveAttribute("aria-pressed", "true");
+    // 듣는 동안은 배경 구체에 은은한 물결
+    expect(document.querySelector(".chat-area")).toHaveAttribute("data-voice", "listening");
 
     // 중간 인식 결과가 띠에 보인다
     act(() => FakeRecognition.latest().say("간장치킨", false));
@@ -875,6 +877,39 @@ describe("읽어 주기 목소리", () => {
     act(() => listeners.forEach((f) => f()));
     expect(speakSpy).toHaveBeenCalledTimes(1);
     expect((speakSpy.mock.calls[0][0] as FakeUtterance).text).toContain("어떤 음식을 배달해 드릴까요?");
+  });
+
+  it("봇이 소리로 말하는 동안 배경 구체에 말하는 효과가 켜지고, 끝나면 꺼진다", () => {
+    voices = [SUNHI];
+    renderChat();
+    const area = document.querySelector(".chat-area")!;
+    type Spoken = { onstart?: () => void; onend?: () => void; onerror?: () => void };
+    const greeting = speakSpy.mock.calls[0][0] as unknown as Spoken;
+    expect(area).not.toHaveAttribute("data-voice");
+
+    act(() => greeting.onstart?.());
+    expect(area).toHaveAttribute("data-voice", "talking");
+
+    // 새 답이 이전 말을 끊으면, 늦게 온 이전 말의 끝 신호로 효과가 꺼지지 않는다
+    send("배달");
+    wait(700);
+    const next = speakSpy.mock.calls[1][0] as unknown as Spoken;
+    act(() => next.onstart?.());
+    act(() => greeting.onerror?.());
+    expect(area).toHaveAttribute("data-voice", "talking");
+
+    act(() => next.onend?.());
+    expect(area).not.toHaveAttribute("data-voice");
+  });
+
+  it("소리를 끄면 말하는 효과도 바로 꺼진다", () => {
+    voices = [SUNHI];
+    renderChat();
+    const area = document.querySelector(".chat-area")!;
+    act(() => (speakSpy.mock.calls[0][0] as unknown as { onstart: () => void }).onstart());
+    expect(area).toHaveAttribute("data-voice", "talking");
+    fireEvent.click(screen.getByRole("button", { name: "소리 끄기" }));
+    expect(area).not.toHaveAttribute("data-voice");
   });
 
   it("처음 열 때와 페이지를 떠날 때 읽던 말을 끊는다 (새로고침 뒤 이전 말이 이어지지 않게)", () => {
