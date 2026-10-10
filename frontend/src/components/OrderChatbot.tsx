@@ -8,7 +8,7 @@ import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
 import { VoiceCaption } from "./VoiceCaption";
-import { FALLBACK_PROMPT, QUICK_MENUS, quickMenuReply } from "./quickMenu";
+import { FALLBACK_PROMPT, QUICK_MENUS, menuIntent, menuReply, quickMenuReply } from "./quickMenu";
 import {
   DEFAULT_PEOPLE,
   deliveryPrompt,
@@ -597,7 +597,7 @@ export function OrderChatbot() {
         cancelDelivery();
         return;
       }
-      if (!quickMenuReply(text)) {
+      if (!menuIntent(text)) {
         const menu = deliveryPrompt();
         const names = (menu.choices ?? []).map((c) => c.label);
         botReply(() =>
@@ -636,7 +636,7 @@ export function OrderChatbot() {
         botReply(() => push(botText("식당 찾기를 그만할게요. 다른 게 필요하면 말씀해 주세요!")));
         return;
       }
-      if (!quickMenuReply(text) && findDeliveryItems(text).length === 0) {
+      if (!menuIntent(text) && findDeliveryItems(text).length === 0) {
         const hint = stage === "restaurant" ? "추천 맛집 중에서 고르시거나, 다른 음식을 말씀해 주세요." : "드시고 싶은 음식을 편하게 말씀해 주세요.";
         botReply(() =>
           push(botPrompt({ ...FOOD_PROMPT, text: `어떤 음식인지 잘 모르겠어요.\n${hint}`, say: `어떤 음식인지 잘 모르겠어요. ${hint}` })),
@@ -645,20 +645,52 @@ export function OrderChatbot() {
       }
     }
 
-    const quickReply = quickMenuReply(text);
-    if (quickReply) {
-      setPendingItem(null);
-      setOrder(null);
-      setRsv(null);
-      setStage(quickReply.next);
-      botReply(() => push(botPrompt(quickReply)));
+    // 문장 속에 배달·식당을 뜻하는 말이 있으면 그 기능으로 ("배달 주문하고 싶어", "근처 식당 예약할래")
+    const intent = menuIntent(text);
+    const food = matchFood(text);
+
+    // "중식 식당 예약해줘": 식당 말과 음식 종류를 같이 말했으면 바로 근처 식당 추천으로
+    if (intent === "식당") {
+      if (food) {
+        startFresh();
+        showRestaurants(food.label, nearbyRestaurants(food.key));
+      } else {
+        startMenu("식당");
+      }
       return;
     }
 
-    // "간장치킨 2마리 시켜줘"처럼 메뉴를 바로 말하면 배달 주문으로
+    // "간장치킨 2마리 시켜줘", "떡볶이": 배달 메뉴 이름이 있으면 배달 주문으로
     if (tryDelivery(text)) return;
 
+    if (intent === "배달") {
+      startMenu("배달");
+      return;
+    }
+
+    // "한식 먹고 싶어": 배달 메뉴에는 없는 음식 종류만 말했으면 근처 식당 추천으로
+    if (food) {
+      startFresh();
+      showRestaurants(food.label, nearbyRestaurants(food.key));
+      return;
+    }
+
     botReply(() => push(botPrompt(FALLBACK_PROMPT)));
+  }
+
+  // 진행 중이던 주문·예약을 접고 처음부터
+  function startFresh() {
+    setPendingItem(null);
+    setOrder(null);
+    setRsv(null);
+  }
+
+  // 배달·식당의 첫 질문으로
+  function startMenu(menu: "배달" | "식당") {
+    const reply = menuReply(menu)!;
+    startFresh();
+    setStage(reply.next);
+    botReply(() => push(botPrompt(reply)));
   }
 
   function onPayCancel() {

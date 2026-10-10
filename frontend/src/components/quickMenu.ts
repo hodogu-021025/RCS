@@ -3,6 +3,7 @@
 import { FOOD_PROMPT, deliveryPrompt, type BotPrompt } from "./orderChatKnowledge";
 
 export const QUICK_MENUS = ["배달", "식당"] as const;
+type QuickMenu = (typeof QUICK_MENUS)[number];
 
 export interface QuickMenuReply extends BotPrompt {
   // 다음 입력을 무엇으로 받을지: 배달은 메뉴, 식당은 음식 종류
@@ -14,7 +15,19 @@ export interface QuickMenuReply extends BotPrompt {
 const MENU_ONLY = new RegExp(`^(${QUICK_MENUS.join("|")})\\s*(이요|요|할래요?|할게요?|해\\s?줘|하고\\s?싶어요?|부탁해요?)?[.!]?$`);
 
 export function quickMenuReply(text: string): QuickMenuReply | undefined {
-  const menu = QUICK_MENUS.find((m) => m === MENU_ONLY.exec(text.trim())?.[1]);
+  return menuReply(QUICK_MENUS.find((m) => m === MENU_ONLY.exec(text.trim())?.[1]));
+}
+
+// 문장 어디에든 배달·식당을 뜻하는 말이 들어 있으면 그 기능으로 본다 ("배달 주문하고 싶어", "근처 식당 예약할래").
+// "배달" 이 있으면 배달, 식당·예약·맛집이 있으면 식당, "시켜"·"주문" 만 있으면 배달 (메뉴 이름이 함께 있으면 부르는 쪽에서 주문으로 먼저 처리한다)
+export function menuIntent(text: string): QuickMenu | undefined {
+  if (/배달/.test(text)) return "배달";
+  if (/식당|예약|맛집|레스토랑|밥집/.test(text)) return "식당";
+  if (/시켜|주문/.test(text)) return "배달";
+  return undefined;
+}
+
+export function menuReply(menu: QuickMenu | undefined): QuickMenuReply | undefined {
   if (menu === "배달") return { ...deliveryPrompt(), next: "menu" };
   if (menu === "식당") return { ...FOOD_PROMPT, next: "food" };
   return undefined;

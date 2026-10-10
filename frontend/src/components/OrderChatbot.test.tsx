@@ -410,6 +410,39 @@ describe("OrderChatbot", () => {
     expect(screen.getAllByRole("button", { name: "한식" }).at(-1)).toBeEnabled();
   });
 
+  it("문장 속에 배달·식당 말이 있으면 그 기능으로 바로 간다", () => {
+    renderChat();
+    send("배달 주문하고 싶어");
+    wait(700);
+    expect(screen.getByText(/오늘은 이런 메뉴 어떠세요\?/)).toBeInTheDocument();
+
+    send("근처 식당 예약할래"); // 배달 메뉴를 보는 중에도 식당으로 넘어간다
+    wait(700);
+    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
+
+    send("배달로 할게"); // 식당 단계에서도 배달로 넘어간다
+    wait(700);
+    expect(screen.getAllByText(/오늘은 이런 메뉴 어떠세요\?/)).toHaveLength(2);
+  });
+
+  it("음식 종류까지 말하면 근처 식당 추천으로 바로 가고, 메뉴 이름이 있으면 배달 주문으로 간다", () => {
+    renderChat();
+    send("중식 식당 예약해줘");
+    wait(900);
+    expect(screen.getByText(/근처 중식 맛집을 추천해요!/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /장락반점/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "새 대화" })); // 채팅창은 켠 채로 남는다
+    send("한식 먹고 싶어"); // 배달·식당 말이 없어도 음식 종류만으로 식당 추천
+    wait(900);
+    expect(screen.getByText(/근처 한식 맛집을 추천해요!/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "새 대화" }));
+    send("간장치킨 배달해줘"); // 메뉴 이름이 있으면 배달 말과 상관없이 주문으로
+    wait(700);
+    expect(screen.getByText(/몇 마리 주문할까요\?/)).toBeInTheDocument();
+  });
+
   it("못 알아들으면 할 수 있는 서비스를 선택지로 보여 준다", () => {
     renderChat();
     send("안녕");
