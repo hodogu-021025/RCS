@@ -6,7 +6,9 @@ import {
   formatDate,
   squash,
   startOfDay,
+  spokenTime,
   toMinutes,
+  withSubjectParticle,
   won,
   type BotPrompt,
   type Choice,
@@ -81,28 +83,36 @@ export function isShowDate(show: Show, date: Date, now: Date): boolean {
 export const lastShowDate = (now: Date) => addDays(startOfDay(now), MAX_TICKET_DAYS);
 
 export const TICKET_PROMPT: BotPrompt = {
-  text: "무엇을 예매할까요?",
+  text: "어떤 공연을 보고 싶으세요?\n지금 볼 수 있는 작품을 추천해 드릴게요.",
+  say: `${TICKET_CATEGORIES.map((c) => c.label).join(", ")} 모두 예매할 수 있어요. 보고 싶은 걸 말씀해 주시면 지금 볼 수 있는 작품을 추천해 드릴게요!`,
   choices: TICKET_CATEGORIES.map((c): Choice => ({ label: c.label, value: c.label })),
   placeholder: "예) 영화",
 };
 
 export function showDatePrompt(show: Show, now: Date, lead?: string): BotPrompt {
   const today = startOfDay(now);
+  // 오늘 회차가 다 끝났으면 "오늘"은 뺀다
+  const choices = ["오늘", "내일", "모레"].flatMap((label, i) => {
+    const d = addDays(today, i);
+    return isShowDate(show, d, now) ? [{ label: `${label} (${d.getMonth() + 1}/${d.getDate()})`, value: label }] : [];
+  });
+  const head = lead ?? `${show.title} 예매를 도와드릴게요.`;
   return {
-    text: `${lead ?? `${show.title} 예매를 도와드릴게요.`}\n언제 보실 건가요?`,
-    // 오늘 회차가 다 끝났으면 "오늘"은 뺀다
-    choices: ["오늘", "내일", "모레"].flatMap((label, i) => {
-      const d = addDays(today, i);
-      return isShowDate(show, d, now) ? [{ label: `${label} (${d.getMonth() + 1}/${d.getDate()})`, value: label }] : [];
-    }),
+    text: `${head}\n언제 보실 건가요?`,
+    say: `${head} 언제 보실 건가요?${choices[0] ? ` ${choices[0].value}도 볼 수 있어요.` : ""} 편한 날짜를 말씀해 주세요.`,
+    choices,
     picker: "date",
   };
 }
 
 export function sessionPrompt(show: Show, date: Date, now: Date, lead?: string): BotPrompt {
+  const times = sessionsOn(show, date, now);
+  const head = lead ?? formatDate(date);
+  const what = show.category === "exhibition" ? "입장 시간" : "회차";
   return {
-    text: `${lead ?? formatDate(date)}\n${show.category === "exhibition" ? "입장 시간을" : "회차를"} 골라 주세요.`,
-    choices: sessionsOn(show, date, now).map((t) => ({ label: t, value: t })),
+    text: `${head}\n${what === "회차" ? "회차를" : "입장 시간을"} 골라 주세요.`,
+    say: `${head} ${withSubjectParticle(`${times.map(spokenTime).join(", ")} ${what}`)} 남아 있어요. 몇 시로 할까요?`,
+    choices: times.map((t) => ({ label: t, value: t })),
     noDirect: true,
   };
 }

@@ -10,6 +10,13 @@ import {
   findPayment,
   findRestaurant,
   formatDate,
+  datePrompt,
+  FOOD_PROMPT,
+  recommend,
+  restaurantById,
+  spokenTime,
+  timePrompt,
+  withSubjectParticle,
   isNo,
   isBookableDate,
   isWithinHours,
@@ -228,5 +235,35 @@ describe("makeOrder / completionText", () => {
     expect(text).toMatch(/주문번호: ON\d{6}/);
     expect(text).toContain("장락 화덕피자에서 마르게리따 피자 1판을 준비 중이에요");
     expect(text).toContain("도착 예정: 약 40분 후 (10:40)");
+  });
+});
+
+describe("추천하는 말투 (읽어 주기·자막)", () => {
+  it("시각은 말로 읽는다", () => {
+    expect(spokenTime("18:00")).toBe("오후 6시");
+    expect(spokenTime("11:30")).toBe("오전 11시 30분");
+    expect(spokenTime("12:00")).toBe("오후 12시");
+    expect(spokenTime("00:10")).toBe("오전 12시 10분");
+  });
+
+  it("추천 목록은 마지막 말의 받침에 맞춰 조사를 붙인다", () => {
+    expect(recommend(["옛날통닭", "간장치킨"])).toBe("옛날통닭, 간장치킨을 추천해요!");
+    expect(recommend(["마르게리따 피자", "국물떡볶이"])).toBe("마르게리따 피자, 국물떡볶이를 추천해요!");
+    expect(withSubjectParticle("S, M, L, XL")).toBe("S, M, L, XL이");
+    expect(withSubjectParticle("오후 7시 30분 회차")).toBe("오후 7시 30분 회차가");
+  });
+
+  it("배달·식당 첫 질문은 고르라고 하지 않고 추천한다", () => {
+    expect(deliveryPrompt().say).toBe("오늘은 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이를 추천해요! 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
+    expect(FOOD_PROMPT.say).toContain("뭐든 좋아요");
+    for (const say of [deliveryPrompt().say, FOOD_PROMPT.say]) expect(say).not.toContain("중에서");
+  });
+
+  it("예약 시간은 대표 시간을 말로 추천하고, 다른 시간도 괜찮다고 한다", () => {
+    const now = new Date(2026, 9, 1, 10, 0);
+    const say = timePrompt(restaurantById("c1"), new Date(2026, 9, 2), now).say!;
+    expect(say).toContain("오후 12시, 오후 1시, 오후 6시를 추천해요!");
+    expect(say).toContain("다른 시간도 괜찮아요");
+    expect(datePrompt(restaurantById("c1"), now).say).toContain("오늘도 예약할 수 있어요");
   });
 });

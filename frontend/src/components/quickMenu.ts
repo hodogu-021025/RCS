@@ -26,6 +26,7 @@ export function quickMenuReply(text: string): QuickMenuReply | undefined {
 }
 
 export const FALLBACK_PROMPT: BotPrompt = {
-  text: "죄송해요, 잘 이해하지 못했어요.\n원하는 서비스를 골라 주세요.",
+  text: "죄송해요, 잘 이해하지 못했어요.\n배달, 식당 예약, 쇼핑, 예매를 도와드릴 수 있어요.",
+  say: "죄송해요, 잘 이해하지 못했어요. 배달, 식당 예약, 쇼핑, 예매를 도와드릴 수 있어요. 무엇을 해 드릴까요?",
   choices: QUICK_MENUS.map((m) => ({ label: m, value: m })),
 };

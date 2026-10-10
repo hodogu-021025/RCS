@@ -50,7 +50,7 @@ describe("OrderChatbot", () => {
     renderChat();
     send("배달");
     wait(700);
-    expect(screen.getByText(/어떤 음식을 배달해 드릴까요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 이런 메뉴 어떠세요\?/)).toBeInTheDocument();
     for (const name of ["옛날통닭", "간장치킨", "마르게리따 피자", "국물떡볶이"]) {
       expect(screen.getByRole("button", { name })).toBeEnabled();
     }
@@ -100,7 +100,7 @@ describe("OrderChatbot", () => {
     renderChat();
     send("치킨 시켜줘");
     wait(700);
-    expect(screen.getByText(/어떤 메뉴로 할까요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/이런 메뉴를 추천해요!/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "옛날통닭" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "간장치킨" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "국물떡볶이" })).not.toBeInTheDocument();
@@ -210,7 +210,7 @@ describe("OrderChatbot", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "신발" }));
     wait(900);
-    expect(screen.getByText(/신발 상품이에요/)).toBeInTheDocument();
+    expect(screen.getByText(/신발 인기 상품을 추천해요!/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /에어플로우 러닝화/ }));
     wait(700);
 
@@ -332,14 +332,14 @@ describe("OrderChatbot", () => {
     fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
-    expect(screen.getByText(/어떤 음식을 원하세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
 
     const korean = screen.getByRole("button", { name: "한식" });
     fireEvent.click(korean);
     expect(korean).toHaveClass("selected");
     expect(screen.getByRole("button", { name: "중식" })).toBeDisabled();
     wait(900);
-    expect(screen.getByText(/근처 한식 식당이에요/)).toBeInTheDocument();
+    expect(screen.getByText(/근처 한식 맛집을 추천해요!/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /장락 할매국밥/ })).toBeEnabled();
   });
 
@@ -367,7 +367,7 @@ describe("OrderChatbot", () => {
     fireEvent.click(screen.getByRole("button", { name: "직접 입력" }));
     send("짬뽕");
     wait(900);
-    expect(screen.getByText(/근처 중식 식당이에요/)).toBeInTheDocument();
+    expect(screen.getByText(/근처 중식 맛집을 추천해요!/)).toBeInTheDocument();
     const other = screen.getByRole("button", { name: /하소 만리향/ });
     expect(other).toBeEnabled();
 
@@ -536,7 +536,7 @@ describe("OrderChatbot", () => {
     renderChat();
     send("안녕");
     wait(700);
-    expect(screen.getByText(/원하는 서비스를 골라 주세요/)).toBeInTheDocument();
+    expect(screen.getByText(/배달, 식당 예약, 쇼핑, 예매를 도와드릴 수 있어요/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "배달" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "직접 입력" })).toBeEnabled();
   });
@@ -617,7 +617,7 @@ describe("OrderChatbot", () => {
     expect(document.querySelector(".caption-dots")).not.toBeInTheDocument();
     wait(10_000);
     // 선택지까지 읽어 주는 문장 그대로 (사용자가 한 말은 자막에 없다)
-    expect(caption()).toBe("어떤 음식을 배달해 드릴까요? 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이 중에서 말씀해 주세요.");
+    expect(caption()).toBe("오늘은 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이를 추천해요! 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
 
     // 숫자 속 점(1.8km)에서는 줄을 바꾸지 않는다
     send("간장치킨 1마리 시켜줘");
@@ -634,8 +634,8 @@ describe("OrderChatbot", () => {
     send("예매");
     wait(700);
 
-    expect(screen.getByText(/무엇을 예매할까요\?/)).toBeInTheDocument();
-    expect(screen.queryByText(/결제 수단을 선택해 주세요/)).not.toBeInTheDocument();
+    expect(screen.getByText(/어떤 공연을 보고 싶으세요\?/)).toBeInTheDocument();
+    expect(screen.queryByText(/어떤 걸로 결제하시겠어요/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });
 
@@ -753,12 +753,12 @@ describe("음성", () => {
     renderChat();
     speakInto("식당이요");
     wait(700);
-    expect(screen.getByText(/어떤 음식을 원하세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).toHaveAttribute("inert");
 
     speakInto("한식");
     wait(900);
-    expect(screen.getByText(/근처 한식 식당이에요/)).toBeInTheDocument();
+    expect(screen.getByText(/근처 한식 맛집을 추천해요!/)).toBeInTheDocument();
 
     speakInto("장락 할매국밥");
     wait(700);
@@ -820,8 +820,9 @@ describe("음성", () => {
     expect(utterance.lang).toBe("ko-KR");
     expect((utterance as unknown as { voice: { name: string } }).voice.name).toContain("SunHi"); // 자연 음성이 있으면 그걸 고른다
     expect((utterance as unknown as { pitch: number }).pitch).toBeGreaterThan(1);
-    expect(utterance.text).toContain("어떤 음식을 배달해 드릴까요?");
-    expect(utterance.text).toContain("옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이 중에서 말씀해 주세요.");
+    expect(utterance.text).toContain("오늘은 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이를 추천해요!");
+    expect(utterance.text).toContain("드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
+    expect(utterance.text).not.toContain("중에서");
 
     fireEvent.click(sound);
     expect(screen.getByRole("button", { name: "소리 켜기" })).toHaveAttribute("aria-pressed", "false");
@@ -888,7 +889,7 @@ describe("읽어 주기 목소리", () => {
     voices = [SUNHI];
     act(() => listeners.forEach((f) => f()));
     expect(speakSpy).toHaveBeenCalledTimes(1);
-    expect((speakSpy.mock.calls[0][0] as FakeUtterance).text).toContain("어떤 음식을 배달해 드릴까요?");
+    expect((speakSpy.mock.calls[0][0] as FakeUtterance).text).toContain("오늘은 옛날통닭, 간장치킨");
   });
 
   it("봇이 소리로 말하는 동안 배경 구체에 말하는 효과가 켜지고, 끝나면 꺼진다", () => {
@@ -981,7 +982,7 @@ describe("읽어 주기 목소리", () => {
     wait(700);
     const texts = speakSpy.mock.calls.map((c) => (c[0] as FakeUtterance).text);
     expect(texts.filter((t) => t.includes("Saylo예요"))).toHaveLength(1);
-    expect(texts.at(-1)).toContain("어떤 음식을 배달해 드릴까요?");
+    expect(texts.at(-1)).toContain("오늘은 옛날통닭, 간장치킨");
   });
 });
 

@@ -144,6 +144,7 @@ function withParticle(word: string, afterConsonant: string, afterVowel: string):
 }
 export const withObjectParticle = (word: string) => withParticle(word, "을", "를");
 export const withTopicParticle = (word: string) => withParticle(word, "은", "는");
+export const withSubjectParticle = (word: string) => withParticle(word, "이", "가");
 
 // ---- 배달 ----
 // 배달 메뉴 데모 데이터. 매장은 식당 찾기의 가상 식당과 같은 곳이다 (restaurantId).
@@ -361,13 +362,16 @@ export const lastBookableDate = (now: Date) => addDays(startOfDay(now), MAX_DAYS
 export function datePrompt(restaurant: Restaurant, now: Date, lead?: string): BotPrompt {
   const today = startOfDay(now);
   const labels = ["오늘", "내일", "모레"];
+  // 시간이 다 지난 오늘은 빼고 보여 준다
+  const choices = labels.flatMap((label, i) => {
+    const d = addDays(today, i);
+    return isBookableDate(restaurant, d, now) ? [{ label: `${label} (${d.getMonth() + 1}/${d.getDate()})`, value: label }] : [];
+  });
+  const head = lead ?? `${restaurant.name} 예약을 도와드릴게요.`;
   return {
-    text: `${lead ?? `${restaurant.name} 예약을 도와드릴게요.`}\n언제 방문하실 건가요?`,
-    // 시간이 다 지난 오늘은 빼고 보여 준다
-    choices: labels.flatMap((label, i) => {
-      const d = addDays(today, i);
-      return isBookableDate(restaurant, d, now) ? [{ label: `${label} (${d.getMonth() + 1}/${d.getDate()})`, value: label }] : [];
-    }),
+    text: `${head}\n언제 방문하실 건가요?`,
+    say: `${head} 언제 방문하실 건가요?${choices[0] ? ` ${choices[0].value}도 예약할 수 있어요.` : ""} 편한 날짜를 말씀해 주세요.`,
+    choices,
     picker: "date",
   };
 }
@@ -378,12 +382,28 @@ export function timeChoices(restaurant: Restaurant, date: Date, now: Date): Choi
 }
 
 export function timePrompt(restaurant: Restaurant, date: Date, now: Date, lead?: string): BotPrompt {
+  const choices = timeChoices(restaurant, date, now);
+  const head = lead ?? formatDate(date);
+  const picks = choices.slice(0, 3).map((c) => spokenTime(c.value));
   return {
-    text: `${lead ?? formatDate(date)}\n몇 시에 방문하실 건가요?\n영업시간 ${restaurant.hours}`,
-    choices: timeChoices(restaurant, date, now),
+    text: `${head}\n몇 시에 방문하실 건가요?\n영업시간 ${restaurant.hours}`,
+    say:
+      `${head} 몇 시에 방문하실 건가요?` +
+      (picks.length ? ` ${withObjectParticle(picks.join(", "))} 추천해요!` : "") +
+      ` 영업시간 안이라면 다른 시간도 괜찮아요.`,
+    choices,
     picker: "time",
   };
 }
+
+// 소리로 읽을 시각: "18:00" → "오후 6시", "11:30" → "오전 11시 30분"
+export function spokenTime(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${h < 12 ? "오전" : "오후"} ${h % 12 || 12}시${m ? ` ${m}분` : ""}`;
+}
+
+// 추천 목록을 말로: "옛날통닭, 간장치킨을 추천해요!"
+export const recommend = (names: string[]) => `${withObjectParticle(names.join(", "))} 추천해요!`;
 
 // 인원은 화면에서 −/+ 카운터 버튼으로 고른다 (1 ~ MAX_PEOPLE, 처음 값 DEFAULT_PEOPLE)
 export const DEFAULT_PEOPLE = 2;
@@ -416,25 +436,36 @@ export interface BotPrompt {
   picker?: "date" | "time";
   directLabel?: string; // "직접 입력" 대신 쓸 버튼 글자 (예: "다른 주소 입력")
   noDirect?: boolean; // 정해진 선택지 중에서만 고르는 질문 (사이즈, 상영 회차)
+  // 소리로 읽고 채팅창을 끈 동안 자막으로 보여 줄 문장. 선택지를 "중에서 고르세요"가 아니라 추천하듯 말한다.
+  // 없으면 text 와 선택지로 만든다
+  say?: string;
 }
 
 export const FOOD_PROMPT: BotPrompt = {
-  text: "어떤 음식을 원하세요?",
+  text: "오늘은 어떤 음식이 당기세요?\n말씀해 주시면 근처 맛집을 추천해 드릴게요.",
+  say: `오늘은 어떤 음식이 당기세요? ${FOODS.map((f) => f.label).join(", ")} 뭐든 좋아요. 말씀해 주시면 근처 맛집을 추천해 드릴게요!`,
   choices: FOODS.map((f) => ({ label: f.label, value: f.label })),
   placeholder: "먹고 싶은 음식을 입력하세요",
 };
 
 // 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 한다
-export const deliveryPrompt = (): BotPrompt => ({
-  text: "어떤 음식을 배달해 드릴까요?",
-  choices: deliveryChoices(availableDeliveryMenu()),
-  placeholder: "예) 간장치킨",
-});
+export const deliveryPrompt = (): BotPrompt => {
+  const menu = availableDeliveryMenu();
+  return {
+    text: "오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.",
+    say: menu.length
+      ? `오늘은 ${recommend(menu.map((d) => d.name))} 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
+      : "어떤 음식을 배달해 드릴까요?",
+    choices: deliveryChoices(menu),
+    placeholder: "예) 간장치킨",
+  };
+};
 
-// 여러 메뉴에 걸리는 말이면 그 메뉴들 중에서 고르게 한다
+// 여러 메뉴에 걸리는 말이면("치킨") 그 메뉴들을 추천한다
 export const pickDeliveryPrompt = (items: DeliveryItem[]): BotPrompt => ({
   ...deliveryPrompt(),
-  text: "어떤 메뉴로 할까요?",
+  text: "이런 메뉴를 추천해요!\n마음에 드는 걸로 골라 주세요.",
+  say: `${recommend(items.map((d) => d.name))} 마음에 드는 걸로 말씀해 주세요.`,
   choices: deliveryChoices(items),
 });
 

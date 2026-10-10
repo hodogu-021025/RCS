@@ -1,6 +1,6 @@
 // 쇼핑: 종류 → 상품 → (사이즈) → 수량 → 배송지 확인 → 주문서 → 결제.
 // 상품·브랜드는 화면 확인용 가상 데이터다.
-import { ADDRESS, squash, won, withTopicParticle, type BotPrompt, type Choice, type Order } from "./orderChatKnowledge";
+import { ADDRESS, squash, won, withSubjectParticle, withTopicParticle, type BotPrompt, type Choice, type Order } from "./orderChatKnowledge";
 
 export type ShopCategoryKey = "clothes" | "shoes" | "toys" | "cosmetics" | "books";
 
@@ -80,15 +80,18 @@ export function findSize(text: string, sizes: string[]): string | undefined {
 }
 
 export const SHOP_PROMPT: BotPrompt = {
-  text: "어떤 상품을 찾으세요?",
+  text: "어떤 상품을 찾으세요?\n말씀해 주시면 인기 상품을 추천해 드릴게요.",
+  say: `어떤 상품을 찾으세요? ${SHOP_CATEGORIES.map((c) => c.label).join(", ")} 모두 있어요. 찾으시는 걸 말씀해 주시면 인기 상품을 추천해 드릴게요!`,
   choices: SHOP_CATEGORIES.map((c): Choice => ({ label: c.label, value: c.label })),
   placeholder: "예) 운동화",
 };
 
 export function sizePrompt(product: Product, lead?: string): BotPrompt {
   const sizes = categoryOf(product).sizes ?? [];
+  const head = lead ?? `${product.name} (${won(product.price)})`;
   return {
-    text: `${lead ?? `${product.name} (${won(product.price)})`}\n사이즈를 골라 주세요.`,
+    text: `${head}\n사이즈를 골라 주세요.`,
+    say: `${head} 사이즈는 ${withSubjectParticle(sizes.join(", "))} 있어요. 어떤 사이즈로 드릴까요?`,
     choices: sizes.map((s) => ({ label: s, value: s })),
     noDirect: true,
   };
@@ -102,6 +105,7 @@ export function shopQuantityQuestion(product: Product, size?: string): string {
 export function addressPrompt(address: string, lead?: string): BotPrompt {
   return {
     text: `${lead ? `${lead}\n` : ""}배송지를 확인해 주세요.\n${address}`,
+    say: `${lead ? `${lead} ` : ""}배송지는 ${address}, 이 주소로 보내 드릴까요? 다른 곳에서 받으시려면 주소를 말씀해 주세요.`,
     choices: [{ label: "이 주소로 받기", value: "이 주소로 받을게요" }],
     directLabel: "다른 주소 입력",
     placeholder: "새 배송지 주소를 입력하세요",

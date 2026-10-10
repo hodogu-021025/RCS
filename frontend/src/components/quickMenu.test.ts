@@ -7,7 +7,7 @@ import { TICKET_PROMPT } from "./ticketKnowledge";
 describe("quickMenuReply", () => {
   it("배달·식당·쇼핑·예매가 각각 첫 질문과 다음 단계로 이어진다", () => {
     expect(quickMenuReply("배달")).toMatchObject({ next: "menu" });
-    expect(quickMenuReply("배달")?.text).toContain("어떤 음식을 배달해 드릴까요?");
+    expect(quickMenuReply("배달")?.text).toContain("오늘은 이런 메뉴 어떠세요?");
     expect(quickMenuReply("식당")).toEqual({ ...FOOD_PROMPT, next: "food" });
     expect(quickMenuReply("쇼핑")).toEqual({ ...SHOP_PROMPT, next: "shopCategory" });
     expect(quickMenuReply("예매")).toEqual({ ...TICKET_PROMPT, next: "tkCategory" });

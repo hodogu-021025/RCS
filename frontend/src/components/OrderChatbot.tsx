@@ -78,6 +78,8 @@ import {
   isBookableDate,
   lastBookableDate,
   timePrompt,
+  recommend,
+  spokenTime,
   withObjectParticle,
   won,
   type BotPrompt,
@@ -131,6 +133,7 @@ type Message =
       picker?: BotPrompt["picker"];
       directLabel?: string;
       noDirect?: boolean;
+      say?: string;
       picked?: string;
     }
   | { id: number; role: "bot"; kind: "order"; order: Order }
@@ -159,7 +162,7 @@ const GREETING = "안녕하세요! Saylo예요.\n무엇을 주문해 드릴까�
 
 let nextId = 1;
 const botText = (text: string): NewMessage => ({ role: "bot", kind: "text", text });
-const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect }: BotPrompt): NewMessage => ({
+const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect, say }: BotPrompt): NewMessage => ({
   role: "bot",
   kind: "text",
   text,
@@ -168,6 +171,7 @@ const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect }
   picker,
   directLabel,
   noDirect,
+  say,
 });
 const DEFAULT_PLACEHOLDER = "메시지를 입력하세요";
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
@@ -208,31 +212,36 @@ function DirectInputIcon({ picker }: { picker?: BotPrompt["picker"] }) {
 function spokenText(m: Message): string {
   if (m.role === "user") return "";
   const line = (s: string) => s.replace(/\n/g, " ");
+  // 선택지는 "중에서 고르세요"가 아니라 추천하듯 말한다. 질문마다 따로 써 둔 문장(say)이 있으면 그걸 읽는다
   switch (m.kind) {
     case "text":
-      return m.choices?.length ? `${line(m.text)} ${m.choices.map((c) => c.label).join(", ")} 중에서 말씀해 주세요.` : line(m.text);
+      if (m.say) return m.say;
+      if (!m.choices?.length) return line(m.text);
+      return m.noDirect
+        ? `${line(m.text)} ${m.choices.map((c) => c.label).join(", ")} 중에서 골라 주세요.`
+        : `${line(m.text)} ${recommend(m.choices.map((c) => c.label))} 다른 것도 편하게 말씀해 주세요.`;
     case "confirm":
       return "";
     case "order":
       return `${orderCardTitle(m.order)} ${orderCardRows(m.order).map((r) => `${r.label} ${r.value}`).join(", ")}. ${orderCardQuestion(m.order)}`;
     case "payment":
-      return `결제 수단을 말씀해 주세요. 총 결제금액 ${won(m.order.price)}. ${PAYMENTS.map((p) => p.label).join(", ")}.`;
+      return `총 결제금액은 ${won(m.order.price)}이에요. ${PAYMENTS.map((p) => p.label).join(", ")}로 결제할 수 있어요. 어떤 걸로 하시겠어요?`;
     case "restaurants":
-      return `근처 ${m.foodLabel} 식당이에요. ${m.list.map((r) => `${r.name} ${km(r.distanceKm)}`).join(", ")}. 원하는 곳을 말씀해 주세요.`;
+      return `근처 ${m.foodLabel} 맛집으로 ${recommend(m.list.map((r) => r.name))} 가까운 순서예요. 마음에 드는 곳을 말씀해 주세요.`;
     case "restaurantPicked":
       return `${withObjectParticle(m.restaurant.name)} 선택했어요.`;
     case "reservation": {
       const r = m.reservation;
-      return `예약 내용을 확인해 주세요. ${r.restaurant.name}, ${formatDate(r.date)} ${r.time}, ${r.people}명. 예약할까요?`;
+      return `예약 내용을 확인해 주세요. ${r.restaurant.name}, ${formatDate(r.date)} ${spokenTime(r.time)}, ${r.people}명. 예약할까요?`;
     }
     case "people":
       return `${m.lead ? `${m.lead} ` : ""}${PEOPLE_QUESTION}`;
     case "qty":
       return line(m.text);
     case "products":
-      return `${m.categoryLabel} 상품이에요. ${m.list.map((p) => `${p.name} ${won(p.price)}`).join(", ")}. 원하는 상품을 말씀해 주세요.`;
+      return `${m.categoryLabel} 인기 상품으로 ${recommend(m.list.map((p) => `${p.name} ${won(p.price)}`))} 마음에 드는 상품을 말씀해 주세요.`;
     case "shows":
-      return `예매할 수 있는 ${m.categoryLabel}이에요. ${m.list.map((s) => `${s.title} ${won(s.price)}`).join(", ")}. 원하는 작품을 말씀해 주세요.`;
+      return `지금 볼 수 있는 ${m.categoryLabel} 중에서 ${recommend(m.list.map((s) => s.title))} 보고 싶은 작품을 말씀해 주세요.`;
   }
 }
 
@@ -624,8 +633,10 @@ export function OrderChatbot() {
         botReply(() => push({ role: "bot", kind: "products", categoryLabel: category.label, list: productsOf(category.key) }), 900);
         return;
       }
-      const hint = stage === "shopProduct" ? "목록에서 상품을 고르거나, 다른 종류를 골라 주세요." : "아래에서 고르거나 직접 입력해 주세요.";
-      botReply(() => push(botPrompt({ ...SHOP_PROMPT, text: `어떤 상품인지 잘 모르겠어요.\n${hint}` })));
+      const hint = stage === "shopProduct" ? "추천 목록에서 고르시거나, 다른 종류를 말씀해 주세요." : "찾으시는 상품을 편하게 말씀해 주세요.";
+      botReply(() =>
+        push(botPrompt({ ...SHOP_PROMPT, text: `어떤 상품인지 잘 모르겠어요.\n${hint}`, say: `어떤 상품인지 잘 모르겠어요. ${hint}` })),
+      );
       return;
     }
 
@@ -690,8 +701,10 @@ export function OrderChatbot() {
         botReply(() => push({ role: "bot", kind: "shows", categoryLabel: category.label, list: showsOf(category.key) }), 900);
         return;
       }
-      const hint = stage === "tkShow" ? "목록에서 작품을 고르거나, 다른 종류를 골라 주세요." : "아래에서 고르거나 직접 입력해 주세요.";
-      botReply(() => push(botPrompt({ ...TICKET_PROMPT, text: `무엇을 예매할지 잘 모르겠어요.\n${hint}` })));
+      const hint = stage === "tkShow" ? "추천작 중에서 고르시거나, 다른 종류를 말씀해 주세요." : "보고 싶은 공연을 편하게 말씀해 주세요.";
+      botReply(() =>
+        push(botPrompt({ ...TICKET_PROMPT, text: `무엇을 예매할지 잘 모르겠어요.\n${hint}`, say: `무엇을 예매할지 잘 모르겠어요. ${hint}` })),
+      );
       return;
     }
 
@@ -840,7 +853,17 @@ export function OrderChatbot() {
         return;
       }
       if (!quickMenuReply(text)) {
-        botReply(() => push(botPrompt({ ...deliveryPrompt(), text: "지금은 아래 메뉴를 배달할 수 있어요.\n골라 주시거나 메뉴 이름을 입력해 주세요." })));
+        const menu = deliveryPrompt();
+        const names = (menu.choices ?? []).map((c) => c.label);
+        botReply(() =>
+          push(
+            botPrompt({
+              ...menu,
+              text: "그 메뉴는 아직 배달이 어려워요.\n대신 이런 메뉴는 어떠세요?",
+              say: `그 메뉴는 아직 배달이 어려워요.${names.length ? ` 대신 ${recommend(names)}` : ""} 드시고 싶은 다른 메뉴도 말씀해 주세요.`,
+            }),
+          ),
+        );
         return;
       }
     }
@@ -869,8 +892,10 @@ export function OrderChatbot() {
         return;
       }
       if (!quickMenuReply(text) && findDeliveryItems(text).length === 0) {
-        const hint = stage === "restaurant" ? "목록에서 식당을 고르거나, 다른 음식을 골라 주세요." : "아래에서 고르거나 직접 입력해 주세요.";
-        botReply(() => push(botPrompt({ ...FOOD_PROMPT, text: `어떤 음식인지 잘 모르겠어요.\n${hint}` })));
+        const hint = stage === "restaurant" ? "추천 맛집 중에서 고르시거나, 다른 음식을 말씀해 주세요." : "드시고 싶은 음식을 편하게 말씀해 주세요.";
+        botReply(() =>
+          push(botPrompt({ ...FOOD_PROMPT, text: `어떤 음식인지 잘 모르겠어요.\n${hint}`, say: `어떤 음식인지 잘 모르겠어요. ${hint}` })),
+        );
         return;
       }
     }
@@ -1080,7 +1105,7 @@ export function OrderChatbot() {
       case "payment":
         return (
           <>
-            {`결제 수단을 선택해 주세요.\n총 결제금액: ${won(m.order.price)}`}
+            {`어떤 걸로 결제하시겠어요?\n총 결제금액: ${won(m.order.price)}`}
             <div className="pay">
               {PAYMENTS.map((p) => (
                 <button
@@ -1100,7 +1125,7 @@ export function OrderChatbot() {
       case "restaurants":
         return (
           <>
-            {`근처 ${m.foodLabel} 식당이에요. 가까운 순서예요.\n원하는 곳을 눌러 주세요.`}
+            {`근처 ${m.foodLabel} 맛집을 추천해요!\n가까운 순서예요. 마음에 드는 곳을 골라 주세요.`}
             <div className="places">
               {m.list.map((r) => (
                 <button
@@ -1174,7 +1199,7 @@ export function OrderChatbot() {
       case "products":
         return (
           <>
-            {`${m.categoryLabel} 상품이에요.\n원하는 상품을 눌러 주세요.`}
+            {`${m.categoryLabel} 인기 상품을 추천해요!\n마음에 드는 상품을 골라 주세요.`}
             <div className="places">
               {m.list.map((p) => (
                 <button
@@ -1199,7 +1224,7 @@ export function OrderChatbot() {
       case "shows":
         return (
           <>
-            {`예매할 수 있는 ${m.categoryLabel}이에요.\n원하는 작품을 눌러 주세요.`}
+            {`지금 볼 수 있는 ${m.categoryLabel} 추천작이에요!\n보고 싶은 작품을 골라 주세요.`}
             <div className="places">
               {m.list.map((s) => (
                 <button
