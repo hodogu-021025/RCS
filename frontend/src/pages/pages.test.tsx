@@ -33,22 +33,85 @@ describe("첫 화면", () => {
 
   it("첫 화면에서 소비자로 로그인하면 챗봇으로 간다", () => {
     open("#/");
-    fireEvent.click(screen.getByRole("button", { name: "소비자 · user" }));
-    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    typeLogin("user", "1234");
     expect(window.location.hash).toBe("#/chat");
     expect(screen.getByRole("button", { name: "Say 전송" })).toBeInTheDocument();
+  });
+
+  it("로그인 버튼 밑에 회원가입 버튼이 있고, 데모 계정 버튼은 없다", () => {
+    open("#/login");
+    // 화면에 놓인 순서대로 (버튼과 링크를 섞어서)
+    const controls = [...document.querySelectorAll("form button, form a")].map((el) => el.textContent);
+    expect(controls.indexOf("회원가입")).toBe(controls.indexOf("로그인") + 1);
+    expect(screen.getByRole("link", { name: "회원가입" })).toHaveAttribute("href", "#/signup");
+    expect(screen.queryByText(/데모 계정/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /· owner/ })).not.toBeInTheDocument();
+  });
+});
+
+function typeLogin(username: string, password: string) {
+  fireEvent.change(screen.getByLabelText("아이디"), { target: { value: username } });
+  fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: password } });
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+}
+
+describe("회원가입", () => {
+  function fill(fields: Record<string, string>) {
+    for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  }
+
+  it("고객님으로 가입하면 바로 로그인돼 챗봇으로 가고, 다음부터 그 계정으로 로그인할 수 있다", () => {
+    open("#/signup");
+    expect(screen.getByRole("radio", { name: "고객님" })).toBeChecked();
+    expect(screen.queryByLabelText("매장")).not.toBeInTheDocument();
+    fill({ 아이디: "hong", 이름: "홍길동", 비밀번호: "pw1234", "비밀번호 확인": "pw1234" });
+    fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
+
+    expect(window.location.hash).toBe("#/chat");
+    expect(getDb().users).toMatchObject([{ username: "hong", name: "홍길동" }]);
+    expect(login("hong", "pw1234")).toMatchObject({ role: "user", name: "홍길동" });
+  });
+
+  it("사장님으로 가입하면 매장을 고르고, 가입 후 내 매장의 사장님 페이지로 간다", () => {
+    open("#/signup");
+    fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
+    fill({ 아이디: "banjeom", "대표자 이름": "김사장", 비밀번호: "pw1234", "비밀번호 확인": "pw1234" });
+    fireEvent.click(screen.getByRole("button", { name: "사장님으로 가입하기" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("매장을 골라 주세요");
+
+    fill({ 매장: "c1" });
+    fireEvent.click(screen.getByRole("button", { name: "사장님으로 가입하기" }));
+    expect(window.location.hash).toBe("#/owner");
+    expect(screen.getByText("장락반점 · 사장님")).toBeInTheDocument();
+    expect(getDb().owners).toMatchObject([{ username: "banjeom", storeId: "c1", name: "김사장" }]);
+  });
+
+  it("이미 있는 아이디, 짧은 비밀번호, 서로 다른 비밀번호 확인은 안내하고 가입하지 않는다", () => {
+    open("#/signup");
+    const submit = () => fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
+    fill({ 아이디: "owner", 이름: "누구", 비밀번호: "pw1234", "비밀번호 확인": "pw1234" });
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
+
+    fill({ 아이디: "newbie", 비밀번호: "12" });
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("4자 이상");
+
+    fill({ 비밀번호: "pw1234", "비밀번호 확인": "pw9999" });
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("비밀번호가 서로 달라요");
+    expect(getDb().users).toEqual([]);
+    expect(window.location.hash).toBe("#/signup");
   });
 });
 
 describe("로그인 페이지", () => {
   it("틀리면 안내가 뜨고, 사장님으로 맞게 로그인하면 사장님 페이지로 간다", () => {
     open("#/login");
-    fireEvent.change(screen.getByLabelText("아이디"), { target: { value: "owner" } });
-    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "wrong" } });
-    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    typeLogin("owner", "wrong");
     expect(screen.getByRole("alert")).toHaveTextContent("맞지 않아요");
 
-    fireEvent.click(screen.getByRole("button", { name: "사장님 · owner" })); // 데모 계정 버튼이 채워 준다
+    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "1234" } });
     fireEvent.click(screen.getByRole("button", { name: "로그인" }));
     expect(window.location.hash).toBe("#/owner");
     expect(screen.getByText("청전 치킨공방 · 사장님")).toBeInTheDocument();

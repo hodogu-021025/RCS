@@ -56,13 +56,23 @@
 .btn:disabled { opacity: .4; cursor: default; }
 .dash-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.demo-accounts { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; }
-.demo-accounts > span { width: 100%; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
-.demo-accounts button {
-  height: 30px; padding: 0 12px; border: 1px dashed #cbd5e1; border-radius: 999px;
-  background: #fff; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+/* 로그인 화면 맨 아래의 작은 글자 링크 */
+.link-quiet {
+  display: block; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
+  text-align: center; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none;
 }
-.demo-accounts button:hover { border-color: var(--accent); color: var(--accent); }
+.link-quiet:hover { color: var(--accent); }
+
+/* 회원가입: 고객님 / 사장님 고르기 (두 칸짜리 토글) */
+.role-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface); }
+.role-switch button {
+  height: 40px; border: none; border-radius: 10px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.role-switch button[aria-checked="true"] { background: #fff; color: var(--accent); }
+.role-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dash-card .role-hint { margin: 8px 2px 16px; font-size: 13px; }
 
 /* 탭 */
 .dash-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }

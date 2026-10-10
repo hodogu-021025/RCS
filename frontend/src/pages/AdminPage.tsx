@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { allOwners, isUsernameTaken } from "../auth/auth";
+import { allOwners, passwordError, usernameError } from "../auth/auth";
 import { RESTAURANTS, formatDate, withStoreSettings, won } from "../components/orderChatKnowledge";
 import { addOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
 import { DashLayout, Tabs } from "./DashLayout";
@@ -137,9 +137,8 @@ function StoresTab() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     const u = username.trim();
-    if (!/^[a-z0-9_]{3,20}$/i.test(u)) return setError("아이디는 영문·숫자 3~20자로 적어 주세요.");
-    if (isUsernameTaken(u)) return setError("이미 있는 아이디예요.");
-    if (password.length < 4) return setError("비밀번호는 4자 이상이어야 해요.");
+    const invalid = usernameError(u) ?? passwordError(password);
+    if (invalid) return setError(invalid);
     addOwner({ username: u, password, name: name.trim() || `${RESTAURANTS.find((r) => r.id === storeId)!.name} 사장님`, storeId });
     setUsername("");
     setPassword("");
@@ -300,31 +299,60 @@ function UsersTab({ rows }: { rows: Row[] }) {
     byUser.set(r.who, { count: cur.count + 1, spent: cur.spent + (r.status !== "취소" ? (r.amount ?? 0) : 0), last: Math.max(cur.last, r.createdAt) });
   }
   const users = [...byUser.entries()].sort((a, b) => b[1].last - a[1].last);
+  const members = [...useDb().users].sort((a, b) => b.createdAt - a.createdAt);
   return (
-    <section className="dash-section">
-      <h2>사용자 ({users.length})</h2>
-      <div className="table-wrap">
-        <table className="dash-table">
-          <thead>
-            <tr>
-              <th>이름</th>
-              <th>주문·예약</th>
-              <th>결제 합계</th>
-              <th>마지막 이용</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(([name, u]) => (
-              <tr key={name}>
-                <td>{name}</td>
-                <td>{u.count}건</td>
-                <td>{won(u.spent)}</td>
-                <td>{formatDateTime(u.last)}</td>
+    <>
+      <section className="dash-section">
+        <h2>가입한 고객님 ({members.length})</h2>
+        {members.length === 0 && <p className="empty">아직 회원가입한 고객님이 없어요.</p>}
+        {members.length > 0 && (
+          <div className="table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>아이디</th>
+                  <th>이름</th>
+                  <th>가입 시각</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr key={m.username}>
+                    <td>{m.username}</td>
+                    <td>{m.name}</td>
+                    <td>{formatDateTime(m.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      <section className="dash-section">
+        <h2>이용 내역 ({users.length})</h2>
+        <div className="table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>주문·예약</th>
+                <th>결제 합계</th>
+                <th>마지막 이용</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            </thead>
+            <tbody>
+              {users.map(([name, u]) => (
+                <tr key={name}>
+                  <td>{name}</td>
+                  <td>{u.count}건</td>
+                  <td>{won(u.spent)}</td>
+                  <td>{formatDateTime(u.last)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }

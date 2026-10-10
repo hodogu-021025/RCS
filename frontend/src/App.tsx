@@ -5,6 +5,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MyOrdersPage } from "./pages/MyOrdersPage";
 import { OwnerPage } from "./pages/OwnerPage";
 import { RequireRole } from "./pages/RequireRole";
+import { SignupPage } from "./pages/SignupPage";
 
 // 주소는 #/owner 처럼 해시를 쓴다: 어떤 정적 호스팅이든, 파일을 바로 열어도(saylo.html) 동작한다
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/chat" element={<OrderChatbot />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
         <Route
           path="/me"
           element={

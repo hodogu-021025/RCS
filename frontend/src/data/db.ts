@@ -43,15 +43,24 @@ export interface OwnerAccount {
   storeId: string;
 }
 
+// 회원가입한 소비자
+export interface UserAccount {
+  username: string;
+  password: string; // 데모라서 그대로 저장한다
+  name: string;
+  createdAt: number;
+}
+
 interface Db {
   orders: OrderRecord[];
   reservations: ReservationRecord[];
   storeSettings: Record<string, StoreSettings>;
   owners: OwnerAccount[];
+  users: UserAccount[];
 }
 
 const KEY = "saylo.db";
-const EMPTY: Db = { orders: [], reservations: [], storeSettings: {}, owners: [] };
+const EMPTY: Db = { orders: [], reservations: [], storeSettings: {}, owners: [], users: [] };
 
 let cacheRaw: string | null | undefined;
 let cache: Db = EMPTY;
@@ -185,6 +194,12 @@ export function addOwner(account: OwnerAccount) {
   updateDb((db) => {
     db.owners = db.owners.filter((o) => o.username !== account.username);
     db.owners.push(account);
+  });
+}
+
+export function addUser(account: UserAccount) {
+  updateDb((db) => {
+    db.users.push(account);
   });
 }
 

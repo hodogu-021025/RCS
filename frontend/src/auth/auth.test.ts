@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { addOwner, removeOwner, resetDb } from "../data/db";
-import { accountExists, allOwners, getSession, isUsernameTaken, login, logout } from "./auth";
+import { accountExists, allOwners, getSession, isUsernameTaken, login, logout, signup, usernameError } from "./auth";
 
 afterEach(resetDb);
 
@@ -37,6 +37,16 @@ describe("로그인", () => {
     removeOwner("jangrak");
     expect(accountExists(session)).toBe(false);
     expect(accountExists(login("owner", "1234")!)).toBe(true);
+  });
+
+  it("회원가입한 아이디는 다른 가입·사장님 계정 만들기에서 다시 쓸 수 없다", () => {
+    expect(signup({ role: "user", username: "hong", name: "홍길동", password: "pw1234", passwordConfirm: "pw1234" })).toHaveProperty("session");
+    expect(isUsernameTaken("hong")).toBe(true);
+    expect(usernameError("hong")).toBe("이미 있는 아이디예요.");
+    expect(signup({ role: "owner", username: "hong", name: "홍", storeId: "c1", password: "pw1234", passwordConfirm: "pw1234" })).toEqual({
+      error: "이미 있는 아이디예요.",
+    });
+    expect(usernameError("한글아이디")).toMatch(/영문·숫자/);
   });
 
   it("저장된 세션이 손상돼 있으면 로그인 안 된 것으로 본다", () => {
