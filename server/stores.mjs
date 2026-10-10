@@ -1,7 +1,5 @@
 // 가게·메뉴 목록 (catalog.json, 화면과 같이 쓰는 파일)과 상태 값. 실제 목록이 오면 catalog.json 만 바꾼다
-import { readFileSync } from "node:fs";
-
-const catalog = JSON.parse(readFileSync(new URL("./catalog.json", import.meta.url), "utf8"));
+import catalog from "./catalog.json" with { type: "json" };
 
 export const RESTAURANTS = catalog.restaurants;
 export const DELIVERY_MENU = catalog.deliveryMenu;
