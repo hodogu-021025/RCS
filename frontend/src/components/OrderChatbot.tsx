@@ -340,6 +340,19 @@ export function OrderChatbot() {
     if (list) list.scrollTop = list.scrollHeight;
   }, [messages, thinking, pickerOpenFor]);
 
+  // 입력창이 펼쳐지거나 접히면서(또는 휴대폰 키보드가 올라오면서) 대화 영역 높이가 바뀌면 맨 아래를 계속 보여 준다.
+  // 입력창은 애니메이션으로 열리므로 위 효과만으로는 마지막 말풍선의 버튼이 입력창 아래에 가려진다
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || typeof ResizeObserver === "undefined") return;
+    // 애니메이션 중에는 매 프레임 불리므로 부드러운 스크롤(.chat 의 scroll-behavior) 대신 바로 옮긴다
+    const observer = new ResizeObserver(() => {
+      list.scrollTo({ top: list.scrollHeight, behavior: "instant" });
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, []);
+
   // 입력창이 열리면 바로 쓸 수 있게 포커스한다
   useEffect(() => {
     if (composerOpen) inputRef.current?.focus();
