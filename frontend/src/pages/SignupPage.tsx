@@ -21,25 +21,29 @@ export function SignupPage() {
   const [name, setName] = useState("");
   const [storeId, setStoreId] = useState("");
   const [email, setEmail] = useState("");
-  const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
+  // 인증을 마친 주소와 그때 받은 증표. 주소를 바꾸면 더 쓰지 않는다
+  const [verified, setVerified] = useState<{ email: string; proof: string } | null>(null);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   if (session) return <Navigate to={HOME_BY_ROLE[session.role]} replace />;
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const result = signup({
+    setBusy(true);
+    const result = await signup({
       role,
       username,
       name,
       email,
-      emailVerified: verifiedEmail !== null && verifiedEmail === normalizeEmail(email),
+      proof: verified && verified.email === normalizeEmail(email) ? verified.proof : null,
       password,
       passwordConfirm,
       storeId: role === "owner" ? storeId : undefined,
     });
+    setBusy(false);
     if ("error" in result) {
       setError(result.error);
       return;
@@ -91,7 +95,7 @@ export function SignupPage() {
             </select>
           </label>
         )}
-        <EmailVerifyField email={email} onEmailChange={setEmail} verifiedEmail={verifiedEmail} onVerified={setVerifiedEmail} />
+        <EmailVerifyField email={email} onEmailChange={setEmail} verifiedEmail={verified?.email ?? null} onVerified={setVerified} />
         <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder={`${PASSWORD_MIN}자 이상`} />
         <PasswordField
           label="비밀번호 확인"
@@ -105,8 +109,8 @@ export function SignupPage() {
             {error}
           </p>
         )}
-        <button className="btn primary wide" type="submit">
-          {ROLES.find((r) => r.value === role)!.label}으로 가입하기
+        <button className="btn primary wide" type="submit" disabled={busy}>
+          {busy ? "가입하는 중…" : `${ROLES.find((r) => r.value === role)!.label}으로 가입하기`}
         </button>
         <a className="btn wide" href="#/login">
           이미 계정이 있어요 · 로그인

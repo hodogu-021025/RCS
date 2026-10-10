@@ -58,8 +58,14 @@ describe("인증번호 보내기", () => {
 describe("인증번호 확인", () => {
   it("맞으면 인증되고, 같은 번호는 두 번 쓸 수 없다", async () => {
     await verifier.sendCode("hong@example.com");
-    assert.deepEqual(verifier.verifyCode("HONG@example.com", " 123456 ").body, { ok: true, verified: true });
+    const ok = verifier.verifyCode("HONG@example.com", " 123456 ").body;
+    assert.equal(ok.verified, true);
+    assert.match(ok.proof, /^[A-Za-z0-9_-]{20,}$/); // 회원가입에 같이 보내는 증표
     assert.equal(verifier.verifyCode("hong@example.com", "123456").status, 400);
+    // 증표는 한 번만 쓴다
+    assert.equal(verifier.consumeProof("hong@example.com", "wrong"), false);
+    assert.equal(verifier.consumeProof("Hong@Example.com", ok.proof), true);
+    assert.equal(verifier.consumeProof("hong@example.com", ok.proof), false);
   });
 
   it("틀리면 남은 횟수를 알려 주고, 다 틀리면 번호가 없어진다", async () => {

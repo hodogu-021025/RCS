@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { allOwners, passwordError, usernameError } from "../auth/auth";
+import { passwordError, usernameError } from "../auth/auth";
 import { RESTAURANTS, formatDate, withStoreSettings, won } from "../components/orderChatKnowledge";
 import { addOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
 import { DashLayout, Tabs } from "./DashLayout";
@@ -120,22 +120,25 @@ function AllTab({ rows }: { rows: Row[] }) {
   );
 }
 
-// 식당마다 사장님 계정을 보여 주고, 새 사장님 계정을 만든다 (데모 계정은 지울 수 없다)
+// 식당마다 사장님 계정을 보여 주고, 새 사장님 계정을 만든다
 function StoresTab() {
-  useDb(); // 계정이나 매장 설정이 바뀌면 다시 그린다
-  const owners = allOwners();
+  const owners = useDb(["settings", "accounts"]).owners;
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [storeId, setStoreId] = useState(RESTAURANTS[0].id);
   const [error, setError] = useState<string | null>(null);
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const u = username.trim();
     const invalid = usernameError(u) ?? passwordError(password);
     if (invalid) return setError(invalid);
-    addOwner({ username: u, password, name: name.trim() || `${RESTAURANTS.find((r) => r.id === storeId)!.name} 사장님`, storeId });
+    try {
+      await addOwner({ username: u, password, name: name.trim() || `${RESTAURANTS.find((r) => r.id === storeId)!.name} 사장님`, storeId });
+    } catch (err) {
+      return setError((err as Error).message); // 이미 있는 아이디 등 서버가 거절한 이유
+    }
     setUsername("");
     setPassword("");
     setName("");
@@ -149,7 +152,7 @@ function StoresTab() {
         <ul className="record-list">
           {RESTAURANTS.map((r) => {
             const mine = owners.filter((o) => o.storeId === r.id);
-            const removable = mine.filter((o) => !o.builtIn);
+            const removable = mine;
             return (
               <li key={r.id} className="record">
                 <div className="record-head">
@@ -291,7 +294,7 @@ function UsersTab({ rows }: { rows: Row[] }) {
     byUser.set(r.who, { count: cur.count + 1, spent: cur.spent + (r.status !== "취소" ? (r.amount ?? 0) : 0), last: Math.max(cur.last, r.createdAt) });
   }
   const users = [...byUser.entries()].sort((a, b) => b[1].last - a[1].last);
-  const members = [...useDb().users].sort((a, b) => b.createdAt - a.createdAt);
+  const members = [...useDb(["accounts"]).users].sort((a, b) => b.createdAt - a.createdAt);
   return (
     <>
       <section className="dash-section">

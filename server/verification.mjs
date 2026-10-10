@@ -1,12 +1,13 @@
 // 이메일 인증번호: 6자리 번호를 만들어 메일로 보내고, 사용자가 적은 번호가 맞는지 확인한다.
 // 번호는 이 서버 프로세스 메모리에만 둔다 (서버가 하나뿐이라 충분하다. 여러 대로 늘리면 Redis 같은 공용 저장소로 옮긴다).
-import { randomInt, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
 export const CODE_TTL_MS = 5 * 60_000; // 인증번호 유효 시간
 export const RESEND_COOLDOWN_MS = 60_000; // 같은 주소로 다시 보내기까지
 export const MAX_ATTEMPTS = 5; // 번호 하나로 틀릴 수 있는 횟수
 export const IP_WINDOW_MS = 10 * 60_000; // 한 IP 가 이 시간 동안
 export const IP_MAX_SENDS = 5; //            보낼 수 있는 메일 수 (아무 주소로나 메일을 뿌리는 걸 막는다)
+export const PROOF_TTL_MS = 15 * 60_000; // 인증을 마친 뒤 회원가입을 끝내야 하는 시간
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const normalizeEmail = (email) => String(email ?? "").trim().toLowerCase();
@@ -21,9 +22,16 @@ function sameCode(a, b) {
 }
 
 // sendMail(email, code): 실제 발송 (Resend). 실패하면 throw
-export function createVerifier({ sendMail, now = Date.now, generateCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0") }) {
+// newProof(): 인증을 마친 주소에 주는 증표 (회원가입 때 같이 보내야 인증된 주소로 인정한다)
+export function createVerifier({
+  sendMail,
+  now = Date.now,
+  generateCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0"),
+  newProof = () => randomBytes(24).toString("base64url"),
+}) {
   const codes = new Map(); // email → { code, expiresAt, sentAt, attempts }
   const sendsByIp = new Map(); // ip → [보낸 시각…]
+  const proofs = new Map(); // email → { proof, expiresAt }
 
   async function sendCode(rawEmail, ip = "unknown") {
     const email = normalizeEmail(rawEmail);
@@ -67,13 +75,25 @@ export function createVerifier({ sendMail, now = Date.now, generateCode = () => 
       return fail(429, "인증번호를 너무 많이 틀렸어요. 다시 받아 주세요.");
     }
     codes.delete(email); // 한 번 쓰면 끝
-    return { status: 200, body: { ok: true, verified: true } };
+    const proof = newProof();
+    proofs.set(email, { proof, expiresAt: now() + PROOF_TTL_MS });
+    return { status: 200, body: { ok: true, verified: true, proof } };
+  }
+
+  // 회원가입 때: 이 주소가 방금 인증한 주소가 맞는지. 맞으면 증표를 지운다 (한 번만 쓴다)
+  function consumeProof(rawEmail, proof) {
+    const email = normalizeEmail(rawEmail);
+    const entry = proofs.get(email);
+    if (!entry || now() > entry.expiresAt || !proof || !sameCode(String(proof), entry.proof)) return false;
+    proofs.delete(email);
+    return true;
   }
 
   // 오래된 기록 청소 (메모리가 계속 늘지 않게)
   function sweep() {
     const t = now();
     for (const [email, e] of codes) if (t > e.expiresAt) codes.delete(email);
+    for (const [email, e] of proofs) if (t > e.expiresAt) proofs.delete(email);
     for (const [ip, list] of sendsByIp) {
       const recent = list.filter((at) => t - at < IP_WINDOW_MS);
       if (recent.length) sendsByIp.set(ip, recent);
@@ -81,5 +101,5 @@ export function createVerifier({ sendMail, now = Date.now, generateCode = () => 
     }
   }
 
-  return { sendCode, verifyCode, sweep };
+  return { sendCode, verifyCode, consumeProof, sweep };
 }

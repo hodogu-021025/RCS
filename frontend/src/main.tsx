@@ -3,11 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './dashboard.css'
 import App from './App.tsx'
-import { seedDemoData } from './data/db'
-import { makeDemoRecords } from './data/seed'
+import { restoreSession } from './auth/auth'
 
-// 처음 열면 사장님·관리자 화면용 보기 데이터를 넣는다 (이미 있으면 그대로)
-seedDemoData(makeDemoRecords)
+// 저장된 로그인 토큰이 있으면 서버에 물어 세션을 되살린다 (응답 전에는 로그인 화면으로 보내지 않는다)
+void restoreSession()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

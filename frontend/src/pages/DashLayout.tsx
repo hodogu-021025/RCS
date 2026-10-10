@@ -13,7 +13,7 @@ export function DashLayout({ title, children }: Props) {
   const navigate = useNavigate();
 
   function onLogout() {
-    logout();
+    void logout(); // 화면의 로그인 상태는 바로 풀리고, 서버의 세션 삭제는 뒤에서 이어진다
     navigate("/login");
   }
 

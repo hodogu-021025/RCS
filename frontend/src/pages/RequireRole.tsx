@@ -1,25 +1,21 @@
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
-import { HOME_BY_ROLE, ROLE_LABEL, accountExists, logout, useSession, type Role } from "../auth/auth";
-import { useDb } from "../data/db";
+import { HOME_BY_ROLE, ROLE_LABEL, useSession, useSessionLoaded, type Role } from "../auth/auth";
 
 interface Props {
   roles: Role[];
   children: ReactNode;
 }
 
-// 로그인하지 않았으면 로그인 페이지로 보내고, 역할이 다르면 안내만 보여 준다
+// 로그인하지 않았으면 로그인 페이지로 보내고, 역할이 다르면 안내만 보여 준다.
+// 저장된 토큰으로 세션을 되살리는 중에는 잠깐 빈 틀을 보여 준다 (바로 로그인 페이지로 보내면 새로고침 때마다 튕긴다).
+// 관리자가 지운 계정은 서버가 토큰을 거절하므로 다음 요청 때 자동으로 로그아웃된다
 export function RequireRole({ roles, children }: Props) {
   const session = useSession();
-  useDb(); // 관리자가 계정을 지우면 바로 다시 판단한다
-  const alive = !!session && accountExists(session);
+  const loaded = useSessionLoaded();
 
-  // 지워진 계정의 세션은 여기서 정리한다 (다른 탭에서 지워도 storage 이벤트로 들어온다)
-  useEffect(() => {
-    if (session && !alive) logout();
-  }, [session, alive]);
-
-  if (!session || !alive) return <Navigate to="/login" replace />;
+  if (!loaded) return <div className="dash dash-mobile" aria-busy="true" />;
+  if (!session) return <Navigate to="/login" replace />;
   if (!roles.includes(session.role)) {
     return (
       <div className="dash dash-center">

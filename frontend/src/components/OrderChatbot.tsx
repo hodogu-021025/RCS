@@ -3,7 +3,7 @@ import backgroundVideo from "../image/saylo_background.mp4";
 import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { useSession } from "../auth/auth";
-import { addOrder, addReservation } from "../data/db";
+import { addOrder, addReservation, useDb } from "../data/db";
 import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
@@ -248,6 +248,8 @@ export function OrderChatbot() {
   const tts = useSpeechOutput();
   // 로그인한 소비자면 주문·예약 기록에 이름이 남고, 아니면 비회원으로 남는다
   const session = useSession();
+  // 사장님이 바꾼 영업시간·품절을 서버에서 받아 온다 (메뉴 버튼과 예약 시간에 반영)
+  useDb(["settings"]);
 
   useEffect(() => {
     if (!notice) return;
@@ -496,9 +498,9 @@ export function OrderChatbot() {
       if (isYes(text)) {
         const done = reservationDoneText({ restaurant, date: draft.date, time: draft.time, people: draft.people });
         // 사장님·관리자 화면에서 보이도록 기록한다
-        addReservation(
-          { restaurantId: restaurant.id, restaurantName: restaurant.name, date: draft.date, time: draft.time, people: draft.people },
-          session,
+        // 로그인했으면 그 사람 이름으로, 아니면 비회원으로 서버에 남는다 (실패해도 대화는 이어 간다)
+        addReservation({ restaurantId: restaurant.id, restaurantName: restaurant.name, date: draft.date, time: draft.time, people: draft.people }).catch(
+          () => {},
         );
         setRsv(null);
         setStage("idle");
@@ -704,7 +706,7 @@ export function OrderChatbot() {
     if (!order || !payMethod) return;
     const text = completionText(order, payMethod);
     // 사장님·관리자 화면에서 보이도록 기록한다
-    addOrder(order, payMethod.label, session);
+    addOrder(order, payMethod.label).catch(() => {});
     setPayMethod(null);
     setOrder(null);
     setStage("done");

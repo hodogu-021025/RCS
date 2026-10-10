@@ -67,10 +67,12 @@ export function OwnerPage() {
 
   const [tab, setTab] = useState<Tab>("orders");
   const [filter, setFilter] = useState<Filter>("all");
-  // 페이지를 열 때 이미 있던 주문에는 알리지 않는다
-  const [seenAtOpen] = useState(() => orders[0]?.id);
+  // 페이지를 열 때 이미 있던 주문에는 알리지 않는다: 서버에서 처음 받아 온 뒤의 맨 위 주문을 기억해 두고, 그 뒤에 생긴 것만 알린다
+  // (렌더 중에 상태를 맞추는 React 의 파생 상태 방식)
+  const [seenAtOpen, setSeenAtOpen] = useState<string | null | undefined>(undefined);
+  if (db.recordsLoaded && seenAtOpen === undefined) setSeenAtOpen(orders[0]?.id ?? null);
   const latest = orders[0];
-  const isNew = latest && latest.id !== seenAtOpen && latest.status === "접수";
+  const isNew = seenAtOpen !== undefined && latest && latest.id !== seenAtOpen && latest.status === "접수";
 
   const shownOrders = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 

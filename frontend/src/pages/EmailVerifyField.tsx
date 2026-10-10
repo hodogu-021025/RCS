@@ -1,12 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { confirmVerificationCode, isValidEmail, normalizeEmail, sendVerificationCode } from "../api/emailVerification";
-import { isEmailTaken } from "../auth/auth";
 
 interface Props {
   email: string;
   onEmailChange: (email: string) => void;
   verifiedEmail: string | null; // 인증을 마친 주소 (정규화된 값). 입력값과 같아야 인증된 것
-  onVerified: (email: string | null) => void;
+  onVerified: (result: { email: string; proof: string } | null) => void; // 인증을 마친 주소와 증표 (회원가입에 같이 보낸다)
 }
 
 const mmss = (ms: number) => {
@@ -58,7 +57,6 @@ export function EmailVerifyField({ email, onEmailChange, verifiedEmail, onVerifi
   async function send() {
     const target = normalizeEmail(email);
     if (!isValidEmail(target)) return setNote({ text: "이메일 주소를 다시 확인해 주세요.", error: true });
-    if (isEmailTaken(target)) return setNote({ text: "이미 가입된 이메일이에요.", error: true });
     setBusy("sending");
     setNote(null);
     const r = await sendVerificationCode(target);
@@ -84,7 +82,7 @@ export function EmailVerifyField({ email, onEmailChange, verifiedEmail, onVerifi
     const r = await confirmVerificationCode(sentTo, code);
     setBusy(null);
     if (!r.ok) return setNote({ text: r.error, error: true });
-    onVerified(sentTo);
+    onVerified({ email: sentTo, proof: r.proof });
     setSentTo(null);
     setCode("");
     setNote(null);

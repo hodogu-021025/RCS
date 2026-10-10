@@ -10,17 +10,20 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   if (session) return <Navigate to={HOME_BY_ROLE[session.role]} replace />;
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const s = login(username, password);
-    if (!s) {
-      setError("아이디 또는 비밀번호가 맞지 않아요.");
+    setBusy(true);
+    const result = await login(username, password);
+    setBusy(false);
+    if ("error" in result) {
+      setError(result.error);
       return;
     }
-    navigate(HOME_BY_ROLE[s.role], { replace: true });
+    navigate(HOME_BY_ROLE[result.session.role], { replace: true });
   }
 
   return (
@@ -40,8 +43,8 @@ export function LoginPage() {
             {error}
           </p>
         )}
-        <button className="btn primary wide" type="submit" disabled={!username.trim() || !password}>
-          로그인
+        <button className="btn primary wide" type="submit" disabled={!username.trim() || !password || busy}>
+          {busy ? "로그인 중…" : "로그인"}
         </button>
         <a className="btn wide" href="#/signup">
           회원가입

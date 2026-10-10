@@ -18,14 +18,17 @@ services:
       - api
     restart: unless-stopped
 
-  # 이메일 인증 API (server/). 바깥에 포트를 열지 않고, chatbot 의 nginx 가 /api/ 를 여기로 넘긴다.
-  # Resend 키는 저장소 루트의 .env 에서 읽는다 (.env.example 참고). 없으면 인증 메일 발송이 거절된다
+  # API 서버 (server/): 계정·주문·예약·매장 설정을 SQLite 에 저장하고, 회원가입 이메일 인증을 보낸다.
+  # 바깥에 포트를 열지 않고, chatbot 의 nginx 가 /api/ 를 여기로 넘긴다.
+  # Resend 키·관리자 계정은 저장소 루트의 .env 에서 읽는다 (.env.example 참고). 데이터는 saylo-data 볼륨에 남는다
   api:
     build: ./server
     image: rcs-api:latest
     env_file:
       - path: .env
         required: false
+    volumes:
+      - saylo-data:/data
     restart: unless-stopped
 
   # Cloudflare 임시 터널(계정 불필요). 주소를 아는 누구나 접속할 수 있으니 필요할 때만 켠다
@@ -36,3 +39,6 @@ services:
       - chatbot
     restart: unless-stopped
     profiles: ["tunnel"]
+
+volumes:
+  saylo-data:

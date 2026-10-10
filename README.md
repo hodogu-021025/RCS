@@ -3,7 +3,7 @@
 채팅·버튼·음성으로 배달 주문과 식당 예약을 끝까지 진행하는 소비자 챗봇에, 로그인으로 나뉘는 사장님·관리자 페이지가 붙어 있습니다.
 모바일 기준 웹이라 소비자·사장님·관리자 화면 모두 휴대폰 폭(최대 440px)으로 그리고, PC에서는 가운데 휴대폰 크기 카드로 띄웁니다.
 
-결제·매장 데이터와 로그인 계정은 모두 화면 확인용 데모입니다(회원가입 이메일 인증만 `server/` API 서버를 씁니다).
+계정·주문·예약·매장 설정은 `server/` API 서버가 SQLite 에 저장합니다. 그래서 손님이 자기 폰에서 주문하면 사장님 폰의 사장님 화면에 몇 초 안에 뜹니다. 결제와 매장·메뉴 목록은 화면 확인용 데모입니다.
 
 - 기술: React 19, TypeScript, Vite, Vitest (테스트), oxlint (린트)
 - 공개 도메인: sayloorder.com (도메인·호스팅 연결은 별도 담당자)
@@ -20,21 +20,29 @@
 | `#/owner` | 사장님 | 내 매장의 주문·예약 접수(상태 변경, 새 주문 알림), 영업시간·메뉴 가격·품절 관리, 매출 요약 |
 | `#/admin` | 관리자 | 전체 주문·예약 현황, 매장별 사장님 계정 관리, 통계, 사용자 목록 |
 
-회원가입으로 고객님·사장님 계정을 만들 수 있고, 관리자 페이지에서도 사장님 계정을 만들 수 있습니다. 관리자는 가입이 없고 기본 계정만 있습니다.
+회원가입으로 고객님·사장님 계정을 만들 수 있고(이메일 인증 필요), 관리자 페이지에서도 사장님 계정을 만들 수 있습니다. 관리자는 가입이 없고 `.env` 의 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 로 서버가 처음 시작할 때 하나 만듭니다 (개발 중에 비워 두면 `adminuser / admin1234`).
 
-기본 계정 (비밀번호는 모두 `1234`, 로그인 화면에 직접 입력): 고객님 `user`, 사장님 `owner`(청전 치킨공방), 관리자 `admin`.
-
-주문·예약 내역, 사장님이 바꾼 매장 설정, 추가한 계정은 **브라우저(localStorage)** 에 저장됩니다. 같은 브라우저 안에서는 소비자가 주문하면 사장님 화면에 바로 뜨지만, 다른 기기와는 공유되지 않습니다(서버를 붙이면 `src/data/db.ts` 하나만 API 호출로 바꾸면 됩니다). 처음 열면 보기용 기록이 몇 건 들어가고, 지우려면 브라우저 저장소를 비우면 됩니다.
+로그인은 서버가 판단합니다. 비밀번호는 서버에만 암호화(scrypt)해 저장하고, 브라우저에는 로그인 토큰만 남습니다(30일). 관리자가 사장님 계정을 지우면 그 사장님은 다음 요청 때 바로 로그아웃됩니다.
 
 ## 실행
 
-Node 24 이상이 필요합니다. 화면(frontend)과 이메일 인증 API(server)를 각각 띄웁니다.
+Node 24 이상이 필요합니다. 화면(frontend)과 API 서버(server)를 각각 띄웁니다.
 
 ```bash
-cp .env.example .env     # 처음 한 번: RESEND_API_KEY 를 채운다 (아래 "이메일 인증" 참고)
-npm --prefix server run dev        # API     http://localhost:3001
+cp .env.example .env     # 처음 한 번: RESEND_API_KEY, ADMIN_USERNAME / ADMIN_PASSWORD 를 채운다
+npm --prefix server run dev        # API     http://localhost:3001  (데이터: server/data/saylo.db)
 cd frontend && npm install && npm run dev   # 화면 http://localhost:5173 (/api 는 3001 로 넘어감)
 ```
+
+### API 서버
+
+외부 패키지 없이 Node 내장 기능(http, node:sqlite, crypto)만 씁니다. 주소 목록과 권한은 `server/app.mjs` 맨 위 주석에 있습니다.
+
+- 데이터: SQLite 파일 하나 (`DATA_DIR`, 기본 `server/data/`, Docker 는 `/data` 볼륨). 지우면 처음 상태로 돌아갑니다.
+- 로그인: `Authorization: Bearer <토큰>` 헤더. 토큰은 서버 DB 의 `sessions` 에 있고 30일 뒤 만료됩니다.
+- 권한: 손님은 자기 주문·예약만, 사장님은 자기 매장만, 관리자는 전부. 비회원 주문도 됩니다.
+- 매장 id 목록은 `server/stores.mjs` 에도 있어서 식당을 추가하면 화면 쪽(`orderChatKnowledge.ts`)과 같이 적습니다.
+- 서버 테스트: `npm --prefix server test` (메모리 DB 로 API 전체를 돌려 봅니다)
 
 ### 이메일 인증 (Resend)
 
@@ -67,9 +75,11 @@ docker compose --profile tunnel down          # 터널까지 모두 중지
 
 ## 배포
 
-화면은 `npm run build`로 나온 `frontend/dist/` 정적 파일이고, 회원가입 이메일 인증에는 `server/` API 서버가 함께 있어야 합니다. 가장 간단한 방법은 `docker compose up -d --build` 그대로 서버에 올리는 것입니다 (화면과 API 가 같은 주소에서 동작).
+화면은 `npm run build`로 나온 `frontend/dist/` 정적 파일이고, 로그인·주문·예약 저장과 이메일 인증은 `server/` API 서버가 맡습니다. 가장 간단한 방법은 `docker compose up -d --build` 그대로 서버에 올리는 것입니다 (화면과 API 가 같은 주소에서 동작하고, 데이터는 `saylo-data` 볼륨에 남습니다).
 
-- 정적 호스팅(Vercel 등)에 화면만 올리면 회원가입의 인증번호 받기가 동작하지 않습니다. 그때는 API 서버를 따로 띄우고 그 호스팅에서 `/api/*` 를 API 서버로 넘기도록 설정해야 합니다.
+- 올리기 전에 서버의 `.env` 에 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 와 Resend 설정을 적습니다. 관리자 계정은 서버가 처음 시작할 때 한 번 만듭니다.
+- 정적 호스팅(Vercel 등)에 화면만 올리면 로그인·주문 저장·이메일 인증이 모두 동작하지 않습니다. 그때는 API 서버를 따로 띄우고 그 호스팅에서 `/api/*` 를 API 서버로 넘기도록 설정해야 합니다.
+- 백업은 `saylo-data` 볼륨의 `saylo.db` 파일 하나를 복사하면 됩니다.
 - 빌드 명령: `npm --prefix frontend run build` (저장소 루트 기준) 또는 `cd frontend && npm run build`
 - 결과물: `frontend/dist`
 - 페이지 이동은 해시 주소(`#/owner`)를 써서 별도 리라이트 설정이 필요 없습니다.
@@ -92,9 +102,9 @@ frontend/
       Select.tsx              결제 팝업 드롭다운
       useSpeech.ts            음성 입력(말 → 글자)과 읽어 주기(글자 → 말)
       *.test.ts(x)            같은 이름 파일의 테스트
-    auth/auth.ts              데모 로그인·회원가입(계정·세션)
-    data/db.ts                주문·예약·매장 설정·계정 저장소 (localStorage)
-    data/seed.ts              처음 열 때 넣는 보기용 기록
+    api/client.ts             API 호출 공통 (토큰 헤더, 오류 처리)
+    auth/auth.ts              로그인 상태 (서버 세션을 토큰으로 되살림), 회원가입
+    data/db.ts                서버에서 받아 온 주문·예약·매장 설정·계정 (몇 초마다 새로 받음)
     api/emailVerification.ts  이메일 인증 API 호출 (/api/email/…)
     pages/                    LoginPage, SignupPage(회원가입), EmailVerifyField(이메일 인증), PasswordField(눈 버튼),
                               OwnerPage(사장님), AdminPage(관리자), MyOrdersPage(내 주문), RequireRole(역할 검사)
@@ -105,20 +115,26 @@ frontend/
   scripts/build-html.mjs      HTML 한 파일 만들기
   Dockerfile
 server/
-  index.mjs                   API 서버 (/api/email/send-code, /api/email/verify), Resend 로 메일 발송
+  index.mjs                   서버 시작 (환경변수, DB 열기, 관리자 계정 만들기)
+  app.mjs                     API 주소·권한·입력 검사 (맨 위 주석에 주소 목록)
+  db.mjs                      SQLite 저장소 (계정·세션·주문·예약·매장 설정)
+  auth.mjs                    비밀번호 암호화(scrypt)·토큰·입력 규칙
+  stores.mjs                  매장 id 목록, 상태 값
   verification.mjs            인증번호 만들기·확인·재발송 제한
-  verification.test.mjs       서버 테스트 (node --test)
+  mail.mjs                    Resend 메일 발송
+  *.test.mjs                  서버 테스트 (node --test)
   Dockerfile
 deploy/nginx.conf             nginx 설정 (/api/ → API 서버)
 docker-compose.yml            로컬 Docker: 화면 + API (+ 터널)
-.env.example                  Resend 설정 예시 (.env 로 복사해서 사용)
+.env.example                  Resend·관리자 계정 설정 예시 (.env 로 복사해서 사용)
 ```
 
 ## 자주 바꾸는 것
 
 - 매장·메뉴·가격, 식당 목록: `orderChatKnowledge.ts`의 배열을 고치면 화면에 바로 반영됩니다.
 - 배달지 기본 주소: `orderChatKnowledge.ts`의 `ADDRESS`
-- 기본 계정: `auth/auth.ts`의 `DEMO_ACCOUNTS` (가입한 계정은 `data/db.ts`의 `users`·`owners`)
+- 관리자 계정: `.env`의 `ADMIN_USERNAME` / `ADMIN_PASSWORD` (서버에 관리자가 없을 때 처음 한 번 만듦)
+- 식당을 추가할 때: `orderChatKnowledge.ts`의 `RESTAURANTS`와 `server/stores.mjs`의 `STORE_IDS` 둘 다
 - 색·여백: `index.css` 맨 위의 CSS 변수
 
 ## 대화 흐름 요약

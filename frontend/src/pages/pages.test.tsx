@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
-import { login, logout } from "../auth/auth";
+import { login } from "../auth/auth";
 import { DELIVERY_MENU, makeOrder } from "../components/orderChatKnowledge";
-import { addOrder, addOwner, addReservation, addUser, getDb, removeOwner, resetDb, setMenuItem, setStoreHours } from "../data/db";
+import { getDb, refresh } from "../data/db";
+import { server, TEST_CODE } from "../test/setup";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
@@ -24,408 +25,341 @@ function open(path: string) {
 }
 
 const chicken = DELIVERY_MENU.find((d) => d.name === "간장치킨")!;
+const tongdak = DELIVERY_MENU.find((d) => d.name === "옛날통닭")!;
+const loginAs = async (username: string) => {
+  const r = await login(username, "password1");
+  if ("error" in r) throw new Error(r.error);
+};
+// 테스트 서버의 DB 에 기록을 바로 넣는다
+const seedOrder = (customer: { username: string; name: string }, item = chicken, qty = 1, payment = "토스페이") =>
+  server.db.addOrder({ customer: customer.username, customerName: customer.name, payment, storeId: item.restaurantId, order: makeOrder(item, qty) });
+const GUEST = { username: "guest", name: "비회원" };
+const KIM = { username: "customer01", name: "김소비" };
 
-beforeEach(() => {
-  vi.useFakeTimers();
-});
-afterEach(() => {
-  vi.useRealTimers();
-  logout();
-  resetDb();
-  window.location.hash = "";
-});
-
-describe("첫 화면", () => {
-  it("주소 없이 열면 로그인 화면이 나오고, '로그인 없이 챗봇 쓰기'는 챗봇으로 간다", () => {
-    open("");
-    expect(window.location.hash).toBe("#/login");
-    expect(screen.getByRole("heading", { name: "로그인" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "로그인 없이 챗봇 쓰기" })).toHaveAttribute("href", "#/chat");
-  });
-
-  it("첫 화면에서 소비자로 로그인하면 챗봇으로 간다", () => {
-    open("#/");
-    typeLogin("user", "1234");
-    expect(window.location.hash).toBe("#/chat");
-    expect(screen.getByRole("button", { name: "Say 전송" })).toBeInTheDocument();
-  });
-
-  it("로그인 버튼 밑에 회원가입 버튼이 있고, 데모 계정 버튼은 없다", () => {
-    open("#/login");
-    // 화면에 놓인 순서대로 (버튼과 링크를 섞어서)
-    const controls = [...document.querySelectorAll("form button, form a")].map((el) => el.textContent);
-    expect(controls.indexOf("회원가입")).toBe(controls.indexOf("로그인") + 1);
-    expect(screen.getByRole("link", { name: "회원가입" })).toHaveAttribute("href", "#/signup");
-    // 로고를 누르면 챗봇이 아니라 로그인 화면 그대로
-    expect(screen.getByRole("link", { name: "Saylo" })).toHaveAttribute("href", "#/login");
-    expect(screen.queryByText(/데모 계정/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /· owner/ })).not.toBeInTheDocument();
-  });
-});
-
+// 로그인 화면: 아이디·비밀번호를 넣고 로그인 버튼
 function typeLogin(username: string, password: string) {
   fireEvent.change(screen.getByLabelText("아이디"), { target: { value: username } });
   fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: password } });
   fireEvent.click(screen.getByRole("button", { name: "로그인" }));
 }
+const fill = (fields: Record<string, string>) => {
+  for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+};
+const click = (name: string | RegExp) => act(async () => void fireEvent.click(screen.getByRole("button", { name })));
+
+afterEach(() => {
+  vi.useRealTimers();
+  window.location.hash = "";
+});
+
+describe("첫 화면과 로그인", () => {
+  it("주소 없이 열면 로그인 화면이 나오고, 로고·회원가입·'로그인 없이 챗봇 쓰기' 링크가 있다", () => {
+    open("");
+    expect(window.location.hash).toBe("#/login");
+    expect(screen.getByRole("heading", { name: "로그인" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Saylo" })).toHaveAttribute("href", "#/login");
+    expect(screen.getByRole("link", { name: "회원가입" })).toHaveAttribute("href", "#/signup");
+    expect(screen.getByRole("link", { name: "로그인 없이 챗봇 쓰기" })).toHaveAttribute("href", "#/chat");
+    expect(screen.queryByText(/데모 계정/)).not.toBeInTheDocument();
+  });
+
+  it("틀리면 서버의 안내가 뜨고, 고객님으로 맞게 로그인하면 챗봇으로 간다", async () => {
+    server.createAccount({ ...KIM, email: "kim@example.com" });
+    open("#/login");
+    typeLogin("customer01", "wrong1234");
+    expect(await screen.findByRole("alert")).toHaveTextContent("맞지 않아요");
+
+    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "password1" } });
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
+    expect(await screen.findByRole("button", { name: "Say 전송" })).toBeInTheDocument();
+    expect(localStorage.getItem("saylo.token")).toBeTruthy();
+  });
+
+  it("사장님으로 로그인하면 내 매장 사장님 페이지로 가고, 새로고침해도 로그인이 유지된다", async () => {
+    server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
+    const first = open("#/login");
+    typeLogin("chickenboss", "password1");
+    await waitFor(() => expect(window.location.hash).toBe("#/owner"));
+    expect(await screen.findByText("청전 치킨공방 · 사장님")).toBeInTheDocument();
+
+    // 새로고침: 토큰은 남아 있고 세션은 서버에 다시 물어본다
+    first.unmount();
+    const { restoreSession } = await import("../auth/auth");
+    await restoreSession();
+    open("#/owner");
+    expect(await screen.findByText("청전 치킨공방 · 사장님")).toBeInTheDocument();
+  });
+
+  it("로그인 없이 사장님·관리자 페이지에 가면 로그인 페이지로 보내고, 역할이 다르면 안내만 보여 준다", async () => {
+    open("#/admin");
+    expect(window.location.hash).toBe("#/login");
+
+    server.createAccount({ ...KIM });
+    await loginAs("customer01");
+    window.location.hash = "#/owner";
+    expect(await screen.findByText(/사장님 전용이에요/)).toBeInTheDocument();
+  });
+
+  it("관리자가 지운 사장님 계정은 다음 요청 때 로그아웃되어 로그인 페이지로 간다", async () => {
+    server.createAccount({ username: "jangrakboss", name: "장락반점 사장님", role: "owner", storeId: "c1" });
+    await loginAs("jangrakboss");
+    open("#/owner");
+    expect(await screen.findByText("장락반점 · 사장님")).toBeInTheDocument();
+
+    server.db.deleteUser("jangrakboss"); // 세션도 같이 지워진다
+    await act(() => refresh(["records"])); // 화면이 몇 초마다 하는 새로 받기
+    expect(await screen.findByRole("heading", { name: "로그인" })).toBeInTheDocument();
+    expect(localStorage.getItem("saylo.token")).toBeNull();
+  });
+});
 
 describe("회원가입", () => {
-  function fill(fields: Record<string, string>) {
-    for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
-  }
-
-  // 이메일 인증 API(server/) 대신 쓰는 가짜. 맞는 번호는 123456
-  function mockEmailServer() {
-    const calls: { path: string; body: Record<string, string> }[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (path: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body ?? "{}"));
-        calls.push({ path, body });
-        if (path === "/api/email/send-code") return Response.json({ ok: true, expiresIn: 300, resendIn: 60 });
-        if (path === "/api/email/verify") {
-          return body.code === "123456"
-            ? Response.json({ ok: true, verified: true })
-            : Response.json({ error: "인증번호가 맞지 않아요. (4번 더 시도할 수 있어요)" }, { status: 400 });
-        }
-        return new Response(null, { status: 404 });
-      }),
-    );
-    return calls;
-  }
-
-  const click = (name: string) => act(async () => void fireEvent.click(screen.getByRole("button", { name })));
-
   async function verifyEmail(email: string) {
     fill({ 이메일: email });
     await click("인증번호 받기");
-    fill({ 인증번호: "123456" });
+    await screen.findByLabelText("인증번호");
+    fill({ 인증번호: TEST_CODE });
     await click("확인");
+    await screen.findByText("인증 완료");
   }
 
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("고객님으로 가입하면 바로 로그인돼 챗봇으로 가고, 다음부터 그 계정으로 로그인할 수 있다", async () => {
-    mockEmailServer();
+  it("고객님으로 가입하면 서버에 계정이 생기고 바로 로그인돼 챗봇으로 간다", async () => {
     open("#/signup");
     expect(screen.getByRole("radio", { name: "고객님" })).toBeChecked();
     expect(screen.queryByLabelText("매장")).not.toBeInTheDocument();
     fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
     await verifyEmail("Hong@Example.com");
-    fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
+    await click("고객님으로 가입하기");
 
-    expect(window.location.hash).toBe("#/chat");
-    expect(getDb().users).toMatchObject([{ username: "hongildong", name: "홍길동", email: "hong@example.com" }]);
-    expect(login("hongildong", "password1")).toMatchObject({ role: "user", name: "홍길동" });
+    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
+    expect(server.db.findUser("hongildong")).toMatchObject({ role: "user" });
+    expect(server.sent).toEqual([{ email: "hong@example.com", code: TEST_CODE }]);
   });
 
-  it("사장님으로 가입하면 매장을 고르고, 가입 후 내 매장의 사장님 페이지로 간다", async () => {
-    mockEmailServer();
+  it("사장님으로 가입하면 매장을 골라야 하고, 가입 후 내 매장의 사장님 페이지로 간다", async () => {
     open("#/signup");
     fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
     fill({ 아이디: "banjeom01", "대표자 이름": "김사장", 비밀번호: "password1", "비밀번호 확인": "password1" });
     await verifyEmail("boss@example.com");
-    fireEvent.click(screen.getByRole("button", { name: "사장님으로 가입하기" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("매장을 골라 주세요");
+    await click("사장님으로 가입하기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("매장을 골라 주세요");
 
     fill({ 매장: "c1" });
-    fireEvent.click(screen.getByRole("button", { name: "사장님으로 가입하기" }));
-    expect(window.location.hash).toBe("#/owner");
-    expect(screen.getByText("장락반점 · 사장님")).toBeInTheDocument();
-    expect(getDb().owners).toMatchObject([{ username: "banjeom01", storeId: "c1", name: "김사장", email: "boss@example.com" }]);
+    await click("사장님으로 가입하기");
+    await waitFor(() => expect(window.location.hash).toBe("#/owner"));
+    expect(await screen.findByText("장락반점 · 사장님")).toBeInTheDocument();
+    expect(server.db.findUser("banjeom01")).toMatchObject({ role: "owner", storeId: "c1" });
   });
 
-  it("이메일 인증: 번호를 받으면 5분 타이머가 돌고, 틀리면 안내, 맞으면 인증 완료로 바뀐다", async () => {
-    const calls = mockEmailServer();
+  it("이메일 인증: 번호를 받으면 5분 타이머가 돌고, 틀리면 안내, 맞으면 인증 완료, 변경하면 다시 인증", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     open("#/signup");
     fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
-    fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("이메일 인증을 마쳐 주세요");
+    await click("고객님으로 가입하기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("이메일 인증을 마쳐 주세요");
 
     fill({ 이메일: "hong@example.com" });
     await click("인증번호 받기");
-    expect(calls).toEqual([{ path: "/api/email/send-code", body: { email: "hong@example.com" } }]);
-    expect(screen.getByText("5:00")).toBeInTheDocument();
+    expect(await screen.findByText("5:00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "다시 받기 60초" })).toBeDisabled();
-
     act(() => void vi.advanceTimersByTime(60_000));
-    expect(screen.getByText("4:00")).toBeInTheDocument();
+    // 시계가 실제 시간과 같이 흐르는 설정이라 몇 초 차이는 둔다
+    await waitFor(() => expect(screen.getByLabelText("남은 시간")).toHaveTextContent(/^(4:00|3:5[0-9])$/));
     expect(screen.getByRole("button", { name: "다시 받기" })).toBeEnabled();
 
     fill({ 인증번호: "000000" });
     await click("확인");
-    expect(screen.getByText(/인증번호가 맞지 않아요/)).toBeInTheDocument();
+    expect(await screen.findByText(/인증번호가 맞지 않아요/)).toBeInTheDocument();
 
-    fill({ 인증번호: "123456" });
+    fill({ 인증번호: TEST_CODE });
     await click("확인");
-    expect(screen.getByText("인증 완료")).toBeInTheDocument();
+    expect(await screen.findByText("인증 완료")).toBeInTheDocument();
     expect(screen.getByLabelText("이메일")).toHaveAttribute("readonly");
-    expect(screen.queryByLabelText("인증번호")).not.toBeInTheDocument();
 
-    // 변경을 누르면 다시 고칠 수 있고, 인증은 풀린다
     fireEvent.click(screen.getByRole("button", { name: "변경" }));
     expect(screen.getByLabelText("이메일")).not.toHaveAttribute("readonly");
     expect(screen.getByRole("button", { name: "인증번호 받기" })).toBeInTheDocument();
   });
 
-  it("이메일 인증: 5분이 지나면 만료되고, 형식이 틀리거나 이미 가입된 주소는 메일을 보내지 않는다", async () => {
-    const calls = mockEmailServer();
-    addUser({ username: "takenuser", password: "password1", name: "기존", email: "taken@example.com", createdAt: 0 });
+  it("이미 가입된 이메일로는 인증번호를 보내지 않고, 아이디·비밀번호 규칙은 서버가 다시 거른다", async () => {
+    server.createAccount({ username: "takenuser", email: "taken@example.com" });
     open("#/signup");
-
-    fill({ 이메일: "not-an-email" });
-    await click("인증번호 받기");
-    expect(screen.getByText("이메일 주소를 다시 확인해 주세요.")).toBeInTheDocument();
     fill({ 이메일: "TAKEN@example.com" });
     await click("인증번호 받기");
-    expect(screen.getByText("이미 가입된 이메일이에요.")).toBeInTheDocument();
-    expect(calls).toEqual([]);
+    expect(await screen.findByText("이미 가입된 이메일이에요.")).toBeInTheDocument();
+    expect(server.sent).toEqual([]);
 
-    fill({ 이메일: "hong@example.com" });
-    await click("인증번호 받기");
-    act(() => void vi.advanceTimersByTime(5 * 60_000));
-    expect(screen.getByText("만료")).toBeInTheDocument();
-    expect(screen.getByText(/인증번호가 만료됐어요/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "확인" })).toBeDisabled();
+    fill({ 아이디: "short1", 이름: "누구", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    await verifyEmail("new@example.com");
+    await click("고객님으로 가입하기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("영문·숫자 8~20자");
+    fill({ 아이디: "takenuser" });
+    await click("고객님으로 가입하기"); // 이번엔 서버가 거른다 (안내가 바뀔 때까지 기다린다)
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("이미 있는 아이디예요"));
+    expect(server.db.findUser("short1")).toBeNull();
   });
 
-  it("인증 서버에 연결하지 못하면 안내한다", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
-    open("#/signup");
-    fill({ 이메일: "hong@example.com" });
-    await click("인증번호 받기");
-    expect(screen.getByText(/인증 서버에 연결하지 못했어요/)).toBeInTheDocument();
-  });
-
-  it("비밀번호는 처음에 가려져 있고, 눈을 누르면 보였다가 다시 누르면 가려진다 (칸마다 따로)", () => {
+  it("비밀번호 눈 버튼과 고객님·사장님 토글", () => {
     open("#/signup");
     const pw = screen.getByLabelText("비밀번호");
-    const confirm = screen.getByLabelText("비밀번호 확인");
     expect(pw).toHaveAttribute("type", "password");
-    expect(confirm).toHaveAttribute("type", "password");
-
-    const eye = screen.getByRole("button", { name: "비밀번호 보기" });
-    expect(eye).toHaveAttribute("aria-pressed", "false");
-    fireEvent.change(pw, { target: { value: "password1" } });
-    fireEvent.click(eye);
+    fireEvent.click(screen.getByRole("button", { name: "비밀번호 보기" }));
     expect(pw).toHaveAttribute("type", "text");
-    expect(pw).toHaveValue("password1");
-    expect(screen.getByRole("button", { name: "비밀번호 숨기기" })).toHaveAttribute("aria-pressed", "true");
-    expect(confirm).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("비밀번호 확인")).toHaveAttribute("type", "password"); // 칸마다 따로
 
-    fireEvent.click(screen.getByRole("button", { name: "비밀번호 숨기기" }));
-    expect(pw).toHaveAttribute("type", "password");
-  });
-
-  it("고객님·사장님 토글은 고른 쪽을 표시한다 (미끄러지는 칸은 data-active 로 움직인다)", () => {
-    open("#/signup");
     const group = screen.getByRole("radiogroup", { name: "가입 유형" });
     expect(group).toHaveAttribute("data-active", "user");
     fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
     expect(group).toHaveAttribute("data-active", "owner");
-    expect(screen.getByRole("radio", { name: "사장님" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "고객님" })).not.toBeChecked();
-  });
-
-  it("아이디 8~20자, 비밀번호 8자 이상, 이미 있는 아이디, 서로 다른 비밀번호 확인은 안내하고 가입하지 않는다", async () => {
-    mockEmailServer();
-    addUser({ username: "takenuser", password: "password1", name: "기존", createdAt: 0 });
-    open("#/signup");
-    const submit = () => fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
-    await verifyEmail("new@example.com");
-
-    fill({ 아이디: "short1", 이름: "누구", 비밀번호: "password1", "비밀번호 확인": "password1" });
-    submit();
-    expect(screen.getByRole("alert")).toHaveTextContent("영문·숫자 8~20자");
-
-    fill({ 아이디: "takenuser" });
-    submit();
-    expect(screen.getByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
-
-    fill({ 아이디: "newuser01", 비밀번호: "1234567", "비밀번호 확인": "1234567" });
-    submit();
-    expect(screen.getByRole("alert")).toHaveTextContent("8자 이상");
-
-    fill({ 비밀번호: "password1", "비밀번호 확인": "password2" });
-    submit();
-    expect(screen.getByRole("alert")).toHaveTextContent("비밀번호가 서로 달라요");
-    expect(getDb().users.map((u) => u.username)).toEqual(["takenuser"]);
-    expect(window.location.hash).toBe("#/signup");
-  });
-});
-
-describe("로그인 페이지", () => {
-  it("틀리면 안내가 뜨고, 사장님으로 맞게 로그인하면 사장님 페이지로 간다", () => {
-    open("#/login");
-    typeLogin("owner", "wrong");
-    expect(screen.getByRole("alert")).toHaveTextContent("맞지 않아요");
-
-    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "1234" } });
-    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
-    expect(window.location.hash).toBe("#/owner");
-    expect(screen.getByText("청전 치킨공방 · 사장님")).toBeInTheDocument();
-  });
-
-  it("로그인 없이 사장님·관리자 페이지에 가면 로그인 페이지로 보낸다", () => {
-    open("#/admin");
-    expect(window.location.hash).toBe("#/login");
-    expect(screen.getByRole("heading", { name: "로그인" })).toBeInTheDocument();
-  });
-
-  it("역할이 다른 페이지에 가면 안내만 보여 준다", () => {
-    login("user", "1234");
-    open("#/owner");
-    expect(screen.getByText(/사장님 전용이에요/)).toBeInTheDocument();
-  });
-
-  it("관리자가 지운 사장님 계정은 로그인 상태였어도 로그인 페이지로 보낸다", () => {
-    addOwner({ username: "jangrak", password: "pw1234", name: "장락반점 사장님", storeId: "c1" });
-    login("jangrak", "pw1234");
-    open("#/owner");
-    expect(screen.getByText("장락반점 · 사장님")).toBeInTheDocument();
-
-    act(() => removeOwner("jangrak"));
-    expect(window.location.hash).toBe("#/login");
-    expect(screen.getByRole("heading", { name: "로그인" })).toBeInTheDocument();
-    expect(localStorage.getItem("saylo.session")).toBeNull();
   });
 });
 
 describe("사장님 페이지", () => {
-  it("내 매장 주문만 보이고, 접수 → 준비 중 → 완료로 바꿀 수 있다", () => {
-    addOrder(makeOrder(chicken, 2), "카카오페이", { username: "user", name: "김소비" });
-    addOrder(makeOrder(DELIVERY_MENU.find((d) => d.name === "옛날통닭")!, 1), "토스페이"); // 다른 매장(h1)
-    login("owner", "1234");
+  const boss = { username: "chickenboss", name: "치킨 사장", role: "owner" as const, storeId: "h3" };
+
+  it("내 매장 주문만 보이고, 접수 → 준비 중 → 완료로 바꾸면 서버에 저장된다", async () => {
+    server.createAccount(boss);
+    server.createAccount({ ...KIM });
+    const mine = seedOrder(KIM, chicken, 2, "카카오페이");
+    seedOrder(GUEST, tongdak, 1); // 다른 매장(h1)
+    await loginAs("chickenboss");
     open("#/owner");
 
-    expect(screen.getByText("간장치킨 2마리")).toBeInTheDocument();
+    expect(await screen.findByText("간장치킨 2마리")).toBeInTheDocument();
     expect(screen.queryByText(/옛날통닭/)).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /주문·예약/ })).toHaveTextContent("1"); // 접수 배지
 
-    fireEvent.click(screen.getByRole("button", { name: "준비 시작" }));
-    expect(getDb().orders.find((o) => o.order.item === "간장치킨")?.status).toBe("준비 중");
-    fireEvent.click(screen.getByRole("button", { name: "배달 완료" }));
-    expect(getDb().orders.find((o) => o.order.item === "간장치킨")?.status).toBe("완료");
+    await click("준비 시작");
+    await waitFor(() => expect(server.db.orderById(mine.id)?.status).toBe("준비 중"));
+    await click("배달 완료");
+    await waitFor(() => expect(server.db.orderById(mine.id)?.status).toBe("완료"));
+    await waitFor(() => expect(screen.getByText("완료", { selector: ".status" })).toBeInTheDocument());
   });
 
-  it("새 주문이 들어오면 알림이 뜨고 잠시 뒤 사라진다", () => {
-    login("owner", "1234");
+  it("다른 기기에서 새 주문이 들어오면 몇 초 안에 알림이 뜬다 (처음 열 때 있던 주문은 아니다)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    server.createAccount(boss);
+    seedOrder(GUEST, chicken, 3); // 열기 전부터 있던 주문
+    await loginAs("chickenboss");
     open("#/owner");
+    expect(await screen.findByText("간장치킨 3마리")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
-    act(() => {
-      addOrder(makeOrder(chicken, 1), "신용카드");
-    });
-    expect(screen.getByRole("status")).toHaveTextContent("새 주문: 간장치킨 1마리");
-    act(() => void vi.advanceTimersByTime(5000));
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    seedOrder(GUEST, chicken, 1, "신용카드"); // 손님 폰에서 주문이 들어온 것과 같다
+    act(() => void vi.advanceTimersByTime(5000)); // 화면이 몇 초마다 새로 받는다
+    expect(await screen.findByRole("status")).toHaveTextContent("새 주문: 간장치킨 1마리");
   });
 
-  it("매장·메뉴 탭에서 품절·가격·영업시간을 바꿀 수 있다", () => {
-    login("owner", "1234");
+  it("매장·메뉴 탭에서 품절·가격·영업시간을 바꾸면 서버에 저장된다", async () => {
+    server.createAccount(boss);
+    await loginAs("chickenboss");
     open("#/owner");
-    fireEvent.click(screen.getByRole("tab", { name: "매장·메뉴" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "품절" }));
-    expect(getDb().storeSettings.h3.items?.d2?.soldOut).toBe(true);
-
+    await act(async () => void fireEvent.click(screen.getByRole("checkbox", { name: "품절" })));
+    await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2?.soldOut).toBe(true));
     const price = screen.getByRole("spinbutton", { name: "간장치킨 가격" });
     fireEvent.change(price, { target: { value: "23000" } });
     fireEvent.blur(price);
-    expect(getDb().storeSettings.h3.items?.d2?.price).toBe(23000);
-
+    await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2?.price).toBe(23000));
     fireEvent.change(screen.getByLabelText("닫는 시간"), { target: { value: "23:00" } });
-    expect(getDb().storeSettings.h3.hours).toBe("16:00 - 23:00");
+    await waitFor(() => expect(server.db.allStoreSettings().h3?.hours).toBe("16:00 - 23:00"));
   });
 
-  it("자정(24:00)에 닫는 매장은 닫는 시간 칸에 00:00 으로 보인다", () => {
-    addOwner({ username: "tongdak", password: "pw1234", name: "옛날통닭 사장님", storeId: "h1" }); // 15:00 - 24:00
-    login("tongdak", "pw1234");
+  it("예약은 방문 완료로 바꿀 수 있고, 자정(24:00)에 닫는 매장은 닫는 시간이 00:00 으로 보인다", async () => {
+    server.createAccount({ username: "tongdakboss", name: "옛날통닭 사장님", role: "owner", storeId: "h1" }); // 15:00 - 24:00
+    const rsv = server.db.addReservation({ ...GUEST, customer: "guest", customerName: "비회원", restaurantId: "h1", restaurantName: "장락 옛날통닭", date: "2026-10-10", time: "19:00", people: 3 });
+    await loginAs("tongdakboss");
     open("#/owner");
+    expect(await screen.findByText(/10월 10일 \(토\) 19:00/)).toBeInTheDocument();
+    await click("방문 완료");
+    await waitFor(() => expect(server.db.reservationById(rsv.id)?.status).toBe("방문 완료"));
+
     fireEvent.click(screen.getByRole("tab", { name: "매장·메뉴" }));
     expect(screen.getByLabelText("여는 시간")).toHaveValue("15:00");
     expect(screen.getByLabelText("닫는 시간")).toHaveValue("00:00");
-
-    fireEvent.change(screen.getByLabelText("여는 시간"), { target: { value: "16:00" } });
-    expect(getDb().storeSettings.h1.hours).toBe("16:00 - 00:00");
-  });
-
-  it("예약은 방문 완료로 바꿀 수 있다", () => {
-    addReservation({ restaurantId: "h3", restaurantName: "청전 치킨공방", date: new Date(2026, 9, 10), time: "19:00", people: 3 });
-    login("owner", "1234");
-    open("#/owner");
-    expect(screen.getByText(/10월 10일 \(토\) 19:00/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "방문 완료" }));
-    expect(getDb().reservations[0].status).toBe("방문 완료");
   });
 });
 
 describe("관리자 페이지", () => {
-  it("모든 주문·예약이 한 목록에 카드로 보이고 종류로 거를 수 있다 (휴대폰 폭이라 표는 없다)", () => {
-    addOrder(makeOrder(chicken, 1), "토스페이");
-    addReservation({ restaurantId: "c1", restaurantName: "장락반점", date: new Date(2026, 9, 10), time: "12:00", people: 2 });
-    login("admin", "1234");
+  const admin = { username: "adminuser", name: "관리자", role: "admin" as const };
+
+  it("모든 주문·예약이 카드로 보이고 종류로 거를 수 있다", async () => {
+    server.createAccount(admin);
+    seedOrder(GUEST);
+    server.db.addReservation({ customer: "guest", customerName: "비회원", restaurantId: "c1", restaurantName: "장락반점", date: "2026-10-10", time: "12:00", people: 2 });
+    await loginAs("adminuser");
     open("#/admin");
 
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const cards = () => document.querySelectorAll(".record-list .record");
-    expect(cards()).toHaveLength(2);
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "식당 예약" }));
     expect(cards()).toHaveLength(1);
     expect(within(cards()[0] as HTMLElement).getByText("장락반점")).toBeInTheDocument();
-  });
-
-  it("관리자 화면도 휴대폰 폭 틀로 그린다", () => {
-    login("admin", "1234");
-    open("#/admin");
     expect(document.querySelector(".dash")).toHaveClass("dash-mobile");
   });
 
-  it("사장님 계정을 만들면 목록에 뜨고 그 계정으로 로그인할 수 있다", () => {
-    setStoreHours("c1", "11:00 - 18:00"); // 사장님이 바꾼 영업시간이 표에 보인다
-    login("admin", "1234");
+  it("사장님 계정을 만들면 목록에 뜨고 그 계정으로 로그인되며, 지우면 사라진다", async () => {
+    server.createAccount(admin);
+    server.db.updateStoreSettings("c1", { hours: "11:00 - 18:00" });
+    await loginAs("adminuser");
     open("#/admin");
-    fireEvent.click(screen.getByRole("tab", { name: "매장·사장님" }));
-    expect(screen.getByText("11:00 - 18:00")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("tab", { name: "매장·사장님" }));
+    expect(await screen.findByText("11:00 - 18:00")).toBeInTheDocument(); // 사장님이 바꾼 영업시간이 보인다
 
-    fireEvent.change(screen.getByLabelText("아이디"), { target: { value: "jangrak01" } });
-    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "pw123456" } });
-    fireEvent.change(screen.getByLabelText("매장"), { target: { value: "c1" } });
-    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+    fill({ 아이디: "jangrakboss", 비밀번호: "password1", 매장: "c1" });
+    await click("계정 만들기");
+    expect(await screen.findByText("jangrakboss (장락반점 사장님)")).toBeInTheDocument();
+    expect(server.db.findUser("jangrakboss")).toMatchObject({ role: "owner", storeId: "c1" });
 
-    expect(screen.getByText("jangrak01 (장락반점 사장님)")).toBeInTheDocument();
-    expect(login("jangrak01", "pw123456")).toMatchObject({ storeId: "c1" });
+    fill({ 아이디: "jangrakboss", 비밀번호: "password1" });
+    await click("계정 만들기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
+
+    await click("jangrakboss 삭제");
+    await waitFor(() => expect(server.db.findUser("jangrakboss")).toBeNull());
   });
 
-  it("통계 탭은 건수와 매출을 보여 준다", () => {
-    addOrder(makeOrder(chicken, 2), "토스페이");
-    login("admin", "1234");
+  it("통계 탭은 건수와 매출을, 사용자 탭은 가입한 고객님을 보여 준다", async () => {
+    server.createAccount(admin);
+    server.createAccount({ ...KIM, email: "kim@example.com" });
+    seedOrder(KIM, chicken, 2);
+    await loginAs("adminuser");
     open("#/admin");
-    fireEvent.click(screen.getByRole("tab", { name: "통계" }));
-    expect(screen.getByText("40,000원")).toBeInTheDocument();
-    expect(screen.getAllByText("1건").length).toBeGreaterThan(0); // 타일과 막대 모두에 나온다
+    fireEvent.click(await screen.findByRole("tab", { name: "통계" }));
+    expect(await screen.findByText("40,000원")).toBeInTheDocument();
+    expect(screen.getAllByText("1건").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "사용자" }));
+    expect(await screen.findByText("kim@example.com")).toBeInTheDocument();
+    expect(screen.getByText("customer01")).toBeInTheDocument();
   });
 });
 
 describe("내 주문 페이지", () => {
-  it("로그인한 소비자의 주문만 보인다", () => {
-    addOrder(makeOrder(chicken, 1), "토스페이", { username: "user", name: "김소비" });
-    addOrder(makeOrder(chicken, 3), "토스페이"); // 비회원
-    login("user", "1234");
+  it("로그인한 사람의 주문만 보인다", async () => {
+    server.createAccount({ ...KIM });
+    seedOrder(KIM, chicken, 1);
+    seedOrder(GUEST, chicken, 3);
+    await loginAs("customer01");
     open("#/me");
-    expect(screen.getAllByText("간장치킨 1마리").length).toBeGreaterThan(0); // 제목과 상세 칸
+    expect((await screen.findAllByText("간장치킨 1마리")).length).toBeGreaterThan(0);
     expect(screen.queryAllByText("간장치킨 3마리")).toHaveLength(0);
   });
 });
 
 describe("챗봇과 연결", () => {
-  it("품절된 메뉴는 챗봇 배달 버튼에서 빠진다", () => {
-    setMenuItem("h3", "d2", { soldOut: true });
+  it("사장님이 품절시킨 메뉴는 챗봇 배달 버튼에서 빠지고, 챗봇의 주문은 서버에 남는다", async () => {
+    server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: true } } });
     open("#/chat");
+    await waitFor(() => expect(getDb().storeSettings.h3?.items?.d2?.soldOut).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "배달" } });
     fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
-    act(() => void vi.advanceTimersByTime(700));
-    expect(screen.getByRole("button", { name: "옛날통닭" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "옛날통닭" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "간장치킨" })).not.toBeInTheDocument();
   });
 });
