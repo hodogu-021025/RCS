@@ -63,16 +63,52 @@
 }
 .link-quiet:hover { color: var(--accent); }
 
-/* 회원가입: 고객님 / 사장님 고르기 (두 칸짜리 토글) */
-.role-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface); }
+/* 회원가입: 위 두 줄(로고·제목)은 가운데 */
+.dash-card.signup > .dash-logo, .dash-card.signup > h1 { text-align: center; }
+
+/* 회원가입: 고객님 / 사장님 고르기. 흰 바탕 칸(::before)이 고른 쪽으로 미끄러진다 */
+.role-switch {
+  position: relative;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
+  border-radius: 14px; background: var(--surface);
+}
+.role-switch::before {
+  content: "";
+  position: absolute; top: 4px; bottom: 4px; left: 4px;
+  width: calc(50% - 6px); /* (전체 - 안쪽 여백 8px - 칸 사이 4px) / 2 */
+  border-radius: 10px; background: #fff;
+  transition: transform .3s cubic-bezier(.3, .8, .3, 1);
+}
+.role-switch[data-active="owner"]::before { transform: translateX(calc(100% + 4px)); }
 .role-switch button {
+  position: relative; z-index: 1;
   height: 40px; border: none; border-radius: 10px; background: transparent;
   color: var(--muted); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
-  transition: background .15s, color .15s;
+  transition: color .3s;
 }
-.role-switch button[aria-checked="true"] { background: #fff; color: var(--accent); }
+.role-switch button[aria-checked="true"] { color: var(--accent); }
 .role-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .dash-card .role-hint { margin: 8px 2px 16px; font-size: 13px; }
+@media (prefers-reduced-motion: reduce) {
+  .role-switch::before, .role-switch button { transition: none; }
+}
+
+/* 비밀번호 칸: 오른쪽 안에 눈 버튼 */
+.pw-field { margin-bottom: 12px; }
+.dash-card .pw-field label, .form-grid .pw-field label { margin-bottom: 0; }
+.pw-wrap { position: relative; }
+.dash .pw-wrap .pw-input { padding-right: 48px; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 36px; height: 36px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 10px; background: transparent;
+  color: #94a3b8; cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.pw-toggle:hover { color: var(--text); background: rgba(15, 23, 42, .05); }
+.pw-toggle[aria-pressed="true"] { color: var(--accent); }
+.pw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 
 /* 탭 */
 .dash-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }

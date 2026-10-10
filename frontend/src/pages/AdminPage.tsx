@@ -4,6 +4,7 @@ import { RESTAURANTS, formatDate, withStoreSettings, won } from "../components/o
 import { addOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
+import { PasswordField } from "./PasswordField";
 
 type Tab = "all" | "stores" | "stats" | "users";
 type KindFilter = "all" | "delivery" | "shop" | "ticket" | "reservation";
@@ -192,10 +193,7 @@ function StoresTab() {
             <span>아이디</span>
             <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
           </label>
-          <label>
-            <span>비밀번호</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-          </label>
+          <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
           <label>
             <span>이름 (비우면 "매장 사장님")</span>
             <input value={name} onChange={(e) => setName(e.target.value)} />

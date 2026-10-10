@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { HOME_BY_ROLE, signup, useSession, type SignupInput } from "../auth/auth";
 import { RESTAURANTS } from "../components/orderChatKnowledge";
+import { PasswordField } from "./PasswordField";
 
 type SignupRole = SignupInput["role"];
 const ROLES: { value: SignupRole; label: string; hint: string }[] = [
@@ -40,13 +41,14 @@ export function SignupPage() {
 
   return (
     <div className="dash dash-center">
-      <form className="dash-card login" onSubmit={onSubmit} noValidate>
+      <form className="dash-card login signup" onSubmit={onSubmit} noValidate>
         <a className="dash-logo dark" href="#/login">
           Saylo
         </a>
         <h1>회원가입</h1>
 
-        <div className="role-switch" role="radiogroup" aria-label="가입 유형">
+        {/* 흰 바탕 칸이 고른 쪽으로 미끄러진다 (data-active, CSS) */}
+        <div className="role-switch" role="radiogroup" aria-label="가입 유형" data-active={role}>
           {ROLES.map((r) => (
             <button key={r.value} type="button" role="radio" aria-checked={role === r.value} onClick={() => pickRole(r.value)}>
               {r.label}
@@ -76,14 +78,13 @@ export function SignupPage() {
             </select>
           </label>
         )}
-        <label>
-          <span>비밀번호</span>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder="4자 이상" />
-        </label>
-        <label>
-          <span>비밀번호 확인</span>
-          <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} autoComplete="new-password" />
-        </label>
+        <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder="4자 이상" />
+        <PasswordField
+          label="비밀번호 확인"
+          value={passwordConfirm}
+          onChange={(e) => setPasswordConfirm(e.target.value)}
+          autoComplete="new-password"
+        />
 
         {error && (
           <p className="form-error" role="alert">

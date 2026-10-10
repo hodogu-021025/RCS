@@ -86,6 +86,36 @@ describe("회원가입", () => {
     expect(getDb().owners).toMatchObject([{ username: "banjeom", storeId: "c1", name: "김사장" }]);
   });
 
+  it("비밀번호는 처음에 가려져 있고, 눈을 누르면 보였다가 다시 누르면 가려진다 (칸마다 따로)", () => {
+    open("#/signup");
+    const pw = screen.getByLabelText("비밀번호");
+    const confirm = screen.getByLabelText("비밀번호 확인");
+    expect(pw).toHaveAttribute("type", "password");
+    expect(confirm).toHaveAttribute("type", "password");
+
+    const eye = screen.getByRole("button", { name: "비밀번호 보기" });
+    expect(eye).toHaveAttribute("aria-pressed", "false");
+    fireEvent.change(pw, { target: { value: "pw1234" } });
+    fireEvent.click(eye);
+    expect(pw).toHaveAttribute("type", "text");
+    expect(pw).toHaveValue("pw1234");
+    expect(screen.getByRole("button", { name: "비밀번호 숨기기" })).toHaveAttribute("aria-pressed", "true");
+    expect(confirm).toHaveAttribute("type", "password");
+
+    fireEvent.click(screen.getByRole("button", { name: "비밀번호 숨기기" }));
+    expect(pw).toHaveAttribute("type", "password");
+  });
+
+  it("고객님·사장님 토글은 고른 쪽을 표시한다 (미끄러지는 칸은 data-active 로 움직인다)", () => {
+    open("#/signup");
+    const group = screen.getByRole("radiogroup", { name: "가입 유형" });
+    expect(group).toHaveAttribute("data-active", "user");
+    fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
+    expect(group).toHaveAttribute("data-active", "owner");
+    expect(screen.getByRole("radio", { name: "사장님" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "고객님" })).not.toBeChecked();
+  });
+
   it("이미 있는 아이디, 짧은 비밀번호, 서로 다른 비밀번호 확인은 안내하고 가입하지 않는다", () => {
     open("#/signup");
     const submit = () => fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));

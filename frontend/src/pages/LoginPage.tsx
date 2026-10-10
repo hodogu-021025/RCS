@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { HOME_BY_ROLE, login, useSession } from "../auth/auth";
+import { PasswordField } from "./PasswordField";
 
 // 아이디·비밀번호로 로그인하고 역할에 맞는 페이지로 보낸다. 계정이 없으면 회원가입으로
 export function LoginPage() {
@@ -33,10 +34,7 @@ export function LoginPage() {
           <span>아이디</span>
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus />
         </label>
-        <label>
-          <span>비밀번호</span>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-        </label>
+        <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
         {error && (
           <p className="form-error" role="alert">
             {error}
