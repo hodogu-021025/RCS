@@ -403,7 +403,7 @@ describe("OrderChatbot", () => {
     wait(700);
 
     fireEvent.click(screen.getByRole("button", { name: "직접 입력" }));
-    send("아무거나");
+    send("우주 음식");
     wait(700);
     expect(screen.getByText(/어떤 음식인지 잘 모르겠어요/)).toBeInTheDocument();
     // 다시 묻는 말풍선에도 음식 선택지가 붙는다

@@ -1,7 +1,7 @@
 // 주문 챗봇의 문장 해석 규칙과 주문서 모델. 가게·메뉴 목록은 서버와 같이 쓰는 server/catalog.json 에서 읽는다
 // (지금은 화면 확인용 가상 데이터이고, 실제 목록이 오면 그 파일만 바꾼다)
 import catalog from "../../../server/catalog.json";
-import { getStoreSettings } from "../data/db";
+import { getPopularity, getStoreSettings } from "../data/db";
 
 export interface Store {
   name: string;
@@ -416,9 +416,15 @@ export const FOOD_PROMPT: BotPrompt = {
   placeholder: "먹고 싶은 음식을 입력하세요",
 };
 
-// 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 한다
+// 최근 많이 주문된 메뉴부터 (같으면 목록 순서)
+export function popularFirst(menu: DeliveryItem[]): DeliveryItem[] {
+  const counts = getPopularity().items;
+  return menu.map((d, i) => ({ d, i })).sort((a, b) => (counts[b.d.id] ?? 0) - (counts[a.d.id] ?? 0) || a.i - b.i).map((x) => x.d);
+}
+
+// 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 하고, 인기 순서도 바뀐다
 export const deliveryPrompt = (): BotPrompt => {
-  const menu = availableDeliveryMenu();
+  const menu = popularFirst(availableDeliveryMenu());
   return {
     text: "오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.",
     say: menu.length
