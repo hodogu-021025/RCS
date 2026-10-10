@@ -35,7 +35,7 @@ import {
   PAYMENTS,
   checkVisitTime,
   orderCardRows,
-  completionText,
+  completionCard,
   datePrompt,
   findDeliveryItems,
   findPayment,
@@ -53,7 +53,7 @@ import {
   PEOPLE_QUESTION,
   pickDeliveryPrompt,
   quantityQuestion,
-  reservationDoneText,
+  reservationDoneCard,
   bookableTimes,
   isBookableDate,
   lastBookableDate,
@@ -67,7 +67,9 @@ import {
   type BotPrompt,
   type Choice,
   type DeliveryItem,
+  type InfoCard,
   type Order,
+  type OrderRow,
   type PaymentId,
   type PaymentMethod,
   type Reservation,
@@ -86,7 +88,8 @@ import {
   mealOf,
   nearestRestaurants,
   orderLabel,
-  orderStatusText,
+  orderStatusCard,
+  storeInfoCard,
   parsePeople,
   parseReservationSlots,
   recommendItems,
@@ -138,6 +141,8 @@ type Message =
   | { id: number; role: "bot"; kind: "reservation"; reservation: Reservation }
   // 예약 인원 카운터. lead: 다시 물을 때 앞에 붙일 이유, picked: 고른 인원
   | { id: number; role: "bot"; kind: "people"; lead?: string; picked?: number }
+  // 표로 보여 주는 안내: 예약 완료·결제 완료·주문 상태·가게 정보
+  | { id: number; role: "bot"; kind: "info"; card: InfoCard }
   // 배달 수량 카운터 (마리·판·인분)
   | { id: number; role: "bot"; kind: "qty"; text: string; unit: string; max: number; priceEach: number; picked?: number };
 
@@ -230,6 +235,83 @@ function spokenText(m: Message): string {
       return `${m.lead ? `${m.lead} ` : ""}${PEOPLE_QUESTION}`;
     case "qty":
       return line(m.text);
+    case "info":
+      return m.card.say ?? `${line(m.card.title)} ${m.card.rows.map((r) => `${r.label} ${r.value}`).join(", ")}.${m.card.note ? ` ${m.card.note}` : ""}`;
+  }
+}
+
+// ---- 채팅창을 끈 동안의 가운데 자막 ----
+// 표가 있는 답(주문서·예약 확인·식당·안내)은 자막에 제목·질문 한 줄만 적고, 다 적히면 그 아래에 표를 띄운다.
+// 소리로는 지금처럼 표 내용까지 읽는다 (spokenText)
+export interface CaptionCard {
+  key: string;
+  rows: OrderRow[];
+  list?: boolean; // 식당 목록: 왼쪽이 이름, 오른쪽이 거리·대표 메뉴
+}
+
+function captionCard(m: Message, now: Date): CaptionCard | null {
+  if (m.role === "user") return null;
+  const key = `m${m.id}`;
+  switch (m.kind) {
+    case "order":
+      return { key, rows: orderCardRows(m.order) };
+    case "reservation": {
+      const r = m.reservation;
+      return {
+        key,
+        rows: [
+          { label: "식당", value: r.restaurant.name },
+          { label: "날짜", value: formatDate(r.date) },
+          { label: "시간", value: r.time, emphasis: true },
+          { label: "인원", value: `${r.people}명` },
+          { label: "주소", value: r.restaurant.address },
+        ],
+      };
+    }
+    case "restaurantPicked": {
+      const r = m.restaurant;
+      return {
+        key,
+        rows: [
+          { label: "식당", value: r.name },
+          { label: "거리", value: km(r.distanceKm) },
+          { label: "대표 메뉴", value: r.signature },
+          { label: "영업시간", value: r.hours },
+          { label: "주소", value: r.address },
+        ],
+      };
+    }
+    case "info":
+      return { key, rows: m.card.rows };
+    case "restaurants":
+      return {
+        key,
+        list: true,
+        rows: m.list.map((r) => ({
+          label: r.name,
+          value: `${km(r.distanceKm)} · ${r.signature} · ${isOpenNow(r, now) ? "영업 중" : `${r.hours.split("-")[0].trim()} 오픈`}`,
+        })),
+      };
+    default:
+      return null;
+  }
+}
+
+function captionLine(m: Message): string {
+  if (m.role === "user") return "";
+  switch (m.kind) {
+    case "order":
+      return `${ORDER_CARD_TITLE} ${ORDER_CARD_QUESTION}`;
+    case "reservation":
+      return "예약 내용을 확인해 주세요. 예약할까요?";
+    case "restaurantPicked":
+      return `${withObjectParticle(m.restaurant.name)} 선택했어요.`;
+    case "info":
+      return [m.card.title, m.card.note].filter(Boolean).join(" ");
+    case "restaurants":
+      return m.heading ? m.heading.replace(/\n/g, " ") : `근처 ${m.foodLabel} 맛집을 추천해요! 마음에 드는 곳을 말씀해 주세요.`;
+    default:
+      return spokenText(m);
   }
 }
 
@@ -369,7 +451,8 @@ export function OrderChatbot() {
   // 채팅창을 끈 동안의 가운데 자막: 마지막으로 사용자가 말한 뒤에 나온 봇 말풍선들을 읽어 주는 문장 그대로
   const lastUserIndex = messages.findLastIndex((m) => m.role === "user");
   const botTurn = messages.slice(lastUserIndex + 1);
-  const captionText = botTurn.map(spokenText).filter(Boolean).join(" ");
+  const captionText = botTurn.map(captionLine).filter(Boolean).join(" ");
+  const captionCards = botTurn.flatMap((m) => captionCard(m, new Date()) ?? []);
   const captionId = botTurn.at(-1)?.id ?? null;
 
   // 채팅창을 숨기면 선택 버튼도 안 보이므로 입력창은 늘 열어 둔다
@@ -482,7 +565,7 @@ export function OrderChatbot() {
     setPendingOrder(null);
     setOrder(next);
     setStage("confirm");
-    botReply(() => push(botText("근처 매장을 찾았어요"), { role: "bot", kind: "order", order: next }), 1000);
+    botReply(() => push(botText("근처 매장을 찾았어요."), { role: "bot", kind: "order", order: next }), 1000);
   }
 
   function askDelivery(what: "address" | "phone", lead?: string) {
@@ -627,7 +710,7 @@ export function OrderChatbot() {
         return;
       }
       if (isYes(text) && draft.date && draft.time && draft.people) {
-        const done = reservationDoneText({ restaurant, date: draft.date, time: draft.time, people: draft.people });
+        const done = reservationDoneCard({ restaurant, date: draft.date, time: draft.time, people: draft.people });
         // 사장님·관리자 화면에서 보이도록 기록한다
         // 로그인했으면 그 사람 이름으로, 아니면 비회원으로 서버에 남는다 (실패해도 대화는 이어 간다)
         addReservation({ restaurantId: restaurant.id, restaurantName: restaurant.name, date: draft.date, time: draft.time, people: draft.people }).catch(
@@ -635,7 +718,7 @@ export function OrderChatbot() {
         );
         setRsv(null);
         setStage("idle");
-        botReply(() => push(botText(done)), 900);
+        botReply(() => push({ role: "bot", kind: "info", card: done }), 900);
         return;
       }
     }
@@ -712,7 +795,7 @@ export function OrderChatbot() {
     botReplyAsync(async () => {
       const latest = (await fetchMyOrders())[0];
       if (!latest) return () => push(botPrompt({ text: "최근 주문 내역이 없어요.\n배달 주문을 도와드릴까요?", choices: [deliveryChoice] }));
-      return () => push(botText(orderStatusText(latest)));
+      return () => push({ role: "bot", kind: "info", card: orderStatusCard(latest) });
     });
   }
 
@@ -795,22 +878,13 @@ export function OrderChatbot() {
   function showStoreInfo(r: Restaurant) {
     setLastPlace(r);
     setStage("idle");
-    const open = isOpenNow(r, new Date());
     const delivers = availableDeliveryMenu().some((d) => d.restaurantId === r.id);
     const choices: Choice[] = [
       { label: "예약하기", value: `${r.name} 예약` },
       ...(delivers ? [{ label: "배달 주문", value: `${r.name} 배달` }] : []),
     ];
-    const state = open ? "지금 영업 중이에요." : "지금은 영업시간이 아니에요.";
-    botReply(() =>
-      push(
-        botPrompt({
-          text: `${r.name}\n영업시간 ${r.hours} · ${state}\n주소 ${r.address}`,
-          say: `${withTopicParticle(r.name)} ${r.hours.replace("-", "부터")}까지 영업해요. ${state} 주소는 ${r.address}예요.`,
-          choices,
-        }),
-      ),
-    );
+    const next = delivers ? "예약하거나 배달 주문할 수 있어요." : "예약을 도와드릴까요?";
+    botReply(() => push({ role: "bot", kind: "info", card: storeInfoCard(r, new Date()) }, botPrompt({ text: next, choices })));
   }
 
   // 시간대에 어울리고 많이 주문된 메뉴를 추천한다 ("배고파", "뭐 먹지", "메뉴 뭐 있어")
@@ -1244,14 +1318,14 @@ export function OrderChatbot() {
 
   function onPaid() {
     if (!order || !payMethod) return;
-    const text = completionText(order, payMethod);
+    const card = completionCard(order, payMethod);
     // 사장님·관리자 화면에서 보이도록 기록한다
     addOrder(order, payMethod.label).catch(() => {});
     setPayMethod(null);
     setPendingPay(null);
     setOrder(null);
     setStage("done");
-    botReply(() => push(botText(text)), 500);
+    botReply(() => push({ role: "bot", kind: "info", card }), 500);
   }
 
   function reset() {
@@ -1490,6 +1564,23 @@ export function OrderChatbot() {
             </div>
           </>
         );
+      case "info":
+        return (
+          <>
+            {m.card.title}
+            <div className="card">
+              <dl>
+                {m.card.rows.map((row) => (
+                  <Fragment key={row.label}>
+                    <dt>{row.label}</dt>
+                    <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+            </div>
+            {m.card.note && <div className="card-note">{m.card.note}</div>}
+          </>
+        );
       case "people":
         return (
           <>
@@ -1646,7 +1737,7 @@ export function OrderChatbot() {
           )}
         </div>
 
-        {chatHidden && <VoiceCaption id={captionId} text={captionText} thinking={thinking} />}
+        {chatHidden && <VoiceCaption id={captionId} text={captionText} cards={captionCards} thinking={thinking} />}
 
         {/* 음성 카드: 대화 영역 위에 겹쳐서 아래에서 올라오고(show) 내려간다. 내려가는 동안은 마지막 내용을 그대로 보여 준다.
             듣는 동안은 중간 인식 결과, 아니면 오류·안내 문구 */}

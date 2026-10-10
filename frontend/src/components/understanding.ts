@@ -9,6 +9,9 @@ import {
   bookableTimes,
   checkVisitTime,
   formatDate,
+  km,
+  withTopicParticle,
+  type InfoCard,
   parseVisitDate,
   parseVisitTime,
   popularFirst,
@@ -256,19 +259,42 @@ const hhmm = (ms: number) => {
 export const ETA_MINUTES = 40;
 export const orderLabel = (o: OrderRecord) => `${o.order.store.name} ${o.order.item} ${o.order.qty}${o.order.unit}`;
 
-export function orderStatusText(o: OrderRecord): string {
-  const eta = `
-도착 예정: 약 ${hhmm(o.createdAt + ETA_MINUTES * 60_000)}`;
-  switch (o.status) {
-    case "접수":
-      return `${orderLabel(o)} 주문이 접수됐어요.
-가게에서 곧 준비를 시작해요.${eta}`;
-    case "준비 중":
-      return `${orderLabel(o)} 주문은 지금 가게에서 준비 중이에요.${eta}`;
-    case "완료":
-      return `${orderLabel(o)} 주문은 배달이 완료됐어요.
-맛있게 드세요!`;
-    case "취소":
-      return `${orderLabel(o)} 주문은 취소됐어요.`;
-  }
+const STATUS_TITLE: Record<OrderRecord["status"], string> = {
+  접수: "주문이 접수됐어요.",
+  "준비 중": "가게에서 준비 중이에요.",
+  완료: "배달이 완료됐어요.",
+  취소: "취소된 주문이에요.",
+};
+const STATUS_NOTE: Partial<Record<OrderRecord["status"], string>> = {
+  접수: "가게에서 곧 준비를 시작해요.",
+  완료: "맛있게 드세요!",
+};
+
+// 내 주문 상태를 표로: 주문 내용, 상태, (아직 오는 중이면) 도착 예정
+export function orderStatusCard(o: OrderRecord): InfoCard {
+  const coming = o.status === "접수" || o.status === "준비 중";
+  return {
+    title: STATUS_TITLE[o.status],
+    rows: [
+      { label: "주문", value: orderLabel(o) },
+      { label: "상태", value: o.status },
+      ...(coming ? [{ label: "도착 예정", value: `약 ${hhmm(o.createdAt + ETA_MINUTES * 60_000)}`, emphasis: true }] : []),
+    ],
+    note: STATUS_NOTE[o.status],
+  };
+}
+
+// 가게 정보를 표로: 영업시간(지금 영업 중인지)·주소·대표 메뉴·거리
+export function storeInfoCard(r: Restaurant, now: Date): InfoCard {
+  const state = isOpenNow(r, now) ? "지금 영업 중이에요." : "지금은 영업시간이 아니에요.";
+  return {
+    title: `${r.name} 정보예요.`,
+    rows: [
+      { label: "영업시간", value: `${r.hours} · ${isOpenNow(r, now) ? "영업 중" : "영업 전·후"}`, emphasis: true },
+      { label: "주소", value: r.address },
+      { label: "대표 메뉴", value: r.signature },
+      { label: "거리", value: km(r.distanceKm) },
+    ],
+    say: `${withTopicParticle(r.name)} ${r.hours.replace("-", "부터")}까지 영업해요. ${state} 주소는 ${r.address}예요.`,
+  };
 }

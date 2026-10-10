@@ -5,7 +5,7 @@ import {
   RESTAURANTS,
   bookableTimes,
   checkVisitTime,
-  completionText,
+  completionCard,
   findDeliveryItems,
   findPayment,
   findRestaurant,
@@ -29,7 +29,7 @@ import {
   parseVisitDate,
   parseVisitTime,
   quantityQuestion,
-  reservationDoneText,
+  reservationDoneCard,
   timeChoices,
   withObjectParticle,
   withTopicParticle,
@@ -213,11 +213,13 @@ describe("식당 예약", () => {
     expect(parseQuantity("여섯")).toBe(6);
   });
 
-  it("완료 문구에 예약번호·식당·날짜·시간·인원을 넣는다", () => {
-    const text = reservationDoneText({ restaurant: restaurant("장락반점"), date: new Date(2026, 9, 2), time: "19:00", people: 2 }, now);
-    expect(text).toContain("예약이 완료되었어요!");
-    expect(text).toMatch(/예약번호: R\d{6}/);
-    expect(text).toContain("장락반점 · 10월 2일 (금) 19:00 · 2명");
+  it("예약 완료 표에 예약번호·식당·일시·인원·주소를 넣는다", () => {
+    const card = reservationDoneCard({ restaurant: restaurant("장락반점"), date: new Date(2026, 9, 2), time: "19:00", people: 2 }, now);
+    expect(card.title).toBe("예약이 완료되었어요!");
+    const row = (label: string) => card.rows.find((r) => r.label === label)?.value;
+    expect(row("예약번호")).toMatch(/^R\d{6}$/);
+    expect([row("식당"), row("일시"), row("인원")]).toEqual(["장락반점", "10월 2일 (금) 19:00", "2명"]);
+    expect(card.note).toBe("방문 10분 전까지 도착해 주세요.");
   });
 });
 
@@ -229,12 +231,14 @@ describe("makeOrder / completionText", () => {
     expect(won(40000)).toBe("40,000원");
   });
 
-  it("완료 문구에 결제수단·금액·주문번호·단위·도착 예정 시각을 넣는다", () => {
-    const text = completionText(makeOrder(item("마르게리따 피자"), 1), findPayment("토스페이")!, new Date(2026, 9, 1, 10, 0));
-    expect(text).toContain("토스페이로 19,000원 결제가 완료되었어요");
-    expect(text).toMatch(/주문번호: ON\d{6}/);
-    expect(text).toContain("장락 화덕피자에서 마르게리따 피자 1판을 준비 중이에요");
-    expect(text).toContain("도착 예정: 약 40분 후 (10:40)");
+  it("결제 완료 표에 결제수단·금액·주문번호·음식·도착 예정 시각을 넣는다", () => {
+    const card = completionCard(makeOrder(item("마르게리따 피자"), 1), findPayment("토스페이")!, new Date(2026, 9, 1, 10, 0));
+    expect(card.title).toBe("토스페이로 19,000원 결제가 완료되었어요!");
+    const row = (label: string) => card.rows.find((r) => r.label === label)?.value;
+    expect(row("주문번호")).toMatch(/^ON\d{6}$/);
+    expect(row("음식")).toBe("마르게리따 피자 1판");
+    expect(row("도착 예정")).toBe("약 40분 후 (10:40)");
+    expect(card.note).toBe("장락 화덕피자에서 마르게리따 피자 1판을 준비 중이에요.");
   });
 });
 

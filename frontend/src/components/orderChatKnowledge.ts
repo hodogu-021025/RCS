@@ -378,15 +378,27 @@ export const recommend = (names: string[]) => `${withObjectParticle(names.join("
 export const DEFAULT_PEOPLE = 2;
 export const PEOPLE_QUESTION = "몇 명이 방문하시나요?";
 
-export function reservationDoneText(r: Reservation, now = new Date()): string {
-  const no = "R" + String(now.getTime()).slice(-6);
-  return (
-    `예약이 완료되었어요!\n\n` +
-    `예약번호: ${no}\n` +
-    `${r.restaurant.name} · ${formatDate(r.date)} ${r.time} · ${r.people}명\n` +
-    `주소: ${r.restaurant.address}\n` +
-    `방문 10분 전까지 도착해 주세요.`
-  );
+// 표로 보여 줄 안내 (예약 완료·결제 완료·주문 상태·가게 정보). title 은 표 위 문장, note 는 표 아래 한 줄,
+// say 가 있으면 소리로는 그 문장을 읽는다 (없으면 제목·표·안내를 이어서 읽는다)
+export interface InfoCard {
+  title: string;
+  rows: OrderRow[];
+  note?: string;
+  say?: string;
+}
+
+export function reservationDoneCard(r: Reservation, now = new Date()): InfoCard {
+  return {
+    title: "예약이 완료되었어요!",
+    rows: [
+      { label: "예약번호", value: "R" + String(now.getTime()).slice(-6) },
+      { label: "식당", value: r.restaurant.name },
+      { label: "일시", value: `${formatDate(r.date)} ${r.time}`, emphasis: true },
+      { label: "인원", value: `${r.people}명` },
+      { label: "주소", value: r.restaurant.address },
+    ],
+    note: "방문 10분 전까지 도착해 주세요.",
+  };
 }
 
 // ---- 선택지가 있는 질문 ----
@@ -468,16 +480,18 @@ export function findPayment(text: string): PaymentMethod | undefined {
 
 export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 
-export function completionText(order: Order, method: PaymentMethod, now = new Date()): string {
-  const digits = String(now.getTime()).slice(-6);
+export function completionCard(order: Order, method: PaymentMethod, now = new Date()): InfoCard {
   const eta = new Date(now.getTime() + 40 * 60_000);
-  const hhmm = `${pad2(eta.getHours())}:${pad2(eta.getMinutes())}`;
-  return (
-    `${method.label}로 ${won(order.price)} 결제가 완료되었어요!\n\n` +
-    `주문번호: ON${digits}\n` +
-    `${order.store.name}에서 ${order.item} ${withObjectParticle(`${order.qty}${order.unit}`)} 준비 중이에요.\n` +
-    `도착 예정: 약 40분 후 (${hhmm})`
-  );
+  return {
+    title: `${method.label}로 ${won(order.price)} 결제가 완료되었어요!`,
+    rows: [
+      { label: "주문번호", value: "ON" + String(now.getTime()).slice(-6) },
+      { label: "매장", value: order.store.name },
+      { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
+      { label: "도착 예정", value: `약 40분 후 (${pad2(eta.getHours())}:${pad2(eta.getMinutes())})`, emphasis: true },
+    ],
+    note: `${order.store.name}에서 ${order.item} ${withObjectParticle(`${order.qty}${order.unit}`)} 준비 중이에요.`,
+  };
 }
 
 // 채팅의 주문서 카드에 들어갈 줄들. emphasis 는 파랗게 강조할 금액

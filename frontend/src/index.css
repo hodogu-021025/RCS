@@ -214,12 +214,49 @@ header .title {
   overflow-y: auto; pointer-events: none;
   animation: pop .25s ease;
 }
+.caption-body {
+  margin: auto 0; width: 100%; max-width: 340px;
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+}
 .caption-text {
-  margin: auto 0; max-width: 340px;
+  margin: 0; max-width: 340px;
   text-align: center; white-space: pre-line; word-break: keep-all;
   font-size: 21px; font-weight: 700; line-height: 1.55; letter-spacing: -.01em; color: var(--text);
 }
 .caption-text.long { font-size: 17px; }
+
+/* 자막 아래 표: 표가 있는 답에서 자막을 다 적은 뒤 카드가 떠오르고, 줄이 하나씩 차례로 나타난다.
+   표가 길면 손가락으로 넘겨 볼 수 있게 이때만 터치를 받는다 */
+.voice-caption.has-cards { pointer-events: auto; }
+.voice-caption.has-cards .caption-text { font-size: 18px; }
+.caption-cards { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.caption-card {
+  padding: 14px 16px; border-radius: 18px;
+  background: rgba(255, 255, 255, .78); border: 1px solid rgba(15, 23, 42, .07);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  text-align: left;
+  animation: card-rise .42s cubic-bezier(.2, .8, .2, 1) both;
+}
+.caption-card dl { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.caption-row {
+  display: grid; grid-template-columns: 68px 1fr; gap: 10px; align-items: baseline;
+  animation: row-in .32s ease both; animation-delay: calc(140ms + var(--i, 0) * 70ms);
+}
+.caption-row dt { color: var(--muted); font-size: 13px; }
+.caption-row dd { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--text); word-break: keep-all; overflow-wrap: anywhere; }
+.caption-row dd.price { color: var(--accent); font-weight: 700; }
+/* 식당 목록: 이름이 앞, 거리·대표 메뉴는 아래 줄에 작게 */
+.caption-card.list .caption-row { grid-template-columns: 1fr; gap: 2px; }
+.caption-card.list .caption-row dt { color: var(--text); font-size: 15px; font-weight: 700; }
+.caption-card.list .caption-row dd { color: var(--muted); font-size: 13px; font-weight: 500; }
+.caption-card.list .caption-row + .caption-row { padding-top: 8px; border-top: 1px solid rgba(15, 23, 42, .06); }
+html[data-keyboard] .caption-card { padding: 10px 12px; }
+html[data-keyboard] .caption-card dl { gap: 5px; }
+@keyframes card-rise { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes row-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .caption-card, .caption-row { animation: none; }
+}
 /* 키보드가 떠서 공간이 좁을 때는 여백과 글자를 줄여 자막이 남은 영역 안에 들어오게 한다 */
 html[data-keyboard] .voice-caption { padding: 16px 24px; }
 html[data-keyboard] .caption-text { font-size: 17px; line-height: 1.45; }
@@ -286,6 +323,10 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .card dt { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .card dd { margin: 0; font-weight: 600; }
 .card .price { color: var(--accent); font-weight: 700; }
+/* 채팅 말풍선 속 표도 살짝 떠오르며 나타난다 */
+.card { animation: card-rise .38s cubic-bezier(.2, .8, .2, 1) both; animation-delay: .08s; }
+.card-note { margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .card { animation: none; } }
 
 /* 선택지 질문의 버튼들. 끝의 "직접 입력" 은 점선으로 구분한다 */
 /* 줄바꿈되면 각 줄의 버튼이 남는 폭을 나눠 가져 말풍선 오른쪽에 빈 공간이 남지 않게 한다 */

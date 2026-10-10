@@ -300,7 +300,11 @@ describe("OrderChatbot", () => {
     fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
     wait(900);
     expect(screen.getByText(/예약이 완료되었어요!/)).toBeInTheDocument();
-    expect(screen.getByText(/장락반점 · 10월 2일 \(금\) 19:00 · 3명/)).toBeInTheDocument();
+    // 완료 내용은 표로 보인다
+    const done = screen.getByText(/예약이 완료되었어요!/).closest(".bubble")!;
+    expect(within(done as HTMLElement).getByText("10월 2일 (금) 19:00")).toBeInTheDocument();
+    expect(within(done as HTMLElement).getByText("3명")).toBeInTheDocument();
+    expect(within(done as HTMLElement).getByText(/^R\d{6}$/)).toBeInTheDocument();
   });
 
   it("식당 예약: 인원 카운터는 1명 아래로 내려가지 않는다", () => {
@@ -532,12 +536,18 @@ describe("OrderChatbot", () => {
     // 선택지까지 읽어 주는 문장 그대로 (사용자가 한 말은 자막에 없다)
     expect(caption()).toBe("오늘은 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이를 추천해요! 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
 
-    // 숫자 속 점(1.8km)에서는 줄을 바꾸지 않는다
+    // 표가 있는 답(주문서)은 자막에 제목·질문만 적고, 다 적은 뒤에 그 아래 표를 띄운다
     send("간장치킨 1마리 시켜줘");
     wait(1000);
+    wait(45 * 3);
+    expect(document.querySelector(".caption-card")).not.toBeInTheDocument(); // 적는 중에는 아직 없다
     wait(10_000);
-    expect(caption()).toContain("청전 치킨공방 · 1.8km");
-    expect(caption()).toContain("근처 매장을 찾았어요 주문 내역을 확인해 주세요.\n");
+    expect(caption()).toBe("근처 매장을 찾았어요.\n주문 내역을 확인해 주세요.\n주문할까요?");
+    const card = document.querySelector(".caption-card") as HTMLElement;
+    expect(card).toBeInTheDocument();
+    expect(within(card).getByText("청전 치킨공방 · 1.8km")).toBeInTheDocument();
+    expect(within(card).getByText("간장치킨 1마리")).toBeInTheDocument();
+    expect(within(card).getByText("20,000원")).toHaveClass("price");
   });
 
   it("주문 확인에서 다른 서비스(식당)를 말하면 결제로 넘어가지 않고 그 서비스로 넘어간다", () => {

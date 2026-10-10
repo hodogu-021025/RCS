@@ -232,8 +232,11 @@ describe("5. 주문한 뒤의 질문", () => {
     guestOrder();
     await renderChat();
     await say("내 주문 어디쯤 왔어");
-    expect(await find(/간장치킨 2마리 주문이 접수됐어요/)).toBeTruthy();
-    expect(screen.getByText(/도착 예정: 약 19:1\d/)).toBeInTheDocument();
+    // 상태는 표로: 주문 내용·상태·도착 예정
+    expect(await find(/주문이 접수됐어요/)).toBeTruthy();
+    expect(inCard("청전 치킨공방 간장치킨 2마리")).toBe(true);
+    expect(inCard("접수")).toBe(true);
+    expect(screen.getByText(/^약 19:1\d$/)).toBeInTheDocument();
   });
 
   it("접수 상태 주문은 확인을 받고 취소한다", async () => {
@@ -257,7 +260,9 @@ describe("5. 주문한 뒤의 질문", () => {
   it("가게 영업시간·주소를 알려 주고, 예약으로 이어 갈 수 있다", async () => {
     await renderChat();
     await say("장락반점 영업시간 알려줘");
-    expect(await find(/영업시간 11:00 - 21:00 · 지금 영업 중이에요/)).toBeTruthy();
+    expect(await find(/장락반점 정보예요/)).toBeTruthy();
+    expect(inCard("11:00 - 21:00 · 영업 중")).toBe(true);
+    expect(inCard("제천시 장락동 30-7")).toBe(true);
     await click("예약하기");
     expect(await find(/장락반점 예약을 도와드릴게요/)).toBeTruthy();
   });
@@ -266,7 +271,7 @@ describe("5. 주문한 뒤의 질문", () => {
     await renderChat();
     await say("영업시간 알려줘");
     await click(/장락 떡볶이/);
-    expect(await find(/영업시간 10:00 - 21:00/)).toBeTruthy();
+    expect(await find(/^10:00 - 21:00 · 영업 중$/)).toBeTruthy();
   });
 
   it("제일 가까운 식당은 음식 종류와 상관없이 가까운 순서로", async () => {
