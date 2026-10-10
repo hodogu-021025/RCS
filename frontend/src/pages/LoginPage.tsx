@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { HOME_BY_ROLE, login, useSession } from "../auth/auth";
+import { HOME_BY_ROLE, login, takeLoginNotice, useSession } from "../auth/auth";
 import { PasswordField } from "./PasswordField";
 
 // 아이디·비밀번호로 로그인하고 역할에 맞는 페이지로 보낸다. 계정이 없으면 회원가입으로
@@ -11,6 +11,8 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 탈퇴 직후처럼 다른 화면에서 넘겨준 안내 (처음 그릴 때 한 번만 받는다)
+  const [notice] = useState(takeLoginNotice);
 
   if (session) return <Navigate to={HOME_BY_ROLE[session.role]} replace />;
 
@@ -33,6 +35,11 @@ export function LoginPage() {
           Saylo
         </a>
         <h1>로그인</h1>
+        {notice && (
+          <p className="form-notice" role="status">
+            {notice}
+          </p>
+        )}
         <label>
           <span>아이디</span>
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus />

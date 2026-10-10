@@ -7,6 +7,7 @@
 //   POST   /api/auth/login             { username, password }         → { token, session }
 //   POST   /api/auth/logout
 //   GET    /api/auth/me                                               → { session }  (토큰이 없거나 만료되면 null)
+//   POST   /api/auth/withdraw          { password }                   회원 탈퇴 (고객님·사장님). 주문·예약 기록은 이름을 지우고 남긴다
 //   GET    /api/orders                 고객: 내 것 / 사장님: 내 매장 / 관리자: 전체
 //   POST   /api/orders                 { order, payment }             로그인 없이도 가능 (비회원)
 //   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자
@@ -110,6 +111,15 @@ export function createApp({ db, verifier, mailer }) {
       return { ok: true };
     }],
     ["GET", "/api/auth/me", ({ user }) => ({ session: publicSession(user) ?? null })],
+    ["POST", "/api/auth/withdraw", ({ body, user }) => {
+      if (!user) throw needLogin();
+      if (user.role === "admin") throw new HttpError(403, "관리자 계정은 탈퇴할 수 없어요.");
+      // 401 은 화면이 "로그인이 풀렸다"로 받아들이므로, 비밀번호가 틀리면 400 으로 알린다
+      const row = db.findUserWithHash(user.username);
+      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) throw bad("비밀번호가 맞지 않아요.");
+      db.withdrawUser(user.username);
+      return { ok: true };
+    }],
 
     // ---- 주문 ----
     ["GET", "/api/orders", ({ user }) => {

@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { PRIVACY_VERSION, createApp } from "./app.mjs";
-import { openDb } from "./db.mjs";
+import { WITHDRAWN, openDb } from "./db.mjs";
+import { hashPassword } from "./auth.mjs";
 import { createVerifier } from "./verification.mjs";
 
 let server;
@@ -229,6 +230,36 @@ describe("개인정보 수집·이용 동의", () => {
   it("관리자가 만든 사장님 계정에는 동의 기록이 없다", () => {
     db.createUser({ username: "byadmin01", passwordHash: "x", name: "관리자가 만듦", role: "owner", storeId: "c2" });
     assert.deepEqual(db.privacyConsent("byadmin01"), { version: null, agreedAt: null });
+  });
+});
+
+describe("회원 탈퇴", () => {
+  it("비밀번호를 확인하고 계정·세션을 지우며, 주문·예약은 이름을 지운 채 남긴다", async () => {
+    const token = await signup({ username: "leavinguser", email: "leaving@example.com", name: "떠날 사람" });
+    const order = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭" }, payment: "카드" }, token)).body;
+    const rsv = (await call("POST", "/api/reservations", { restaurantId: "c1", restaurantName: "장락반점", date: "2026-10-20", time: "19:00", people: 2 }, token)).body;
+
+    assert.equal((await call("POST", "/api/auth/withdraw", { password: "wrongpass1" }, token)).status, 400);
+    assert.ok(db.findUser("leavinguser"));
+    assert.equal((await call("POST", "/api/auth/withdraw", { password: "password1" })).status, 401);
+
+    assert.equal((await call("POST", "/api/auth/withdraw", { password: "password1" }, token)).status, 200);
+    assert.equal(db.findUser("leavinguser"), null);
+    assert.equal((await call("GET", "/api/auth/me", undefined, token)).body.session, null); // 세션도 없어졌다
+    assert.deepEqual([db.orderById(order.id).customer, db.orderById(order.id).customerName], [WITHDRAWN.customer, "탈퇴한 회원"]);
+    const r = db.listReservations({}).find((x) => x.id === rsv.id);
+    assert.deepEqual([r.customer, r.customerName], [WITHDRAWN.customer, "탈퇴한 회원"]);
+    // 같은 이메일로 다시 가입할 수 있고, 새 계정에는 옛 기록이 보이지 않는다
+    const again = await signup({ username: "leavinguser", email: "leaving@example.com" });
+    assert.deepEqual((await call("GET", "/api/orders", undefined, again)).body, []);
+  });
+
+  it("관리자는 탈퇴할 수 없다", async () => {
+    db.createUser({ username: "adminleave", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
+    const token = (await call("POST", "/api/auth/login", { username: "adminleave", password: "password1" })).body.token;
+    const r = await call("POST", "/api/auth/withdraw", { password: "password1" }, token);
+    assert.equal(r.status, 403);
+    assert.ok(db.findUser("adminleave"));
   });
 });
 

@@ -82,11 +82,35 @@ export async function login(username: string, password: string): Promise<{ sessi
   }
 }
 
+// 화면은 바로 로그아웃 상태로 바꾸고, 서버의 세션 삭제는 지운 토큰을 직접 실어 보낸다
+// (저장된 토큰은 이미 지웠으므로 그대로 보내면 서버가 어떤 세션인지 모른다)
 export async function logout() {
   const token = getToken();
   setToken(null);
   setState({ session: null, loaded: true });
-  if (token) await api("POST", "/api/auth/logout", {}).catch(() => {});
+  if (token) await api("POST", "/api/auth/logout", {}, { token }).catch(() => {});
+}
+
+// 로그인 화면에 한 번 보여 줄 안내 (예: 탈퇴 완료). 읽으면 지운다
+let loginNotice: string | null = null;
+export function takeLoginNotice(): string | null {
+  const n = loginNotice;
+  loginNotice = null;
+  return n;
+}
+
+// 회원 탈퇴. 비밀번호가 맞으면 서버가 계정을 지우고, 화면은 로그아웃 상태가 돼 로그인 화면으로 간다
+export async function withdraw(password: string): Promise<{ ok: true } | { error: string }> {
+  if (!password) return { error: "비밀번호를 적어 주세요." };
+  try {
+    await api("POST", "/api/auth/withdraw", { password });
+  } catch (e) {
+    return { error: (e as ApiError).message };
+  }
+  loginNotice = "탈퇴가 완료됐어요. 그동안 Saylo를 이용해 주셔서 감사해요.";
+  setToken(null);
+  setState({ session: null, loaded: true });
+  return { ok: true };
 }
 
 export interface SignupInput {

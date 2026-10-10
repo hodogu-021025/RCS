@@ -1,16 +1,18 @@
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { logout } from "../auth/auth";
+import { logout, useSession } from "../auth/auth";
 
 interface Props {
   title: string;
   children: ReactNode;
+  accountLink?: boolean; // 맨 아래 "계정 관리 · 회원 탈퇴" 링크 (고객님·사장님만, 계정 관리 화면에서는 끈다)
 }
 
 // 사장님·관리자·내 주문 페이지의 공통 틀: 위에 로고·제목·로그아웃, 아래에 내용.
 // 모바일 기준 웹이라 소비자 채팅 화면처럼 휴대폰 폭(최대 440px)의 앱 화면으로 띄운다
-export function DashLayout({ title, children }: Props) {
+export function DashLayout({ title, children, accountLink = true }: Props) {
   const navigate = useNavigate();
+  const session = useSession();
 
   function onLogout() {
     void logout(); // 화면의 로그인 상태는 바로 풀리고, 서버의 세션 삭제는 뒤에서 이어진다
@@ -28,7 +30,14 @@ export function DashLayout({ title, children }: Props) {
           로그아웃
         </button>
       </header>
-      <main className="dash-main">{children}</main>
+      <main className="dash-main">
+        {children}
+        {accountLink && session && session.role !== "admin" && (
+          <a className="account-link" href="#/account">
+            계정 관리 · 회원 탈퇴
+          </a>
+        )}
+      </main>
     </div>
   );
 }

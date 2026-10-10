@@ -81,6 +81,9 @@ const toReservation = (r) => ({
 });
 
 // path: 파일 경로. ":memory:" 면 메모리에만 (테스트)
+// 탈퇴한 회원의 주문·예약에 남는 주문자
+export const WITHDRAWN = { customer: "~withdrawn", name: "탈퇴한 회원" };
+
 export function openDb(path) {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
@@ -101,6 +104,8 @@ export function openDb(path) {
     insertUser: q("INSERT INTO users (username, password_hash, name, email, role, store_id, created_at, privacy_version, privacy_agreed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
     privacyConsent: q("SELECT privacy_version, privacy_agreed_at FROM users WHERE username = ?"),
     deleteUser: q("DELETE FROM users WHERE username = ?"),
+    anonymizeOrders: q("UPDATE orders SET customer = ?, customer_name = ? WHERE customer = ?"),
+    anonymizeReservations: q("UPDATE reservations SET customer = ?, customer_name = ? WHERE customer = ?"),
     countRole: q("SELECT COUNT(*) AS n FROM users WHERE role = ?"),
 
     insertSession: q("INSERT INTO sessions (token, username, created_at, expires_at) VALUES (?, ?, ?, ?)"),
@@ -151,6 +156,21 @@ export function openDb(path) {
       return toUser(stmts.userByName.get(username));
     },
     deleteUser: (username) => stmts.deleteUser.run(username).changes > 0,
+    // 회원 탈퇴: 계정(과 세션)은 지우고, 법에 따라 보관하는 주문·예약 기록은 누구 것인지 알 수 없게 바꿔 남긴다.
+    // WITHDRAWN 은 아이디 규칙(영문·숫자·_)에 맞지 않아 같은 이름으로 새로 가입해 옛 기록을 볼 수 없다
+    withdrawUser(username) {
+      db.exec("BEGIN");
+      try {
+        stmts.anonymizeOrders.run(WITHDRAWN.customer, WITHDRAWN.name, username);
+        stmts.anonymizeReservations.run(WITHDRAWN.customer, WITHDRAWN.name, username);
+        const deleted = stmts.deleteUser.run(username).changes > 0;
+        db.exec("COMMIT");
+        return deleted;
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+    },
 
     // ---- 세션 ----
     createSession(token, username, ttlMs) {

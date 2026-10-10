@@ -1,20 +1,22 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
-import { login } from "../auth/auth";
+import { login, logout } from "../auth/auth";
+import { getToken } from "../api/client";
 import { DELIVERY_MENU, makeOrder } from "../components/orderChatKnowledge";
 import { getDb, refresh } from "../data/db";
 import { server, TEST_CODE } from "../test/setup";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
-  const [login, signup, me, owner, admin, privacy] = await Promise.all([
+  const [login, signup, me, owner, admin, privacy, account] = await Promise.all([
     import("./LoginPage"),
     import("./SignupPage"),
     import("./MyOrdersPage"),
     import("./OwnerPage"),
     import("./AdminPage"),
     import("./PrivacyPage"),
+    import("./AccountPage"),
   ]);
   return {
     LoginPage: login.LoginPage,
@@ -23,6 +25,7 @@ vi.mock("./routes", async () => {
     OwnerPage: owner.OwnerPage,
     AdminPage: admin.AdminPage,
     PrivacyPage: privacy.PrivacyPage,
+    AccountPage: account.AccountPage,
   };
 });
 
@@ -410,5 +413,60 @@ describe("개인정보 처리방침", () => {
     expect(await screen.findByRole("heading", { name: "1. 수집하는 개인정보" })).toBeInTheDocument();
     expect(screen.getByText("Resend, Inc. (미국)")).toBeInTheDocument();
     expect(screen.getByText(/2026년 10월 10일부터 적용돼요/)).toBeInTheDocument();
+  });
+});
+
+describe("계정 관리·회원 탈퇴", () => {
+  it("고객님: 내 주문에서 계정 관리로 가서 비밀번호를 확인하고 탈퇴하면, 주문 기록은 이름을 지운 채 남는다", async () => {
+    server.createAccount({ ...KIM });
+    const order = seedOrder(KIM, chicken, 1);
+    await loginAs(KIM.username);
+    open("#/me");
+    const link = await screen.findByRole("link", { name: "계정 관리 · 회원 탈퇴" });
+    expect(link).toHaveAttribute("href", "#/account");
+    cleanup();
+    open("#/account");
+
+    expect(await screen.findByText(KIM.username)).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "회원 탈퇴" });
+    expect(submit).toBeDisabled();
+    fill({ "비밀번호 확인": "wrongpass1" });
+    fireEvent.click(screen.getByRole("checkbox", { name: "위 내용을 확인했고, 탈퇴할게요" }));
+    await click("회원 탈퇴");
+    expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 맞지 않아요");
+    expect(server.db.findUser(KIM.username)).not.toBeNull();
+
+    fill({ "비밀번호 확인": "password1" });
+    await click("회원 탈퇴");
+    await waitFor(() => expect(window.location.hash).toBe("#/login"));
+    expect(await screen.findByRole("status")).toHaveTextContent("탈퇴가 완료됐어요");
+    expect(server.db.findUser(KIM.username)).toBeNull();
+    expect(getToken()).toBeNull();
+    const kept = server.db.orderById(order.id) as unknown as { customerName: string };
+    expect(kept.customerName).toBe("탈퇴한 회원");
+  });
+
+  it("사장님에게는 매장 기록이 남는다는 안내가 보이고, 관리자 화면에는 탈퇴 링크가 없다", async () => {
+    server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
+    await loginAs("chickenboss");
+    open("#/account");
+    expect(await screen.findByText("청전 치킨공방")).toBeInTheDocument();
+    expect(screen.getByText(/매장에 들어온 주문·예약과 영업시간·메뉴 설정은 그대로 남아요/)).toBeInTheDocument();
+    cleanup();
+
+    server.createAccount({ username: "adminuser", name: "관리자", role: "admin" });
+    await loginAs("adminuser");
+    open("#/admin");
+    await screen.findByText("관리자");
+    expect(screen.queryByRole("link", { name: "계정 관리 · 회원 탈퇴" })).not.toBeInTheDocument();
+  });
+
+  it("로그아웃하면 서버의 로그인 세션도 지워진다", async () => {
+    server.createAccount({ ...KIM });
+    await loginAs(KIM.username);
+    const token = getToken()!;
+    await logout();
+    const res = await fetch(server.base + "/api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
+    expect((await res.json()).session).toBeNull();
   });
 });

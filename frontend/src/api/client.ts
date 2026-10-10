@@ -43,8 +43,14 @@ export const onUnauthorized = (fn: () => void) => {
   return () => unauthorizedListeners.delete(fn);
 };
 
-export async function api<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
-  const token = getToken();
+// opts.token: 저장된 토큰 대신 이 토큰으로 보낸다 (로그아웃처럼 화면에서 먼저 토큰을 지운 뒤 서버에 알릴 때)
+export async function api<T>(
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+  opts: { token?: string } = {},
+): Promise<T> {
+  const token = opts.token ?? getToken();
   let res: Response;
   try {
     res = await fetch(apiBase + path, {
