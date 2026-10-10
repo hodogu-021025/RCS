@@ -195,136 +195,14 @@ describe("OrderChatbot", () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.click(screen.getByRole("button", { name: "쇼핑" }));
+    // 빠른 메뉴는 배달·식당 두 가지뿐이다
+    const menu = toggle.parentElement!.querySelector(".quick-menu")!;
+    expect([...menu.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["배달", "식당"]);
+
+    fireEvent.click(within(menu as HTMLElement).getByRole("button", { name: "식당" }));
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     wait(700);
-    expect(screen.getByText(/어떤 상품을 찾으세요\?/)).toBeInTheDocument();
-  });
-
-  it("쇼핑: 종류 → 상품 → 사이즈 → 수량 → 배송지 확인 → 주문서 → 결제까지", () => {
-    vi.setSystemTime(new Date(2026, 9, 1, 10, 0));
-    renderChat();
-    send("쇼핑");
-    wait(700);
-    for (const name of ["옷", "신발", "장난감", "화장품", "책"]) expect(screen.getByRole("button", { name })).toBeEnabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "신발" }));
-    wait(900);
-    expect(screen.getByText(/신발 인기 상품을 추천해요!/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /에어플로우 러닝화/ }));
-    wait(700);
-
-    // 사이즈는 정해진 버튼에서만 (직접 입력 없음)
-    const sizeBubble = screen.getByText(/사이즈를 골라 주세요/).closest(".bubble") as HTMLElement;
-    expect(within(sizeBubble).queryByRole("button", { name: "직접 입력" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "260" }));
-    wait(700);
-
-    expect(screen.getByText(/에어플로우 러닝화 260은 1켤레에 89,000원이에요/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "1켤레 · 89,000원 선택" }));
-    wait(700);
-
-    // 배송지: 이 주소로 받기
-    expect(screen.getByText(/배송지를 확인해 주세요/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "다른 주소 입력" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "이 주소로 받기" }));
-    wait(900);
-
-    expect(screen.getByText("에어플로우 러닝화 (260) 1켤레")).toBeInTheDocument();
-    expect(screen.getByText("무료")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
-    wait(700);
-    fireEvent.click(screen.getByRole("button", { name: /카카오페이/ }));
-    wait(300);
-    const dialog = screen.getByRole("dialog", { name: "카카오페이" });
-    expect(within(dialog).getByText("판매처")).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "89,000원 결제하기" }));
-    wait(1600 + 1100 + 250 + 500);
-    expect(screen.getByText(/스텝업 에어플로우 러닝화 \(260\) 1켤레/)).toBeInTheDocument();
-    expect(screen.getByText(/도착 예정: 10월 3일 \(토\)/)).toBeInTheDocument();
-  });
-
-  it("쇼핑: 다른 주소 입력으로 새 배송지를 받고, 3만원 미만이면 배송비가 붙는다", () => {
-    renderChat();
-    send("쇼핑");
-    wait(700);
-    fireEvent.click(screen.getByRole("button", { name: "화장품" }));
-    wait(900);
-    fireEvent.click(screen.getByRole("button", { name: /촉촉 립밤 3종 세트/ }));
-    wait(700);
-    fireEvent.click(screen.getByRole("button", { name: "1개 · 12,000원 선택" }));
-    wait(700);
-
-    fireEvent.click(screen.getByRole("button", { name: "다른 주소 입력" }));
-    expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "새 배송지 주소를 입력하세요");
-    send("집으로");
-    wait(700);
-    expect(screen.getByText(/주소를 잘 모르겠어요/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "다른 주소 입력" }).at(-1)!);
-    send("서울시 마포구 연남동 12-3");
-    wait(900);
-    // 내 말풍선과 주문서의 배송지 칸
-    expect(screen.getAllByText("서울시 마포구 연남동 12-3")).toHaveLength(2);
-    expect(screen.getByText("3,000원")).toBeInTheDocument();
-    expect(screen.getByText("15,000원")).toBeInTheDocument();
-  });
-
-  it("예매: 종류 → 작품 → 날짜 → 회차 → 매수 → 예매 확인 → 결제 → 예매번호·좌석", () => {
-    vi.setSystemTime(new Date(2026, 9, 1, 15, 0)); // 10월 1일(목) 오후 3시
-    renderChat();
-    send("예매");
-    wait(700);
-    for (const name of ["영화", "뮤지컬", "콘서트", "전시"]) expect(screen.getByRole("button", { name })).toBeEnabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "영화" }));
-    wait(900);
-    fireEvent.click(screen.getByRole("button", { name: /별빛 정거장/ }));
-    wait(700);
-
-    // 날짜: 오늘 남은 회차가 있으니 오늘 버튼도 있다
-    expect(screen.getByText(/별빛 정거장 예매를 도와드릴게요/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "오늘 (10/1)" }));
-    wait(700);
-
-    // 회차: 이미 시작한 10:30·13:20 은 없다
-    expect(screen.queryByRole("button", { name: "13:20" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "19:00" }));
-    wait(700);
-
-    fireEvent.click(screen.getByRole("button", { name: "한 매 늘리기" }));
-    fireEvent.click(screen.getByRole("button", { name: "2매 · 28,000원 선택" }));
-    wait(900);
-
-    expect(screen.getByText(/예매 내역을 확인해 주세요/)).toBeInTheDocument();
-    expect(screen.getByText("10월 1일 (목) 19:00")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
-    wait(700);
-    fireEvent.click(screen.getByRole("button", { name: /토스페이/ }));
-    wait(300);
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "28,000원 결제하기" }));
-    wait(1600 + 1100 + 250 + 500);
-    expect(screen.getByText(/예매번호: T\d{6}[\s\S]*2매 · [D-J]열 \d+~\d+번/)).toBeInTheDocument();
-  });
-
-  it("예매: 날짜의 직접 입력은 2주 범위의 달력을 펼친다", () => {
-    vi.setSystemTime(new Date(2026, 9, 1, 15, 0));
-    renderChat();
-    send("예매");
-    wait(700);
-    fireEvent.click(screen.getByRole("button", { name: "뮤지컬" }));
-    wait(900);
-    fireEvent.click(screen.getByRole("button", { name: /빛의 정원/ }));
-    wait(700);
-
-    fireEvent.click(screen.getAllByRole("button", { name: "직접 입력" }).at(-1)!);
-    expect(screen.getByText("2026년 10월")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "10월 14일 (수)" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "10월 15일 (목)" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "10월 10일 (토)" }));
-    wait(700);
-    expect(screen.getByRole("button", { name: "14:00" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "19:30" })).toBeEnabled();
+    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
   });
 
   it("식당: 음식 선택지를 버튼으로 보여 주고, 누르면 근처 식당 목록이 나온다", () => {
@@ -536,7 +414,7 @@ describe("OrderChatbot", () => {
     renderChat();
     send("안녕");
     wait(700);
-    expect(screen.getByText(/배달, 식당 예약, 쇼핑, 예매를 도와드릴 수 있어요/)).toBeInTheDocument();
+    expect(screen.getByText(/배달 주문과 식당 예약을 도와드릴 수 있어요/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "배달" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "직접 입력" })).toBeEnabled();
   });
@@ -627,14 +505,14 @@ describe("OrderChatbot", () => {
     expect(caption()).toContain("근처 매장을 찾았어요 주문 내역을 확인해 주세요.\n");
   });
 
-  it("주문 확인에서 다른 서비스(예매)를 말하면 '응'으로 보지 않고 그 서비스로 넘어간다", () => {
+  it("주문 확인에서 다른 서비스(식당)를 말하면 결제로 넘어가지 않고 그 서비스로 넘어간다", () => {
     renderChat();
     send("옛날통닭 2마리 시켜줘");
     wait(1000);
-    send("예매");
+    send("식당");
     wait(700);
 
-    expect(screen.getByText(/어떤 공연을 보고 싶으세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
     expect(screen.queryByText(/어떤 걸로 결제하시겠어요/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });

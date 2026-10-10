@@ -13,7 +13,7 @@ export interface OrderRecord {
   customer: string; // 로그인 아이디, 비로그인은 "guest"
   customerName: string;
   payment: string; // 결제수단 이름
-  storeId: string; // 배달은 식당 id, 쇼핑은 "brand:이름", 예매는 "venue:이름"
+  storeId: string; // 식당 id
   order: Order;
 }
 
@@ -82,7 +82,11 @@ export function getDb(): Db {
 function parseDb(raw: string): Partial<Db> {
   try {
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Partial<Db>) : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    const db = parsed as Partial<Db>;
+    // 쇼핑·예매를 없애기 전에 저장된 주문(보기용 기록 포함)은 빼고 배달 주문만 남긴다
+    if (Array.isArray(db.orders)) db.orders = db.orders.filter((o) => o?.order?.kind === "delivery");
+    return db;
   } catch {
     return {};
   }

@@ -4,7 +4,7 @@ import { useDb } from "../data/db";
 import { DashLayout } from "./DashLayout";
 import { formatDateTime } from "./format";
 
-const KIND_LABEL = { delivery: "배달", shop: "쇼핑", ticket: "예매" } as const;
+const KIND_LABEL = { delivery: "배달" } as const;
 
 // 로그인한 사람의 주문·예약 내역
 export function MyOrdersPage() {

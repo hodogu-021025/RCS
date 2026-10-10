@@ -8,21 +8,18 @@ export interface Store {
 
 export type Unit = "마리" | "판" | "인분";
 
-// 결제까지 가는 주문서. 배달·쇼핑·예매가 같은 확인 → 결제 흐름을 쓴다
-export type OrderKind = "delivery" | "shop" | "ticket";
+// 결제까지 가는 배달 주문서 (확인 → 결제수단 → 결제 팝업)
+export type OrderKind = "delivery";
 
 export interface Order {
   kind: OrderKind;
-  store: Store; // 배달은 매장, 쇼핑은 판매처(브랜드), 예매는 공연장
-  item: string; // 메뉴·상품·작품 이름
-  option?: string; // 쇼핑은 사이즈, 예매는 관람 일시
+  store: Store; // 매장
+  item: string; // 메뉴 이름
   qty: number;
-  unit: string; // 마리·판·인분 / 벌·켤레·개·권 / 매
-  price: number; // 결제 금액 (쇼핑은 배송비 포함)
-  shippingFee?: number;
-  address?: string; // 배달지·배송지 (예매는 없음)
-  seats?: string; // 예매 좌석
-  storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (배달은 식당 id)
+  unit: string; // 마리·판·인분
+  price: number; // 결제 금액
+  address?: string; // 배달지
+  storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
 }
 
 export type PaymentId = "card" | "kakao" | "toss";
@@ -469,14 +466,14 @@ export const pickDeliveryPrompt = (items: DeliveryItem[]): BotPrompt => ({
   choices: deliveryChoices(items),
 });
 
-// (빠른 메뉴 — 배달·식당·쇼핑·예매 — 는 quickMenu.ts 에 있다)
+// (빠른 메뉴 — 배달·식당 — 는 quickMenu.ts 에 있다)
 
 const has = (text: string, words: string[]) => {
   const low = text.toLowerCase();
   return words.some((w) => low.includes(w));
 };
 
-// "네"·"예"는 한 글자라 다른 말("예매", "네 명")에도 들어가므로 혼자 쓰였을 때만 긍정으로 본다
+// "네"·"예"는 한 글자라 다른 말("예약", "네 명")에도 들어가므로 혼자 쓰였을 때만 긍정으로 본다
 export const isYes = (text: string) =>
   has(text, ["응", "좋아", "해줘", "ㅇㅇ", "그래", "주문해", "콜", "ok", "yes"]) || /(^|\s)(네|예)(요|\s|[,.!]|$)/.test(text.trim());
 
@@ -493,37 +490,12 @@ export function findPayment(text: string): PaymentMethod | undefined {
 
 export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 
-// 쇼핑 상품은 이틀 뒤 도착으로 안내한다
-export const SHIPPING_DAYS = 2;
-
-const itemWithOption = (o: Order) => (o.option ? `${o.item} (${o.option})` : o.item);
-
 export function completionText(order: Order, method: PaymentMethod, now = new Date()): string {
   const digits = String(now.getTime()).slice(-6);
-  const head = `${method.label}로 ${won(order.price)} 결제가 완료되었어요!\n\n`;
-  if (order.kind === "shop") {
-    return (
-      head +
-      `주문번호: S${digits}\n` +
-      `${order.store.name} ${itemWithOption(order)} ${order.qty}${order.unit}\n` +
-      `배송지: ${order.address}\n` +
-      `도착 예정: ${formatDate(addDays(now, SHIPPING_DAYS))}`
-    );
-  }
-  if (order.kind === "ticket") {
-    return (
-      head +
-      `예매번호: T${digits}\n` +
-      `${order.item}\n` +
-      `${order.option} · ${order.store.name}\n` +
-      `${order.qty}${order.unit}${order.seats ? ` · ${order.seats}` : ""}\n` +
-      `입장 10분 전까지 도착해 주세요.`
-    );
-  }
   const eta = new Date(now.getTime() + 40 * 60_000);
   const hhmm = `${pad2(eta.getHours())}:${pad2(eta.getMinutes())}`;
   return (
-    head +
+    `${method.label}로 ${won(order.price)} 결제가 완료되었어요!\n\n` +
     `주문번호: ON${digits}\n` +
     `${order.store.name}에서 ${order.item} ${withObjectParticle(`${order.qty}${order.unit}`)} 준비 중이에요.\n` +
     `도착 예정: 약 40분 후 (${hhmm})`
@@ -538,26 +510,6 @@ export interface OrderRow {
 }
 
 export function orderCardRows(order: Order): OrderRow[] {
-  if (order.kind === "shop") {
-    const fee = order.shippingFee ?? 0;
-    return [
-      { label: "판매처", value: order.store.name },
-      { label: "상품", value: `${itemWithOption(order)} ${order.qty}${order.unit}` },
-      { label: "상품 금액", value: won(order.price - fee) },
-      { label: "배송비", value: fee === 0 ? "무료" : won(fee) },
-      { label: "결제 금액", value: won(order.price), emphasis: true },
-      { label: "배송지", value: order.address ?? "" },
-    ];
-  }
-  if (order.kind === "ticket") {
-    return [
-      { label: "작품", value: order.item },
-      { label: "장소", value: order.store.name },
-      { label: "일시", value: order.option ?? "" },
-      { label: "매수", value: `${order.qty}${order.unit}${order.seats ? ` · ${order.seats}` : ""}` },
-      { label: "결제 금액", value: won(order.price), emphasis: true },
-    ];
-  }
   return [
     { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
     { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
@@ -568,20 +520,13 @@ export function orderCardRows(order: Order): OrderRow[] {
 
 // 결제 팝업 요약 칸
 export function orderSummaryRows(order: Order): OrderRow[] {
-  if (order.kind === "ticket") {
-    return [
-      { label: "작품", value: `${order.item} ${order.qty}${order.unit}` },
-      { label: "일시", value: order.option ?? "" },
-      { label: "장소", value: order.store.name },
-    ];
-  }
   return [
-    { label: "상품", value: `${itemWithOption(order)} ${order.qty}${order.unit}` },
-    { label: order.kind === "shop" ? "판매처" : "매장", value: order.store.name },
-    { label: order.kind === "shop" ? "배송지" : "배달지", value: order.address ?? "" },
+    { label: "상품", value: `${order.item} ${order.qty}${order.unit}` },
+    { label: "매장", value: order.store.name },
+    { label: "배달지", value: order.address ?? "" },
   ];
 }
 
 // 주문서 카드 위아래 문구
-export const orderCardTitle = (order: Order) => (order.kind === "ticket" ? "예매 내역을 확인해 주세요." : "주문 내역을 확인해 주세요.");
-export const orderCardQuestion = (order: Order) => (order.kind === "ticket" ? "예매할까요?" : "주문할까요?");
+export const ORDER_CARD_TITLE = "주문 내역을 확인해 주세요.";
+export const ORDER_CARD_QUESTION = "주문할까요?";

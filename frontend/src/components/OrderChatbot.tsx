@@ -10,51 +10,17 @@ import { TimePicker } from "./TimePicker";
 import { VoiceCaption } from "./VoiceCaption";
 import { FALLBACK_PROMPT, QUICK_MENUS, quickMenuReply } from "./quickMenu";
 import {
-  MAX_SHOP_QTY,
-  SHOP_PROMPT,
-  addressPrompt,
-  categoryOf,
-  findProduct,
-  findSize,
-  keepsAddress,
-  looksLikeAddress,
-  makeShopOrder,
-  matchShopCategory,
-  productsOf,
-  shopQuantityQuestion,
-  sizePrompt,
-  type Product,
-} from "./shoppingKnowledge";
-import {
-  MAX_TICKETS,
-  MAX_TICKET_DAYS,
-  TICKET_PROMPT,
-  findShow,
-  isShowDate,
-  lastShowDate,
-  makeTicketOrder,
-  matchTicketCategory,
-  sessionPrompt,
-  sessionsOn,
-  showDatePrompt,
-  showsOf,
-  ticketQuantityQuestion,
-  type Show,
-} from "./ticketKnowledge";
-import {
-  ADDRESS,
   DEFAULT_PEOPLE,
   deliveryPrompt,
   FOOD_PROMPT,
   MAX_DAYS_AHEAD,
   MAX_PEOPLE,
   MAX_QTY,
+  ORDER_CARD_QUESTION,
+  ORDER_CARD_TITLE,
   PAYMENTS,
   checkVisitTime,
-  daysBetween,
-  orderCardQuestion,
   orderCardRows,
-  orderCardTitle,
   completionText,
   datePrompt,
   findDeliveryItems,
@@ -95,30 +61,12 @@ import {
 // 배달: idle → menu(메뉴 대기) → qty(수량 대기) → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
 // 식당: idle → food(음식 종류 대기) → restaurant(식당 목록에서 선택 대기)
 //      → rsvDate(날짜) → rsvTime(시간) → rsvPeople(인원) → rsvConfirm(예약 확인) → idle
-// 쇼핑: idle → shopCategory(종류) → shopProduct(상품) → shopSize(사이즈) → shopQty(수량) → shopAddress(배송지) → confirm → pay …
-// 예매: idle → tkCategory(종류) → tkShow(작품) → tkDate(날짜) → tkTime(회차) → tkQty(매수) → confirm → pay …
 type Stage =
   | "idle" | "menu" | "qty" | "confirm" | "pay" | "paying" | "done"
-  | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm"
-  | "shopCategory" | "shopProduct" | "shopSize" | "shopQty" | "shopAddress"
-  | "tkCategory" | "tkShow" | "tkDate" | "tkTime" | "tkQty";
-
-const SHOP_STAGES: Stage[] = ["shopCategory", "shopProduct", "shopSize", "shopQty", "shopAddress"];
-const TICKET_STAGES: Stage[] = ["tkCategory", "tkShow", "tkDate", "tkTime", "tkQty"];
+  | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm";
 
 // 예약 정보는 날짜 → 시간 → 인원 순으로 채워진다
 type ReservationDraft = Partial<Reservation> & { restaurant: Restaurant };
-// 쇼핑은 상품 → 사이즈 → 수량, 예매는 작품 → 날짜 → 회차 순으로 채워진다
-interface ShopDraft {
-  product?: Product;
-  size?: string;
-  qty?: number;
-}
-interface TicketDraft {
-  show?: Show;
-  date?: Date;
-  time?: string;
-}
 
 type Message =
   | { id: number; role: "user"; text: string }
@@ -144,11 +92,8 @@ type Message =
   | { id: number; role: "bot"; kind: "reservation"; reservation: Reservation }
   // 예약 인원 카운터. lead: 다시 물을 때 앞에 붙일 이유, picked: 고른 인원
   | { id: number; role: "bot"; kind: "people"; lead?: string; picked?: number }
-  // 수량 카운터: 배달(마리·판·인분)·쇼핑(벌·켤레·개·권)·예매(매)
-  | { id: number; role: "bot"; kind: "qty"; text: string; unit: string; max: number; priceEach: number; picked?: number }
-  // 쇼핑 상품 목록, 예매 작품 목록
-  | { id: number; role: "bot"; kind: "products"; categoryLabel: string; list: Product[]; selected?: string }
-  | { id: number; role: "bot"; kind: "shows"; categoryLabel: string; list: Show[]; selected?: string };
+  // 배달 수량 카운터 (마리·판·인분)
+  | { id: number; role: "bot"; kind: "qty"; text: string; unit: string; max: number; priceEach: number; picked?: number };
 
 type NewMessage = Message extends infer M ? (M extends Message ? Omit<M, "id"> : never) : never;
 
@@ -223,7 +168,7 @@ function spokenText(m: Message): string {
     case "confirm":
       return "";
     case "order":
-      return `${orderCardTitle(m.order)} ${orderCardRows(m.order).map((r) => `${r.label} ${r.value}`).join(", ")}. ${orderCardQuestion(m.order)}`;
+      return `${ORDER_CARD_TITLE} ${orderCardRows(m.order).map((r) => `${r.label} ${r.value}`).join(", ")}. ${ORDER_CARD_QUESTION}`;
     case "payment":
       return `총 결제금액은 ${won(m.order.price)}이에요. ${PAYMENTS.map((p) => p.label).join(", ")}로 결제할 수 있어요. 어떤 걸로 하시겠어요?`;
     case "restaurants":
@@ -238,10 +183,6 @@ function spokenText(m: Message): string {
       return `${m.lead ? `${m.lead} ` : ""}${PEOPLE_QUESTION}`;
     case "qty":
       return line(m.text);
-    case "products":
-      return `${m.categoryLabel} 인기 상품으로 ${recommend(m.list.map((p) => `${p.name} ${won(p.price)}`))} 마음에 드는 상품을 말씀해 주세요.`;
-    case "shows":
-      return `지금 볼 수 있는 ${m.categoryLabel} 중에서 ${recommend(m.list.map((s) => s.title))} 보고 싶은 작품을 말씀해 주세요.`;
   }
 }
 
@@ -281,10 +222,8 @@ export function OrderChatbot() {
   const [order, setOrder] = useState<Order | null>(null);
   // 메뉴를 고르고 수량을 기다리는 중인 배달 메뉴
   const [pendingItem, setPendingItem] = useState<DeliveryItem | null>(null);
-  // 진행 중인 식당 예약 · 쇼핑 · 예매
+  // 진행 중인 식당 예약
   const [rsv, setRsv] = useState<ReservationDraft | null>(null);
-  const [shop, setShop] = useState<ShopDraft>({});
-  const [ticket, setTicket] = useState<TicketDraft>({});
   const [payMethod, setPayMethod] = useState<PaymentMethod | null>(null);
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
@@ -433,17 +372,17 @@ export function OrderChatbot() {
     setMessages((prev) => prev.map((m) => (m.id === target && m.role === "bot" && m.kind === "payment" ? { ...m, selected } : m)));
   }
 
-  // 목록 말풍선(식당·상품·작품)에서 고른 항목 표시
-  function markPicked(kind: "restaurants" | "products" | "shows", selected: string) {
-    const target = lastIdOf(messages, [kind]);
-    setMessages((prev) => prev.map((m) => (m.id === target && m.role === "bot" && m.kind === kind ? ({ ...m, selected } as Message) : m)));
+  // 식당 목록 말풍선에서 고른 식당 표시
+  function markPickedRestaurant(selected: string) {
+    const target = lastIdOf(messages, ["restaurants"]);
+    setMessages((prev) => prev.map((m) => (m.id === target && m.role === "bot" && m.kind === "restaurants" ? { ...m, selected } : m)));
   }
 
-  // 가장 최근에 보여 준 목록
-  function latestList<K extends "restaurants" | "products" | "shows">(kind: K) {
-    const target = lastIdOf(messages, [kind]);
+  // 가장 최근에 보여 준 식당 목록
+  function latestRestaurants(): Restaurant[] {
+    const target = lastIdOf(messages, ["restaurants"]);
     const m = messages.find((msg) => msg.id === target);
-    return (m && m.role === "bot" && m.kind === kind ? m.list : []) as Extract<Message, { kind: K }>["list"];
+    return m && m.role === "bot" && m.kind === "restaurants" ? m.list : [];
   }
 
   function showRestaurants(foodLabel: string, list: Restaurant[]) {
@@ -570,188 +509,6 @@ export function OrderChatbot() {
     }
   }
 
-  // 쇼핑·예매에서 주문서까지 왔을 때: 확인 카드 → (응) → 결제수단 → 결제 팝업은 배달과 같다
-  function startCheckout(next: Order) {
-    setOrder(next);
-    setShop({});
-    setTicket({});
-    setStage("confirm");
-    botReply(() => push({ role: "bot", kind: "order", order: next }), 900);
-  }
-
-  function endFlow(message: string) {
-    setStage("idle");
-    setShop({});
-    setTicket({});
-    botReply(() => push(botText(message)));
-  }
-
-  const shopQty = (product: Product, size?: string): NewMessage => ({
-    role: "bot",
-    kind: "qty",
-    text: shopQuantityQuestion(product, size),
-    unit: categoryOf(product).unit,
-    max: MAX_SHOP_QTY,
-    priceEach: product.price,
-  });
-
-  const ticketQty = (show: Show, date: Date, time: string): NewMessage => ({
-    role: "bot",
-    kind: "qty",
-    text: ticketQuantityQuestion(show, date, time),
-    unit: "매",
-    max: MAX_TICKETS,
-    priceEach: show.price,
-  });
-
-  // 쇼핑 단계별 처리: 종류 → 상품 → (사이즈) → 수량 → 배송지 → 주문서
-  function continueShopping(text: string) {
-    if (isNo(text)) {
-      endFlow("쇼핑을 그만할게요. 다른 게 필요하면 말씀해 주세요!");
-      return;
-    }
-
-    // 상품 목록이 떠 있으면 상품 이름부터 본다
-    const product = stage === "shopProduct" ? findProduct(text, latestList("products")) : undefined;
-    if (product) {
-      markPicked("products", product.id);
-      setShop({ product });
-      if (categoryOf(product).sizes) {
-        setStage("shopSize");
-        botReply(() => push(botPrompt(sizePrompt(product))));
-      } else {
-        setStage("shopQty");
-        botReply(() => push(shopQty(product)));
-      }
-      return;
-    }
-    if (stage === "shopCategory" || stage === "shopProduct") {
-      const category = matchShopCategory(text);
-      if (category) {
-        setShop({});
-        setStage("shopProduct");
-        botReply(() => push({ role: "bot", kind: "products", categoryLabel: category.label, list: productsOf(category.key) }), 900);
-        return;
-      }
-      const hint = stage === "shopProduct" ? "추천 목록에서 고르시거나, 다른 종류를 말씀해 주세요." : "찾으시는 상품을 편하게 말씀해 주세요.";
-      botReply(() =>
-        push(botPrompt({ ...SHOP_PROMPT, text: `어떤 상품인지 잘 모르겠어요.\n${hint}`, say: `어떤 상품인지 잘 모르겠어요. ${hint}` })),
-      );
-      return;
-    }
-
-    const chosen = shop.product;
-    if (!chosen) return;
-
-    if (stage === "shopSize") {
-      const size = findSize(text, categoryOf(chosen).sizes ?? []);
-      if (!size) {
-        botReply(() => push(botPrompt(sizePrompt(chosen, "사이즈를 잘 모르겠어요."))));
-        return;
-      }
-      setShop({ product: chosen, size });
-      setStage("shopQty");
-      botReply(() => push(shopQty(chosen, size)));
-      return;
-    }
-
-    if (stage === "shopQty") {
-      const qty = parseQuantity(text);
-      if (qty === undefined || qty < 1 || qty > MAX_SHOP_QTY) {
-        botReply(() => push(shopQty(chosen, shop.size)));
-        return;
-      }
-      setShop({ ...shop, qty });
-      setStage("shopAddress");
-      botReply(() => push(botPrompt(addressPrompt(ADDRESS))));
-      return;
-    }
-
-    if (stage === "shopAddress" && shop.qty) {
-      const address = keepsAddress(text) || isYes(text) ? ADDRESS : looksLikeAddress(text) ? text.trim() : undefined;
-      if (!address) {
-        botReply(() => push(botPrompt(addressPrompt(ADDRESS, "주소를 잘 모르겠어요. 시·구·동이나 도로명까지 적어 주세요."))));
-        return;
-      }
-      startCheckout(makeShopOrder(chosen, shop.size, shop.qty, address));
-    }
-  }
-
-  // 예매 단계별 처리: 종류 → 작품 → 날짜 → 회차 → 매수 → 주문서
-  function continueTicketing(text: string) {
-    if (isNo(text)) {
-      endFlow("예매를 그만할게요. 다른 게 필요하면 말씀해 주세요!");
-      return;
-    }
-    const now = new Date();
-
-    const show = stage === "tkShow" ? findShow(text, latestList("shows")) : undefined;
-    if (show) {
-      markPicked("shows", show.id);
-      setTicket({ show });
-      setStage("tkDate");
-      botReply(() => push(botPrompt(showDatePrompt(show, now))));
-      return;
-    }
-    if (stage === "tkCategory" || stage === "tkShow") {
-      const category = matchTicketCategory(text);
-      if (category) {
-        setTicket({});
-        setStage("tkShow");
-        botReply(() => push({ role: "bot", kind: "shows", categoryLabel: category.label, list: showsOf(category.key) }), 900);
-        return;
-      }
-      const hint = stage === "tkShow" ? "추천작 중에서 고르시거나, 다른 종류를 말씀해 주세요." : "보고 싶은 공연을 편하게 말씀해 주세요.";
-      botReply(() =>
-        push(botPrompt({ ...TICKET_PROMPT, text: `무엇을 예매할지 잘 모르겠어요.\n${hint}`, say: `무엇을 예매할지 잘 모르겠어요. ${hint}` })),
-      );
-      return;
-    }
-
-    const chosen = ticket.show;
-    if (!chosen) return;
-
-    if (stage === "tkDate") {
-      const date = parseVisitDate(text, now);
-      let lead: string | undefined;
-      if (date === "past") lead = "이미 지난 날짜예요.";
-      else if (date === "far" || (date instanceof Date && daysBetween(now, date) > MAX_TICKET_DAYS))
-        lead = `오늘부터 ${MAX_TICKET_DAYS + 1}일 안에서만 예매할 수 있어요.`;
-      else if (!(date instanceof Date)) lead = "날짜를 잘 모르겠어요.";
-      else if (!isShowDate(chosen, date, now)) lead = `${formatDate(date)}은 남은 회차가 없어요.`;
-      if (lead || !(date instanceof Date)) {
-        botReply(() => push(botPrompt(showDatePrompt(chosen, now, lead))));
-        return;
-      }
-      setTicket({ show: chosen, date });
-      setStage("tkTime");
-      botReply(() => push(botPrompt(sessionPrompt(chosen, date, now))));
-      return;
-    }
-
-    if (stage === "tkTime" && ticket.date) {
-      const date = ticket.date;
-      const time = parseVisitTime(text);
-      if (!time || !sessionsOn(chosen, date, now).includes(time)) {
-        botReply(() => push(botPrompt(sessionPrompt(chosen, date, now, "그 시간에는 회차가 없어요."))));
-        return;
-      }
-      setTicket({ ...ticket, time });
-      setStage("tkQty");
-      botReply(() => push(ticketQty(chosen, date, time)));
-      return;
-    }
-
-    if (stage === "tkQty" && ticket.date && ticket.time) {
-      const qty = parseQuantity(text);
-      if (qty === undefined || qty < 1 || qty > MAX_TICKETS) {
-        botReply(() => push(ticketQty(chosen, ticket.date!, ticket.time!)));
-        return;
-      }
-      startCheckout(makeTicketOrder(chosen, ticket.date, ticket.time, qty));
-    }
-  }
-
   // 음성으로 들은 문장. 결제 화면이 떠 있으면 "결제"·"취소"만 받고, 그 밖에는 글자 입력과 같다
   function handleVoice(text: string) {
     if (stage === "paying") {
@@ -780,13 +537,12 @@ export function OrderChatbot() {
       if (isNo(text)) {
         setStage("idle");
         setOrder(null);
-        const cancelled = order.kind === "ticket" ? "예매를 취소했어요." : "주문을 취소했어요.";
-        botReply(() => push(botText(`${cancelled} 다른 게 필요하면 말씀해 주세요!`)));
+        botReply(() => push(botText("주문을 취소했어요. 다른 게 필요하면 말씀해 주세요!")));
       } else if (isYes(text)) {
         setStage("pay");
         botReply(() => push({ role: "bot", kind: "payment", order }));
       } else {
-        botReply(() => push(botText(`${orderCardQuestion(order)} '응' 또는 '취소'로 답해 주세요.`), { role: "bot", kind: "confirm" }));
+        botReply(() => push(botText(`${ORDER_CARD_QUESTION} '응' 또는 '취소'로 답해 주세요.`), { role: "bot", kind: "confirm" }));
       }
       return;
     }
@@ -814,17 +570,6 @@ export function OrderChatbot() {
         return;
       }
       setRsv(null);
-    }
-
-    // 쇼핑·예매 중. 마찬가지로 빠른 메뉴를 고르면 진행 중인 것을 접고 아래로 넘어간다
-    if (SHOP_STAGES.includes(stage) || TICKET_STAGES.includes(stage)) {
-      if (!quickMenuReply(text)) {
-        if (SHOP_STAGES.includes(stage)) continueShopping(text);
-        else continueTicketing(text);
-        return;
-      }
-      setShop({});
-      setTicket({});
     }
 
     // 배달 수량: 숫자만 오면 그 수량으로 주문서를 만든다. 다른 메뉴를 말하면 아래 일반 처리에서 메뉴부터 다시 받는다
@@ -870,10 +615,10 @@ export function OrderChatbot() {
 
     // 식당 찾기 중에는 식당 이름 → 음식 종류 순으로 먼저 본다. 둘 다 아니면 아래 일반 처리로 넘어간다
     if (stage === "food" || stage === "restaurant") {
-      const picked = stage === "restaurant" ? findRestaurant(text, latestList("restaurants")) : undefined;
+      const picked = stage === "restaurant" ? findRestaurant(text, latestRestaurants()) : undefined;
       if (picked) {
         // 식당을 고르면 예약으로 이어진다
-        markPicked("restaurants", picked.id);
+        markPickedRestaurant(picked.id);
         setRsv({ restaurant: picked });
         setStage("rsvDate");
         botReply(() =>
@@ -905,8 +650,6 @@ export function OrderChatbot() {
       setPendingItem(null);
       setOrder(null);
       setRsv(null);
-      setShop({});
-      setTicket({});
       setStage(quickReply.next);
       botReply(() => push(botPrompt(quickReply)));
       return;
@@ -947,8 +690,6 @@ export function OrderChatbot() {
     setPickerOpenFor(null);
     setPendingItem(null);
     setRsv(null);
-    setShop({});
-    setTicket({});
     inputRef.current?.focus();
   }
 
@@ -987,15 +728,11 @@ export function OrderChatbot() {
   }
 
   // 날짜·시간 고르기 화면. 고른 값은 사용자가 그렇게 입력한 것처럼 처리한다
-  // 달력은 식당 예약(영업일·30일)과 공연 예매(남은 회차·14일)에서 함께 쓰고, 고를 수 있는 날만 다르다
+  // 달력은 오늘부터 30일 안에서 예약할 시간이 남은 날만 고를 수 있다
   function renderPicker(picker: "date" | "time") {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const pickDate = (d: Date) => handle(`${d.getMonth() + 1}월 ${d.getDate()}일`);
-    if (picker === "date" && stage === "tkDate" && ticket.show) {
-      const show = ticket.show;
-      return <CalendarPicker today={today} lastDate={lastShowDate(now)} active isSelectable={(d) => isShowDate(show, d, now)} onPick={pickDate} />;
-    }
     if (!rsv) return null;
     if (picker === "date") {
       return (
@@ -1023,8 +760,6 @@ export function OrderChatbot() {
     stage === "confirm" || stage === "rsvConfirm" ? lastIdOf(messages, ["order", "reservation", "confirm"]) : undefined;
   const activePaymentId = stage === "pay" ? lastIdOf(messages, ["payment"]) : undefined;
   const activeRestaurantsId = stage === "restaurant" ? lastIdOf(messages, ["restaurants"]) : undefined;
-  const activeProductsId = stage === "shopProduct" ? lastIdOf(messages, ["products"]) : undefined;
-  const activeShowsId = stage === "tkShow" ? lastIdOf(messages, ["shows"]) : undefined;
 
   function confirmActions(id: number) {
     const active = id === activeConfirmId;
@@ -1085,7 +820,7 @@ export function OrderChatbot() {
       case "order":
         return (
           <>
-            {orderCardTitle(m.order)}
+            {ORDER_CARD_TITLE}
             <div>
               <div className="card">
                 <dl>
@@ -1097,7 +832,7 @@ export function OrderChatbot() {
                   ))}
                 </dl>
               </div>
-              <div style={{ marginTop: 10 }}>{orderCardQuestion(m.order)}</div>
+              <div style={{ marginTop: 10 }}>{ORDER_CARD_QUESTION}</div>
               {confirmActions(m.id)}
             </div>
           </>
@@ -1194,56 +929,6 @@ export function OrderChatbot() {
               picked={m.picked}
               onPick={(n) => pickCount(m.id, n, m.unit)}
             />
-          </>
-        );
-      case "products":
-        return (
-          <>
-            {`${m.categoryLabel} 인기 상품을 추천해요!\n마음에 드는 상품을 골라 주세요.`}
-            <div className="places">
-              {m.list.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={m.selected === p.id ? "selected" : undefined}
-                  disabled={m.id !== activeProductsId}
-                  onClick={() => handle(p.name)}
-                >
-                  <span className="place-main">
-                    <b>{p.name}</b>
-                    <small>
-                      {p.brand} · {p.desc}
-                    </small>
-                  </span>
-                  <span className="place-distance">{won(p.price)}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        );
-      case "shows":
-        return (
-          <>
-            {`지금 볼 수 있는 ${m.categoryLabel} 추천작이에요!\n보고 싶은 작품을 골라 주세요.`}
-            <div className="places">
-              {m.list.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={m.selected === s.id ? "selected" : undefined}
-                  disabled={m.id !== activeShowsId}
-                  onClick={() => handle(s.title)}
-                >
-                  <span className="place-main">
-                    <b>{s.title}</b>
-                    <small>
-                      {s.venue} · {s.info}
-                    </small>
-                  </span>
-                  <span className="place-distance">{won(s.price)}</span>
-                </button>
-              ))}
-            </div>
           </>
         );
       case "reservation":

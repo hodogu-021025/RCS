@@ -45,10 +45,20 @@ describe("주문·예약 기록", () => {
 
   it("보기 데이터는 비어 있을 때만 들어간다", () => {
     seedDemoData(() => makeDemoRecords(new Date(2026, 9, 9, 12, 0).getTime()));
-    expect(getDb().orders.length).toBe(7);
+    expect(getDb().orders.length).toBe(5);
     addOrder(makeOrder(chicken, 1), "토스페이");
     seedDemoData(() => makeDemoRecords());
-    expect(getDb().orders.length).toBe(8);
+    expect(getDb().orders.length).toBe(6);
+  });
+
+  it("쇼핑·예매를 없애기 전에 저장된 주문은 읽을 때 빠지고 배달 주문만 남는다", () => {
+    const delivery = { id: "o1", order: makeOrder(chicken, 1) };
+    const legacy = [
+      { id: "o2", order: { kind: "shop", item: "에어플로우 러닝화" } },
+      { id: "o3", order: { kind: "ticket", item: "별빛 정거장" } },
+    ];
+    localStorage.setItem("saylo.db", JSON.stringify({ orders: [delivery, ...legacy] }));
+    expect(getDb().orders.map((o) => o.id)).toEqual(["o1"]);
   });
 });
 

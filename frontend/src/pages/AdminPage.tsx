@@ -7,9 +7,9 @@ import { formatDateTime } from "./format";
 import { PasswordField } from "./PasswordField";
 
 type Tab = "all" | "stores" | "stats" | "users";
-type KindFilter = "all" | "delivery" | "shop" | "ticket" | "reservation";
+type KindFilter = "all" | "delivery" | "reservation";
 
-const KIND_LABEL: Record<Exclude<KindFilter, "all">, string> = { delivery: "배달", shop: "쇼핑", ticket: "예매", reservation: "식당 예약" };
+const KIND_LABEL: Record<Exclude<KindFilter, "all">, string> = { delivery: "배달", reservation: "식당 예약" };
 const DAY = 86_400_000;
 
 // 주문과 예약을 한 표에 섞어 보여 주기 위한 공통 줄
@@ -28,7 +28,7 @@ const toRow = (o: OrderRecord): Row => ({
   id: o.id,
   createdAt: o.createdAt,
   kind: o.order.kind,
-  what: `${o.order.item}${o.order.option ? ` (${o.order.option})` : ""} ${o.order.qty}${o.order.unit}`,
+  what: `${o.order.item} ${o.order.qty}${o.order.unit}`,
   where: o.order.store.name,
   who: o.customerName,
   amount: o.order.price,
@@ -80,7 +80,7 @@ function AllTab({ rows }: { rows: Row[] }) {
     <section className="dash-section">
       <div className="section-head">
         <div className="chips">
-          {(["all", "delivery", "reservation", "shop", "ticket"] as KindFilter[]).map((k) => (
+          {(["all", "delivery", "reservation"] as KindFilter[]).map((k) => (
             <button key={k} type="button" className={kind === k ? "chip active" : "chip"} onClick={() => setKind(k)}>
               {k === "all" ? "전체" : KIND_LABEL[k]}
             </button>
@@ -229,7 +229,7 @@ function StatsTab({ rows }: { rows: Row[] }) {
   const sales = valid.reduce((a, r) => a + (r.amount ?? 0), 0);
   const cancelRate = rows.length ? Math.round(((rows.length - valid.length) / rows.length) * 100) : 0;
 
-  const byKind = (["delivery", "reservation", "shop", "ticket"] as const).map((k) => ({
+  const byKind = (["delivery", "reservation"] as const).map((k) => ({
     label: KIND_LABEL[k],
     value: valid.filter((r) => r.kind === k).length,
   }));
