@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderChatbot } from "./OrderChatbot";
@@ -923,12 +924,64 @@ describe("읽어 주기 목소리", () => {
     expect(area).not.toHaveAttribute("data-voice");
   });
 
-  it("처음 열 때와 페이지를 떠날 때 읽던 말을 끊는다 (새로고침 뒤 이전 말이 이어지지 않게)", () => {
+  it("새로고침·페이지 이동 때 읽던 말을 끊는다 (새 페이지에서 이전 말이 이어지지 않게)", () => {
     renderChat();
-    expect(cancel).toHaveBeenCalled();
     cancel.mockClear();
     window.dispatchEvent(new Event("pagehide"));
     expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("개발 모드(StrictMode)에서 화면을 껐다 켜 봐도 첫 인사가 끊기지 않는다", () => {
+    voices = [SUNHI];
+    render(
+      <StrictMode>
+        <OrderChatbot />
+      </StrictMode>,
+    );
+    wait(50);
+    expect(speakSpy).toHaveBeenCalledTimes(1);
+    // 말하기 직전의 정리(cancel)는 괜찮지만, 첫 인사를 말한 뒤에 끊는 일은 없어야 한다
+    const spokeAt = speakSpy.mock.invocationCallOrder[0];
+    expect(cancel.mock.invocationCallOrder.filter((at) => at > spokeAt)).toEqual([]);
+  });
+
+  it("챗봇 화면을 떠나면 읽던 말을 끊는다", () => {
+    voices = [SUNHI];
+    const { unmount } = renderChat();
+    cancel.mockClear();
+    unmount();
+    wait(10);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("브라우저가 소리를 막으면(아직 화면을 안 누름) 첫 터치 때 그 말을 읽고, 물결도 켜진다", () => {
+    voices = [SUNHI];
+    renderChat();
+    const blocked = speakSpy.mock.calls[0][0] as unknown as { onerror: (e: { error: string }) => void };
+    act(() => blocked.onerror({ error: "not-allowed" }));
+    expect(speakSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.pointerDown(document.body);
+    expect(speakSpy).toHaveBeenCalledTimes(2);
+    const retried = speakSpy.mock.calls[1][0] as unknown as FakeUtterance & { onstart: () => void };
+    expect(retried.text).toContain("Saylo예요");
+    act(() => retried.onstart());
+    expect(document.querySelector(".chat-area")).toHaveAttribute("data-voice", "talking");
+
+    // 한 번만 다시 읽는다
+    fireEvent.pointerDown(document.body);
+    expect(speakSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("첫 터치를 기다리는 동안 새 답이 오면 예전 인사는 다시 읽지 않는다", () => {
+    voices = [SUNHI];
+    renderChat();
+    act(() => (speakSpy.mock.calls[0][0] as unknown as { onerror: (e: { error: string }) => void }).onerror({ error: "not-allowed" }));
+    send("배달"); // 보내기 버튼을 누른 것 자체가 첫 터치가 아니도록 fireEvent.click 만 쓴다
+    wait(700);
+    const texts = speakSpy.mock.calls.map((c) => (c[0] as FakeUtterance).text);
+    expect(texts.filter((t) => t.includes("Saylo예요"))).toHaveLength(1);
+    expect(texts.at(-1)).toContain("어떤 음식을 배달해 드릴까요?");
   });
 });
 

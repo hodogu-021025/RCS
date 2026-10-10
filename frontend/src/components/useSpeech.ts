@@ -172,14 +172,39 @@ function whenVoicesReady(run: () => void): () => void {
   };
 }
 
+// 새로고침·페이지 이동: 이전 페이지에서 남은 말을 끊는다 (Chrome 은 그냥 두면 새 페이지에서도 이어서 읽는다).
+// 페이지당 한 번이면 되므로 화면(컴포넌트)이 아니라 이 파일을 처음 불러올 때 건다
+if (typeof window !== "undefined") {
+  window.speechSynthesis?.cancel();
+  window.addEventListener("pagehide", () => window.speechSynthesis?.cancel());
+}
+
+// 브라우저는 사용자가 화면을 한 번이라도 누르기 전에는 소리를 막는다 (새로고침하거나 주소로 바로 들어온 경우).
+// 막힌 말은 버리지 않고, 처음 누르거나 키를 칠 때 다시 읽는다. 돌려주는 함수를 부르면 기다리던 것을 취소한다
+function onFirstGesture(run: () => void): () => void {
+  const fire = () => {
+    stop();
+    run();
+  };
+  const stop = () => {
+    document.removeEventListener("pointerdown", fire, true);
+    document.removeEventListener("keydown", fire, true);
+  };
+  document.addEventListener("pointerdown", fire, true);
+  document.addEventListener("keydown", fire, true);
+  return stop;
+}
+
 export function useSpeechOutput() {
   const supported = useMemo(() => typeof window !== "undefined" && "speechSynthesis" in window, []);
   const [enabled, setEnabled] = useState(soundPreference);
-  // 목소리 목록을 기다리는 중인 말 (새 말이 오면 이전 것은 버린다)
+  // 목소리 목록을 기다리는 중인 말, 첫 터치를 기다리는 중인 말 (새 말이 오면 이전 것은 버린다)
   const pendingRef = useRef<() => void>(() => {});
+  const gestureRetryRef = useRef<() => void>(() => {});
   // 지금 소리를 내는 중인지 (배경 구체의 말하는 효과에 쓴다). 새 말이 이전 말을 끊으면 이전 말의 끝 신호는 무시한다
   const [speakingNow, setSpeakingNow] = useState(false);
   const utteranceSeq = useRef(0);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -189,29 +214,32 @@ export function useSpeechOutput() {
     }
     if (!enabled) {
       pendingRef.current();
+      gestureRetryRef.current();
       window.speechSynthesis?.cancel();
     }
   }, [enabled]);
 
-  // 새로고침·페이지 이동 때 읽던 말을 끊는다. Chrome 은 그냥 두면 새 페이지에서도 이전 말을 이어서 읽는다
+  // 챗봇 화면을 떠나면(다른 페이지로 이동) 읽던 말을 끊는다.
+  // 개발 모드(StrictMode)는 화면을 켤 때 한 번 껐다 다시 켜 보는데, 그때 첫 인사가 끊기지 않도록 한 박자 뒤에 진짜로 떠났는지 본다
   useEffect(() => {
-    if (!supported) return;
-    const synth = window.speechSynthesis;
-    synth.cancel(); // 이전 페이지에서 남은 말
-    const stop = () => synth.cancel();
-    window.addEventListener("pagehide", stop);
+    mountedRef.current = true;
     return () => {
-      window.removeEventListener("pagehide", stop);
-      pendingRef.current();
-      synth.cancel();
+      mountedRef.current = false;
+      window.setTimeout(() => {
+        if (mountedRef.current) return;
+        pendingRef.current();
+        gestureRetryRef.current();
+        window.speechSynthesis?.cancel();
+      }, 0);
     };
-  }, [supported]);
+  }, []);
 
   const speak = useCallback(
     (text: string) => {
       if (!enabled || !supported || !text.trim()) return;
       pendingRef.current();
-      pendingRef.current = whenVoicesReady(() => {
+      gestureRetryRef.current();
+      const say = () => {
         const synth = window.speechSynthesis;
         synth.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
@@ -222,14 +250,18 @@ export function useSpeechOutput() {
         utterance.rate = 1.08;
         utterance.pitch = 1.15;
         const seq = ++utteranceSeq.current;
-        const mark = (on: boolean) => () => {
-          if (utteranceSeq.current === seq) setSpeakingNow(on);
+        const latest = () => utteranceSeq.current === seq;
+        utterance.onstart = () => latest() && setSpeakingNow(true);
+        utterance.onend = () => latest() && setSpeakingNow(false);
+        // 끊겼거나(새 말·끄기) 브라우저가 막은 경우. 막혔으면 첫 터치 때 다시 읽는다
+        utterance.onerror = (e?: { error?: string }) => {
+          if (!latest()) return;
+          setSpeakingNow(false);
+          if (e?.error === "not-allowed") gestureRetryRef.current = onFirstGesture(() => latest() && say());
         };
-        utterance.onstart = mark(true);
-        utterance.onend = mark(false);
-        utterance.onerror = mark(false); // 끊겼거나(새 말·끄기) 브라우저가 막은 경우
         synth.speak(utterance);
-      });
+      };
+      pendingRef.current = whenVoicesReady(say);
     },
     [enabled, supported],
   );
