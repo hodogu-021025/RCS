@@ -22,7 +22,7 @@
 //
 // 로그인 상태는 Authorization: Bearer <token> 헤더로 보낸다. 토큰은 서버 DB 의 sessions 에 있고 30일 뒤 만료된다.
 import { SESSION_TTL_MS, hashPassword, newToken, passwordError, usernameError, verifyPassword } from "./auth.mjs";
-import { MAX_PEOPLE, MAX_QTY, ORDER_STATUSES, RESERVATION_STATUSES, STORE_IDS } from "./stores.mjs";
+import { MAX_PEOPLE, MAX_QTY, ORDER_STATUSES, RESERVATION_STATUSES, STORE_IDS, findMenuItem, restaurantName } from "./stores.mjs";
 import { isValidEmail, normalizeEmail } from "./verification.mjs";
 
 const MAX_BODY = 16 * 1024;
@@ -113,17 +113,20 @@ export function createApp({ db, verifier, mailer }) {
     ["POST", "/api/orders", ({ body, user }) => {
       const o = body.order ?? {};
       const qty = Number(o.qty);
-      const price = Number(o.price);
-      if (!str(o.item) || !str(o.unit, 10) || !Number.isInteger(qty) || qty < 1 || qty > MAX_QTY || !Number.isFinite(price) || price < 0)
-        throw bad("주문 내용이 맞지 않아요.");
+      if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) throw bad("주문 내용이 맞지 않아요.");
       if (!STORE_IDS.has(o.storeId)) throw bad("매장을 알 수 없어요.");
+      // 메뉴·단위·금액은 화면이 보낸 값을 믿지 않고 목록(catalog.json)과 사장님 설정(가격·품절)으로 다시 정한다
+      const item = findMenuItem(o.storeId, str(o.item));
+      if (!item) throw bad("메뉴를 알 수 없어요.");
+      const setting = db.allStoreSettings()[o.storeId]?.items?.[item.id] ?? {};
+      if (setting.soldOut) throw bad(`${item.name}은(는) 지금 품절이에요.`);
       const order = {
-        store: { name: str(o.store?.name), ...(o.store?.distance ? { distance: str(o.store.distance, 20) } : {}) },
+        store: { name: restaurantName(o.storeId), ...(o.store?.distance ? { distance: str(o.store.distance, 20) } : {}) },
         storeId: o.storeId,
-        item: str(o.item),
+        item: item.name,
         qty,
-        unit: str(o.unit, 10),
-        price,
+        unit: item.unit,
+        price: (setting.price ?? item.price) * qty,
         ...(o.address ? { address: str(o.address) } : {}),
       };
       const who = user ?? GUEST;

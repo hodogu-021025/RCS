@@ -140,14 +140,29 @@ describe("주문·예약과 권한", () => {
     assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "엉뚱" }, ownerH3)).status, 400);
     assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "준비 중" }, ownerH3)).body.status, "준비 중");
     assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "완료" }, admin)).body.status, "완료");
-    const otherStore = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1" }, payment: "카카오페이" })).body;
+    const otherStore = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭" }, payment: "카카오페이" })).body;
     assert.equal((await call("PATCH", `/api/orders/${otherStore.id}`, { status: "완료" }, ownerH3)).status, 403);
   });
 
   it("주문 내용은 서버가 검사한다", async () => {
     assert.equal((await call("POST", "/api/orders", { order: { ...chicken, qty: 99 }, payment: "카카오페이" })).status, 400);
     assert.equal((await call("POST", "/api/orders", { order: { ...chicken, storeId: "nope" }, payment: "카카오페이" })).status, 400);
-    assert.equal((await call("POST", "/api/orders", { order: { ...chicken, price: "free" }, payment: "카카오페이" })).status, 400);
+    assert.equal((await call("POST", "/api/orders", { order: { ...chicken, item: "없는메뉴" }, payment: "카카오페이" })).status, 400);
+    assert.equal((await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1" }, payment: "카카오페이" })).status, 400); // 그 매장 메뉴가 아님
+  });
+
+  it("금액·단위·매장 이름은 화면이 보낸 값 대신 목록과 사장님 설정으로 정한다", async () => {
+    const cheat = await call("POST", "/api/orders", { order: { ...chicken, qty: 3, price: 1, unit: "개", store: { name: "가짜" } }, payment: "카카오페이" });
+    assert.equal(cheat.status, 200);
+    assert.deepEqual([cheat.body.order.price, cheat.body.order.unit, cheat.body.order.store.name], [60000, "마리", "청전 치킨공방"]);
+
+    db.updateStoreSettings("h3", { item: { id: "d2", patch: { price: 25000 } } });
+    assert.equal((await call("POST", "/api/orders", { order: { ...chicken, qty: 2 }, payment: "카카오페이" })).body.order.price, 50000);
+    db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: true } } });
+    const soldOut = await call("POST", "/api/orders", { order: chicken, payment: "카카오페이" });
+    assert.equal(soldOut.status, 400);
+    assert.match(soldOut.body.error, /품절/);
+    db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: false, price: 20000 } } });
   });
 
   it("예약도 같은 규칙이다", async () => {
@@ -163,14 +178,14 @@ describe("주문·예약과 권한", () => {
   });
 
   it("매장 설정은 누구나 읽고, 그 매장 사장님만 바꾼다", async () => {
-    assert.deepEqual((await call("GET", "/api/stores/settings")).body, {});
+    assert.equal((await call("GET", "/api/stores/settings")).body.h3?.hours, undefined);
     assert.equal((await call("PATCH", "/api/stores/h3/settings", { hours: "16:00 - 23:00" }, customer)).status, 403);
     assert.equal((await call("PATCH", "/api/stores/h1/settings", { hours: "16:00 - 23:00" }, ownerH3)).status, 403);
     assert.equal((await call("PATCH", "/api/stores/h3/settings", { hours: "아무때나" }, ownerH3)).status, 400);
     await call("PATCH", "/api/stores/h3/settings", { hours: "16:00 - 23:00" }, ownerH3);
     await call("PATCH", "/api/stores/h3/settings", { item: { id: "d2", patch: { soldOut: true } } }, ownerH3);
     await call("PATCH", "/api/stores/h3/settings", { item: { id: "d2", patch: { price: 22000 } } }, ownerH3);
-    assert.deepEqual((await call("GET", "/api/stores/settings")).body, { h3: { hours: "16:00 - 23:00", items: { d2: { soldOut: true, price: 22000 } } } });
+    assert.deepEqual((await call("GET", "/api/stores/settings")).body.h3, { hours: "16:00 - 23:00", items: { d2: { soldOut: true, price: 22000 } } });
   });
 
   it("관리자만 사장님 계정을 만들고 지우며, 지운 사장님의 로그인은 바로 끊긴다", async () => {

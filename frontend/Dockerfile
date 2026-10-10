@@ -16,6 +16,8 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY frontend/ ./
+# 가게·메뉴 목록은 서버와 같이 쓰는 파일이다 (src 에서 ../../../server/catalog.json 으로 읽는다)
+COPY server/catalog.json /server/catalog.json
 RUN npm run build
 
 FROM nginx:1.27-alpine

@@ -2,7 +2,7 @@
 # 데이터(SQLite)는 /data 볼륨에 둔다. RESEND_API_KEY · MAIL_FROM · ADMIN_* 은 docker-compose 가 .env 에서 넣어 준다.
 FROM node:24-alpine
 WORKDIR /app
-COPY package.json *.mjs ./
+COPY package.json *.mjs catalog.json ./
 ENV NODE_ENV=production PORT=3001 DATA_DIR=/data
 RUN mkdir -p /data && chown node:node /data
 USER node

@@ -1,4 +1,6 @@
-// 주문 챗봇의 데모 데이터와 문장 해석 규칙. 실제 매장 검색·결제 API를 붙일 때 이 파일만 바꾸면 된다.
+// 주문 챗봇의 문장 해석 규칙과 주문서 모델. 가게·메뉴 목록은 서버와 같이 쓰는 server/catalog.json 에서 읽는다
+// (지금은 화면 확인용 가상 데이터이고, 실제 목록이 오면 그 파일만 바꾼다)
+import catalog from "../../../server/catalog.json";
 import { getStoreSettings } from "../data/db";
 
 export interface Store {
@@ -6,7 +8,7 @@ export interface Store {
   distance?: string;
 }
 
-export type Unit = "마리" | "판" | "인분";
+export type Unit = string; // 마리·판·인분 등 (catalog.json 의 deliveryMenu[].unit)
 
 // 결제까지 가는 배달 주문서 (확인 → 결제수단 → 결제 팝업)
 
@@ -38,14 +40,18 @@ export const PAYMENTS: PaymentMethod[] = [
 ];
 
 // ---- 식당 찾기 ----
-// 근처(장락동 기준) 식당 데모 데이터. 모두 화면 확인용 가상 식당이다.
+// 근처 식당 (catalog.json 의 restaurants). 지금은 화면 확인용 가상 식당이다.
 
-export type FoodKey = "korean" | "chinese" | "japanese" | "chicken" | "pizza" | "meat" | "snack";
+export type FoodKey = string; // catalog.json 의 foods[].key
 
-interface FoodCategory {
+// 추천할 시간대: breakfast 6-10시, lunch 11-14시, afternoon 14-17시, dinner 17-21시, late 21시 이후
+export type Meal = "breakfast" | "lunch" | "afternoon" | "dinner" | "late";
+
+export interface FoodCategory {
   key: FoodKey;
   label: string;
   keywords: string[];
+  meals?: Meal[];
 }
 
 export interface Restaurant {
@@ -60,36 +66,9 @@ export interface Restaurant {
 }
 
 // 카테고리 이름뿐 아니라 "짬뽕", "삼겹살" 같은 메뉴 이름으로 말해도 찾도록 키워드를 둔다
-export const FOODS: FoodCategory[] = [
-  { key: "korean", label: "한식", keywords: ["한식", "국밥", "백반", "찌개", "정식", "비빔밥", "칼국수"] },
-  { key: "chinese", label: "중식", keywords: ["중식", "중국", "짜장", "짬뽕", "탕수육"] },
-  { key: "japanese", label: "일식", keywords: ["일식", "초밥", "스시", "돈까스", "돈가스", "라멘", "우동"] },
-  { key: "chicken", label: "치킨", keywords: ["치킨", "통닭", "닭강정"] },
-  { key: "pizza", label: "피자", keywords: ["피자"] },
-  { key: "meat", label: "고기", keywords: ["고기", "삼겹살", "갈비", "한우", "소고기", "돼지고기", "고깃집"] },
-  { key: "snack", label: "분식", keywords: ["분식", "떡볶이", "김밥", "순대", "튀김"] },
-];
+export const FOODS: FoodCategory[] = catalog.foods as FoodCategory[];
 
-export const RESTAURANTS: Restaurant[] = [
-  { id: "k1", name: "장락 할매국밥", food: "korean", distanceKm: 0.3, rating: 4.5, signature: "순대국밥", hours: "07:00 - 21:00", address: "제천시 장락동 12-3" },
-  { id: "k2", name: "하소 한상차림", food: "korean", distanceKm: 0.8, rating: 4.7, signature: "제육 정식", hours: "10:30 - 21:00", address: "제천시 하소동 45-1" },
-  { id: "k3", name: "청전 된장마을", food: "korean", distanceKm: 1.6, rating: 4.3, signature: "된장찌개 정식", hours: "11:00 - 20:30", address: "제천시 청전동 88-2" },
-  { id: "c1", name: "장락반점", food: "chinese", distanceKm: 0.5, rating: 4.4, signature: "삼선짬뽕", hours: "11:00 - 21:00", address: "제천시 장락동 30-7" },
-  { id: "c2", name: "하소 만리향", food: "chinese", distanceKm: 1.1, rating: 4.6, signature: "찹쌀탕수육", hours: "11:00 - 21:30", address: "제천시 하소동 102-4" },
-  { id: "c3", name: "중앙 차이나", food: "chinese", distanceKm: 2.0, rating: 4.2, signature: "간짜장", hours: "10:30 - 20:00", address: "제천시 중앙로2가 15" },
-  { id: "j1", name: "장락 스시하루", food: "japanese", distanceKm: 0.7, rating: 4.6, signature: "모둠초밥", hours: "11:30 - 21:30", address: "제천시 장락동 51-9" },
-  { id: "j2", name: "하소 카츠야", food: "japanese", distanceKm: 1.3, rating: 4.4, signature: "등심돈까스", hours: "11:00 - 20:30", address: "제천시 하소동 77-3" },
-  { id: "j3", name: "제천 라멘공방", food: "japanese", distanceKm: 2.2, rating: 4.3, signature: "돈코츠라멘", hours: "11:30 - 21:00", address: "제천시 의림대로 210" },
-  { id: "h1", name: "장락 옛날통닭", food: "chicken", distanceKm: 0.4, rating: 4.5, signature: "옛날통닭", hours: "15:00 - 24:00", address: "제천시 장락동 8-14" },
-  { id: "h3", name: "청전 치킨공방", food: "chicken", distanceKm: 1.8, rating: 4.2, signature: "간장치킨", hours: "16:00 - 01:00", address: "제천시 청전동 23-5" },
-  { id: "p1", name: "장락 화덕피자", food: "pizza", distanceKm: 0.6, rating: 4.6, signature: "마르게리따", hours: "11:30 - 21:00", address: "제천시 장락동 40-1" },
-  { id: "p2", name: "하소 피자키친", food: "pizza", distanceKm: 1.5, rating: 4.3, signature: "고구마피자", hours: "11:00 - 22:00", address: "제천시 하소동 91-6" },
-  { id: "m1", name: "장락 숯불갈비", food: "meat", distanceKm: 0.9, rating: 4.7, signature: "양념 돼지갈비", hours: "16:00 - 23:00", address: "제천시 장락동 66-2" },
-  { id: "m2", name: "하소 한우마을", food: "meat", distanceKm: 1.4, rating: 4.5, signature: "한우 등심", hours: "11:30 - 22:00", address: "제천시 하소동 120-8" },
-  { id: "m3", name: "청전 삼겹살집", food: "meat", distanceKm: 1.9, rating: 4.4, signature: "생삼겹살", hours: "16:00 - 24:00", address: "제천시 청전동 54-3" },
-  { id: "s1", name: "장락 떡볶이", food: "snack", distanceKm: 0.2, rating: 4.4, signature: "국물떡볶이", hours: "10:00 - 21:00", address: "제천시 장락동 5-11" },
-  { id: "s2", name: "하소 꼬마김밥", food: "snack", distanceKm: 0.9, rating: 4.3, signature: "참치김밥", hours: "07:30 - 20:00", address: "제천시 하소동 33-7" },
-];
+export const RESTAURANTS: Restaurant[] = catalog.restaurants as Restaurant[];
 
 export function matchFood(text: string): FoodCategory | undefined {
   const low = text.toLowerCase();
@@ -142,7 +121,7 @@ export const withTopicParticle = (word: string) => withParticle(word, "은", "�
 export const withSubjectParticle = (word: string) => withParticle(word, "이", "가");
 
 // ---- 배달 ----
-// 배달 메뉴 데모 데이터. 매장은 식당 찾기의 가상 식당과 같은 곳이다 (restaurantId).
+// 배달 메뉴 (catalog.json 의 deliveryMenu). 매장은 식당 찾기의 식당과 같은 곳이다 (restaurantId).
 // 메뉴를 고르면 단위(마리·판·인분)에 맞춰 수량을 묻는다.
 
 export interface DeliveryItem {
@@ -155,12 +134,7 @@ export interface DeliveryItem {
   keywords: string[];
 }
 
-export const DELIVERY_MENU: DeliveryItem[] = [
-  { id: "d1", name: "옛날통닭", restaurantId: "h1", price: 18000, unit: "마리", keywords: ["통닭", "후라이드", "치킨"] },
-  { id: "d2", name: "간장치킨", restaurantId: "h3", price: 20000, unit: "마리", keywords: ["간장", "치킨"] },
-  { id: "d3", name: "마르게리따 피자", restaurantId: "p1", price: 19000, unit: "판", keywords: ["마르게리따", "피자"] },
-  { id: "d4", name: "국물떡볶이", restaurantId: "s1", price: 6000, unit: "인분", keywords: ["떡볶이"] },
-];
+export const DELIVERY_MENU: DeliveryItem[] = catalog.deliveryMenu as DeliveryItem[];
 
 export const MAX_QTY = 10;
 
