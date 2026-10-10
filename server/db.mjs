@@ -88,13 +88,18 @@ export function openDb(path) {
   // 나중에 생긴 칸: 비회원이 자기 주문을 조회·취소할 때 쓰는 영수증 번호
   if (!db.prepare("PRAGMA table_info(orders)").all().some((c) => c.name === "receipt")) db.exec("ALTER TABLE orders ADD COLUMN receipt TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_receipt ON orders(receipt)");
+  // 회원가입 때 동의한 개인정보 처리방침 버전(시행일)과 동의 시각. 관리자가 만든 계정은 비어 있다
+  const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+  if (!userCols.includes("privacy_version")) db.exec("ALTER TABLE users ADD COLUMN privacy_version TEXT");
+  if (!userCols.includes("privacy_agreed_at")) db.exec("ALTER TABLE users ADD COLUMN privacy_agreed_at INTEGER");
   const q = (sql) => db.prepare(sql);
 
   const stmts = {
     userByName: q("SELECT * FROM users WHERE username = ?"),
     userByEmail: q("SELECT * FROM users WHERE email = ?"),
     usersByRole: q("SELECT * FROM users WHERE role = ? ORDER BY created_at"),
-    insertUser: q("INSERT INTO users (username, password_hash, name, email, role, store_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+    insertUser: q("INSERT INTO users (username, password_hash, name, email, role, store_id, created_at, privacy_version, privacy_agreed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+    privacyConsent: q("SELECT privacy_version, privacy_agreed_at FROM users WHERE username = ?"),
     deleteUser: q("DELETE FROM users WHERE username = ?"),
     countRole: q("SELECT COUNT(*) AS n FROM users WHERE role = ?"),
 
@@ -131,13 +136,18 @@ export function openDb(path) {
 
   return {
     // ---- 계정 ----
+    privacyConsent(username) {
+      const r = stmts.privacyConsent.get(username);
+      return r ? { version: r.privacy_version, agreedAt: r.privacy_agreed_at } : null;
+    },
     findUser: (username) => toUser(stmts.userByName.get(username)) ?? null,
     findUserWithHash: (username) => stmts.userByName.get(username) ?? null,
     emailTaken: (email) => !!stmts.userByEmail.get(email),
     listByRole: (role) => stmts.usersByRole.all(role).map(toUser),
     countByRole: (role) => stmts.countRole.get(role).n,
-    createUser({ username, passwordHash, name, email, role, storeId }) {
-      stmts.insertUser.run(username, passwordHash, name, email ?? null, role, storeId ?? null, Date.now());
+    createUser({ username, passwordHash, name, email, role, storeId, privacyVersion = null }) {
+      const now = Date.now();
+      stmts.insertUser.run(username, passwordHash, name, email ?? null, role, storeId ?? null, now, privacyVersion, privacyVersion ? now : null);
       return toUser(stmts.userByName.get(username));
     },
     deleteUser: (username) => stmts.deleteUser.run(username).changes > 0,

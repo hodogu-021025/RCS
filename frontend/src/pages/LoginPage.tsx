@@ -52,6 +52,9 @@ export function LoginPage() {
         <a className="link-quiet" href="#/chat">
           로그인 없이 챗봇 쓰기
         </a>
+        <a className="link-policy" href="#/privacy">
+          개인정보 처리방침
+        </a>
       </form>
     </div>
   );

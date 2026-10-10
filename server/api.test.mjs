@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { createApp } from "./app.mjs";
+import { PRIVACY_VERSION, createApp } from "./app.mjs";
 import { openDb } from "./db.mjs";
 import { createVerifier } from "./verification.mjs";
 
@@ -40,7 +40,7 @@ let ipSeq = 0;
 async function signup({ role = "user", username, email, storeId, name = "테스트" }) {
   await call("POST", "/api/email/send-code", { email }, undefined, `10.0.0.${++ipSeq}`);
   const v = await call("POST", "/api/email/verify", { email, code: "123456" });
-  const r = await call("POST", "/api/auth/signup", { role, username, name, email, proof: v.body.proof, password: "password1", passwordConfirm: "password1", storeId });
+  const r = await call("POST", "/api/auth/signup", { role, username, name, email, proof: v.body.proof, password: "password1", passwordConfirm: "password1", agreePrivacy: true, storeId });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   return r.body.token;
 }
@@ -52,27 +52,27 @@ describe("회원가입·로그인", () => {
     await call("POST", "/api/email/send-code", { email: "Hong@Example.com" });
     assert.deepEqual(sent.at(-1), { email: "hong@example.com", code: "123456" });
 
-    const noProof = await call("POST", "/api/auth/signup", { role: "user", username: "hongildong", name: "홍길동", email: "hong@example.com", password: "password1", passwordConfirm: "password1" });
+    const noProof = await call("POST", "/api/auth/signup", { role: "user", username: "hongildong", name: "홍길동", email: "hong@example.com", password: "password1", passwordConfirm: "password1", agreePrivacy: true });
     assert.equal(noProof.status, 400);
     assert.match(noProof.body.error, /이메일 인증/);
 
     const v = await call("POST", "/api/email/verify", { email: "hong@example.com", code: "123456" });
     assert.equal(v.body.verified, true);
-    const r = await call("POST", "/api/auth/signup", { role: "user", username: "hongildong", name: "홍길동", email: "hong@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1" });
+    const r = await call("POST", "/api/auth/signup", { role: "user", username: "hongildong", name: "홍길동", email: "hong@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", agreePrivacy: true });
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.session, { username: "hongildong", role: "user", name: "홍길동" });
 
     const me = await call("GET", "/api/auth/me", undefined, r.body.token);
     assert.deepEqual(me.body.session, r.body.session);
     // 증표는 한 번만 쓴다
-    const again = await call("POST", "/api/auth/signup", { role: "user", username: "hongildong2", name: "홍", email: "hong@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1" });
+    const again = await call("POST", "/api/auth/signup", { role: "user", username: "hongildong2", name: "홍", email: "hong@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", agreePrivacy: true });
     assert.equal(again.status, 400);
   });
 
   it("아이디·비밀번호 규칙, 중복 아이디·이메일, 비밀번호 확인을 서버가 검사한다", async () => {
     await call("POST", "/api/email/send-code", { email: "rule@example.com" });
     const v = await call("POST", "/api/email/verify", { email: "rule@example.com", code: "123456" });
-    const base = { role: "user", name: "규칙", email: "rule@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1" };
+    const base = { role: "user", name: "규칙", email: "rule@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", agreePrivacy: true };
     assert.match((await call("POST", "/api/auth/signup", { ...base, username: "short1" })).body.error, /8~20자/);
     assert.match((await call("POST", "/api/auth/signup", { ...base, username: "ruleuser1", password: "1234567", passwordConfirm: "1234567" })).body.error, /8자 이상/);
     assert.match((await call("POST", "/api/auth/signup", { ...base, username: "ruleuser1", passwordConfirm: "different1" })).body.error, /서로 달라요/);
@@ -98,7 +98,7 @@ describe("회원가입·로그인", () => {
   it("사장님 가입은 매장이 있어야 하고, 세션에 매장 id 가 든다", async () => {
     await call("POST", "/api/email/send-code", { email: "owner@example.com" });
     const v = await call("POST", "/api/email/verify", { email: "owner@example.com", code: "123456" });
-    const noStore = await call("POST", "/api/auth/signup", { role: "owner", username: "bossbanjeom", name: "김사장", email: "owner@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", storeId: "zz9" });
+    const noStore = await call("POST", "/api/auth/signup", { role: "owner", username: "bossbanjeom", name: "김사장", email: "owner@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", agreePrivacy: true, storeId: "zz9" });
     assert.match(noStore.body.error, /매장을 골라/);
     // 증표는 실패한 시도에서도 쓰였으므로 다시 인증한다
     const token = await signup({ role: "owner", username: "bossbanjeom", email: "owner2@example.com", storeId: "c1", name: "김사장" });
@@ -206,6 +206,29 @@ describe("주문·예약과 권한", () => {
     const users = (await call("GET", "/api/users", undefined, admin)).body;
     assert.ok(users.some((u) => u.username === "customer01" && u.email === "c01@example.com"));
     assert.ok(users.every((u) => !("passwordHash" in u) && !("password_hash" in u)));
+  });
+});
+
+describe("개인정보 수집·이용 동의", () => {
+  it("동의하지 않으면 가입되지 않고 인증 증표도 그대로 남으며, 동의하면 방침 버전과 시각을 남긴다", async () => {
+    await call("POST", "/api/email/send-code", { email: "consent@example.com" }, undefined, "10.9.9.9");
+    const v = await call("POST", "/api/email/verify", { email: "consent@example.com", code: "123456" });
+    const body = { role: "user", username: "consentuser", name: "동의", email: "consent@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1" };
+    for (const agreePrivacy of [undefined, false, "true"]) {
+      const r = await call("POST", "/api/auth/signup", { ...body, agreePrivacy });
+      assert.equal(r.status, 400);
+      assert.match(r.body.error, /개인정보 수집·이용에 동의/);
+    }
+    const before = Date.now();
+    assert.equal((await call("POST", "/api/auth/signup", { ...body, agreePrivacy: true })).status, 200);
+    const consent = db.privacyConsent("consentuser");
+    assert.equal(consent.version, PRIVACY_VERSION);
+    assert.ok(consent.agreedAt >= before);
+  });
+
+  it("관리자가 만든 사장님 계정에는 동의 기록이 없다", () => {
+    db.createUser({ username: "byadmin01", passwordHash: "x", name: "관리자가 만듦", role: "owner", storeId: "c2" });
+    assert.deepEqual(db.privacyConsent("byadmin01"), { version: null, agreedAt: null });
   });
 });
 

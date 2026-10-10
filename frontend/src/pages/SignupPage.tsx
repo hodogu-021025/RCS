@@ -5,6 +5,8 @@ import { normalizeEmail } from "../api/emailVerification";
 import { RESTAURANTS } from "../components/orderChatKnowledge";
 import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordField } from "./PasswordField";
+import { PolicyItems } from "./PrivacyPage";
+import { SIGNUP_CONSENT } from "./privacyPolicy";
 
 type SignupRole = SignupInput["role"];
 const ROLES: { value: SignupRole; label: string; hint: string }[] = [
@@ -25,6 +27,7 @@ export function SignupPage() {
   const [verified, setVerified] = useState<{ email: string; proof: string } | null>(null);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [agreePrivacy, setAgreePrivacy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -42,6 +45,7 @@ export function SignupPage() {
       password,
       passwordConfirm,
       storeId: role === "owner" ? storeId : undefined,
+      agreePrivacy,
     });
     setBusy(false);
     if ("error" in result) {
@@ -103,6 +107,21 @@ export function SignupPage() {
           onChange={(e) => setPasswordConfirm(e.target.value)}
           autoComplete="new-password"
         />
+
+        {/* 필수 동의: 항목·목적·보유 기간·거부할 권리를 펼쳐 볼 수 있고, 전체 방침은 새 탭으로 연다 (입력한 내용이 지워지지 않게) */}
+        <div className="consent">
+          <label className="consent-check">
+            <input type="checkbox" checked={agreePrivacy} onChange={(e) => setAgreePrivacy(e.target.checked)} />
+            <span>(필수) 만 14세 이상이며, 개인정보 수집·이용에 동의합니다</span>
+          </label>
+          <details className="consent-detail">
+            <summary>내용 보기</summary>
+            <PolicyItems items={SIGNUP_CONSENT} />
+            <a href="#/privacy" target="_blank" rel="noopener">
+              개인정보 처리방침 전체 보기
+            </a>
+          </details>
+        </div>
 
         {error && (
           <p className="form-error" role="alert">

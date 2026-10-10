@@ -98,6 +98,7 @@ export interface SignupInput {
   email: string;
   proof: string | null; // 이메일 인증을 마치면 받은 증표
   storeId?: string; // 사장님만: 내 매장
+  agreePrivacy: boolean; // 개인정보 수집·이용 동의 (필수)
 }
 
 // 회원가입. 서버가 검사하고 계정을 만들면 바로 로그인된다. 서버에 보내기 전에 바로 알 수 있는 것은 먼저 안내한다
@@ -111,10 +112,11 @@ export async function signup(input: SignupInput): Promise<{ error: string } | { 
     (role === "owner" && !storeId ? "매장을 골라 주세요." : null) ??
     (!input.proof ? "이메일 인증을 마쳐 주세요." : null) ??
     passwordError(password) ??
-    (password !== input.passwordConfirm ? "비밀번호가 서로 달라요." : null);
+    (password !== input.passwordConfirm ? "비밀번호가 서로 달라요." : null) ??
+    (!input.agreePrivacy ? "개인정보 수집·이용에 동의해 주세요." : null);
   if (error) return { error };
   try {
-    const body = { role, username, password, passwordConfirm: input.passwordConfirm, name, email: normalizeEmail(input.email), proof: input.proof, storeId };
+    const body = { role, username, password, passwordConfirm: input.passwordConfirm, name, email: normalizeEmail(input.email), proof: input.proof, storeId, agreePrivacy: true };
     return { session: start(await api("POST", "/api/auth/signup", body)) };
   } catch (e) {
     return { error: (e as ApiError).message };

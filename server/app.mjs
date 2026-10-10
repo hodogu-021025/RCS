@@ -3,7 +3,7 @@
 //   GET    /api/health
 //   POST   /api/email/send-code        { email }                      인증번호 메일
 //   POST   /api/email/verify           { email, code }                → { proof }  (회원가입에 같이 보낸다)
-//   POST   /api/auth/signup            { role, username, password, name, email, proof, storeId? } → { token, session }
+//   POST   /api/auth/signup            { role, username, password, name, email, proof, storeId?, agreePrivacy: true } → { token, session }
 //   POST   /api/auth/login             { username, password }         → { token, session }
 //   POST   /api/auth/logout
 //   GET    /api/auth/me                                               → { session }  (토큰이 없거나 만료되면 null)
@@ -29,6 +29,8 @@ import { MAX_PEOPLE, MAX_QTY, ORDER_STATUSES, RESERVATION_STATUSES, STORE_IDS, f
 import { isValidEmail, normalizeEmail } from "./verification.mjs";
 
 const MAX_BODY = 16 * 1024;
+// 지금 개인정보 처리방침의 시행일 (frontend/src/pages/privacyPolicy.ts 의 PRIVACY_EFFECTIVE 와 같게). 가입할 때 이 버전에 동의한 것으로 남긴다
+export const PRIVACY_VERSION = "2026-10-10";
 const GUEST = { username: "guest", name: "비회원" };
 
 class HttpError extends Error {
@@ -94,8 +96,9 @@ export function createApp({ db, verifier, mailer }) {
       if (body.password !== body.passwordConfirm) throw bad("비밀번호가 서로 달라요.");
       // 다른 입력을 먼저 검사하고, 증표는 맨 마지막에 쓴다 (틀린 입력 때문에 증표가 날아가지 않게)
       const account = checkAccount({ role, username: body.username, password: body.password, name: body.name, email, storeId: str(body.storeId, 10) });
+      if (body.agreePrivacy !== true) throw bad("개인정보 수집·이용에 동의해 주세요.");
       if (!verifier.consumeProof(email, body.proof)) throw bad("이메일 인증을 마쳐 주세요.");
-      return startSession(db.createUser({ ...account, passwordHash: hashPassword(account.password) }));
+      return startSession(db.createUser({ ...account, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION }));
     }],
     ["POST", "/api/auth/login", ({ body }) => {
       const row = db.findUserWithHash(str(body.username, 20));

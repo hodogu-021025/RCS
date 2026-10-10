@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { login } from "../auth/auth";
@@ -8,14 +8,22 @@ import { server, TEST_CODE } from "../test/setup";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
-  const [login, signup, me, owner, admin] = await Promise.all([
+  const [login, signup, me, owner, admin, privacy] = await Promise.all([
     import("./LoginPage"),
     import("./SignupPage"),
     import("./MyOrdersPage"),
     import("./OwnerPage"),
     import("./AdminPage"),
+    import("./PrivacyPage"),
   ]);
-  return { LoginPage: login.LoginPage, SignupPage: signup.SignupPage, MyOrdersPage: me.MyOrdersPage, OwnerPage: owner.OwnerPage, AdminPage: admin.AdminPage };
+  return {
+    LoginPage: login.LoginPage,
+    SignupPage: signup.SignupPage,
+    MyOrdersPage: me.MyOrdersPage,
+    OwnerPage: owner.OwnerPage,
+    AdminPage: admin.AdminPage,
+    PrivacyPage: privacy.PrivacyPage,
+  };
 });
 
 // App 은 해시 주소(#/owner)로 페이지를 고른다
@@ -115,6 +123,9 @@ describe("첫 화면과 로그인", () => {
 });
 
 describe("회원가입", () => {
+  const consentBox = () => screen.getByRole("checkbox", { name: /개인정보 수집·이용에 동의합니다/ });
+  const agree = () => fireEvent.click(consentBox());
+
   async function verifyEmail(email: string) {
     fill({ 이메일: email });
     await click("인증번호 받기");
@@ -129,6 +140,7 @@ describe("회원가입", () => {
     expect(screen.getByRole("radio", { name: "고객님" })).toBeChecked();
     expect(screen.queryByLabelText("매장")).not.toBeInTheDocument();
     fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    agree();
     await verifyEmail("Hong@Example.com");
     await click("고객님으로 가입하기");
 
@@ -141,6 +153,7 @@ describe("회원가입", () => {
     open("#/signup");
     fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
     fill({ 아이디: "banjeom01", "대표자 이름": "김사장", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    agree();
     await verifyEmail("boss@example.com");
     await click("사장님으로 가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("매장을 골라 주세요");
@@ -163,7 +176,9 @@ describe("회원가입", () => {
     await click("인증번호 받기");
     expect(await screen.findByText("5:00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "다시 받기 60초" })).toBeDisabled();
-    act(() => void vi.advanceTimersByTime(60_000));
+    // 화면이 그려진 뒤 1초 타이머가 걸릴 때까지 기다렸다가 시간을 넘긴다 (먼저 넘기면 타이머가 한 번도 안 돌아 5:00 그대로다)
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
     // 시계가 실제 시간과 같이 흐르는 설정이라 몇 초 차이는 둔다
     await waitFor(() => expect(screen.getByLabelText("남은 시간")).toHaveTextContent(/^(4:00|3:5[0-9])$/));
     expect(screen.getByRole("button", { name: "다시 받기" })).toBeEnabled();
@@ -191,6 +206,7 @@ describe("회원가입", () => {
     expect(server.sent).toEqual([]);
 
     fill({ 아이디: "short1", 이름: "누구", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    agree();
     await verifyEmail("new@example.com");
     await click("고객님으로 가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("영문·숫자 8~20자");
@@ -198,6 +214,27 @@ describe("회원가입", () => {
     await click("고객님으로 가입하기"); // 이번엔 서버가 거른다 (안내가 바뀔 때까지 기다린다)
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("이미 있는 아이디예요"));
     expect(server.db.findUser("short1")).toBeNull();
+  });
+
+  it("개인정보 수집·이용에 동의해야 가입되고, 요약과 전체 방침(새 탭)을 볼 수 있다", async () => {
+    open("#/signup");
+    expect(consentBox()).not.toBeChecked();
+    fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    await verifyEmail("hong@example.com");
+    await click("고객님으로 가입하기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("개인정보 수집·이용에 동의해 주세요");
+    expect(server.db.findUser("hongildong")).toBeNull();
+
+    fireEvent.click(screen.getByText("내용 보기"));
+    expect(screen.getByText("수집 항목")).toBeInTheDocument();
+    expect(screen.getByText(/동의하지 않으면 회원가입을 할 수 없어요/)).toBeInTheDocument();
+    const full = screen.getByRole("link", { name: "개인정보 처리방침 전체 보기" });
+    expect(full).toHaveAttribute("href", "#/privacy");
+    expect(full).toHaveAttribute("target", "_blank");
+
+    agree();
+    await click("고객님으로 가입하기");
+    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
   });
 
   it("비밀번호 눈 버튼과 고객님·사장님 토글", () => {
@@ -361,5 +398,17 @@ describe("챗봇과 연결", () => {
     fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
     expect(await screen.findByRole("button", { name: "옛날통닭" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "간장치킨" })).not.toBeInTheDocument();
+  });
+});
+
+describe("개인정보 처리방침", () => {
+  it("로그인 화면 아래 링크로 열 수 있고, 로그인 없이 볼 수 있다", async () => {
+    open("#/login");
+    expect(screen.getByRole("link", { name: "개인정보 처리방침" })).toHaveAttribute("href", "#/privacy");
+    cleanup();
+    open("#/privacy");
+    expect(await screen.findByRole("heading", { name: "1. 수집하는 개인정보" })).toBeInTheDocument();
+    expect(screen.getByText("Resend, Inc. (미국)")).toBeInTheDocument();
+    expect(screen.getByText(/2026년 10월 10일부터 적용돼요/)).toBeInTheDocument();
   });
 });
