@@ -49,7 +49,9 @@ describe("의도 알아듣기", () => {
   });
 
   it("주문하는 말은 의도로 잡지 않는다 (배달 흐름이 처리한다)", () => {
-    for (const text of ["간장치킨 2마리 시켜줘", "피자 주문할래", "한식 먹고 싶어", "배달"]) expect(detectIntent(text)).toBeUndefined();
+    for (const text of ["간장치킨 2마리 시켜줘", "피자 주문할래", "한식 먹고 싶어", "배달", "피자 언제까지 돼?", "치킨 주문하고 싶어"]) expect(detectIntent(text)).toBeUndefined();
+    // 주문·배달이 있어야 주문 조회다
+    for (const text of ["주문한 치킨 언제 와요?", "배달 어디쯤 왔어", "치킨 언제 와요"]) expect(detectIntent(text)).toBe("orderStatus");
   });
 
   it("앞에서 말한 식당·메뉴를 가리키는 말", () => {

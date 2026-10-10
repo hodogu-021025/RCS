@@ -383,6 +383,8 @@ export function OrderChatbot() {
   const inputRef = useRef<HTMLInputElement>(null);
   const inputWrapRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
+  // "새 대화"를 누를 때마다 1씩 오른다. 그 전에 시작한 서버 조회의 답은 새 대화에 끼어들지 않는다
+  const conversationRef = useRef(0);
   const sheetRef = useRef<PaymentSheetHandle>(null);
 
   // 말로 입력: 들은 문장을 글자로 입력한 것과 똑같이 처리한다 (입력창이 접혀 있어도 된다)
@@ -450,7 +452,10 @@ export function OrderChatbot() {
       : undefined;
   // 채팅창을 끈 동안의 가운데 자막: 마지막으로 사용자가 말한 뒤에 나온 봇 말풍선들을 읽어 주는 문장 그대로
   const lastUserIndex = messages.findLastIndex((m) => m.role === "user");
-  const botTurn = messages.slice(lastUserIndex + 1);
+  // 결제 화면(사용자 말풍선 없이 이어진다)을 거친 뒤에는 그 앞의 결제수단 질문은 자막에서 뺀다
+  const turn = messages.slice(lastUserIndex + 1);
+  const lastPayment = turn.findLastIndex((m) => m.role === "bot" && m.kind === "payment");
+  const botTurn = lastPayment >= 0 && lastPayment < turn.length - 1 ? turn.slice(lastPayment + 1) : turn;
   const captionText = botTurn.map(captionLine).filter(Boolean).join(" ");
   const captionCards = botTurn.flatMap((m) => captionCard(m, new Date()) ?? []);
   const captionId = botTurn.at(-1)?.id ?? null;
@@ -723,7 +728,7 @@ export function OrderChatbot() {
       }
     }
 
-    if (isNo(text)) {
+    if (isNo(text) && !hasSlots(extra)) {
       setRsv(null);
       setStage("idle");
       botReply(() => push(botText("예약을 취소했어요. 다른 게 필요하면 말씀해 주세요!")));
@@ -778,14 +783,17 @@ export function OrderChatbot() {
   // 서버에 물어봐야 하는 답(주문 조회·취소). 기다리는 동안 타이핑 표시를 보여 주고, 실패하면 이유를 말한다
   function botReplyAsync(work: () => Promise<() => void>) {
     setThinking(true);
+    const generation = conversationRef.current;
     work()
       .catch((e: unknown) => () => push(botText(e instanceof Error && e.message ? e.message : "잠시 후 다시 시도해 주세요.")))
-      .then((apply) =>
+      .then((apply) => {
+        // 기다리는 동안 "새 대화"로 대화를 비웠으면 이 답은 버린다
+        if (generation !== conversationRef.current) return;
         later(() => {
           setThinking(false);
           apply();
-        }, 600),
-      );
+        }, 600);
+      });
   }
 
   const deliveryChoice: Choice = { label: "배달 주문하기", value: "배달" };
@@ -826,8 +834,11 @@ export function OrderChatbot() {
   }
 
   function answerCancel(text: string, target: OrderRecord) {
-    const keep = /아니|그대로|유지|그냥|됐어|싫어/.test(text);
-    if (!keep && !isYes(text) && !/취소/.test(text)) {
+    // "취소 안 할래", "취소 말고", "아니요", "그대로 둘게요"는 그대로 두기. "그냥 취소해줘"처럼 취소가 분명하면 취소
+    const cancelWord = /취소/.test(text);
+    const negated = /(안\s?할|안\s?해|말고|하지\s?마|취소\s?안)/.test(text);
+    const keep = negated || (!cancelWord && /아니|그대로|유지|됐어|싫어|그냥/.test(text));
+    if (!keep && !isYes(text) && !cancelWord) {
       botReply(() => push(botText("주문을 취소할까요? '취소할게요' 또는 '그대로 둘게요'로 답해 주세요.")));
       return;
     }
@@ -927,18 +938,34 @@ export function OrderChatbot() {
     handle(text);
   }
 
-  function handle(raw: string) {
+  // 받아들였으면 true. 봇이 답하는 중이거나 결제 화면이 떠 있으면 받지 않는다 (입력창의 글은 그대로 남긴다)
+  function handle(raw: string): boolean {
     const text = raw.trim();
-    if (!text || thinking || stage === "paying") return;
+    if (!text || thinking || stage === "paying") {
+      if (text && thinking) setNotice("답하는 중이에요. 잠시 뒤 다시 보내 주세요.");
+      return false;
+    }
     push({ role: "user", text });
+    handleAccepted(text);
+    return true;
+  }
+
+  function handleAccepted(text: string) {
 
     // 주문 확인·결제수단 단계에서 빠른 메뉴(배달·식당 등)를 고르면 주문을 접고 아래 일반 처리로 넘어간다
     const switchingMenu = (stage === "confirm" || stage === "pay") && !!quickMenuReply(text);
 
     // 배달지·연락처를 묻는 중
     if (stage === "address" || stage === "phone") {
-      answerDelivery(text);
-      return;
+      // "양념치킨 시켜줘", "식당", "내 주문 어디쯤"처럼 다른 말이면 주소로 저장하지 않고 그 말로 넘어간다.
+      // ("…로 배달해 주세요"처럼 주소 뒤에 붙는 말은 주소로 본다: 배달·주문 낱말만으로는 넘어가지 않는다)
+      const looksLikeCommand = findDeliveryItems(text).length > 0 || !!quickMenuReply(text) || !!detectIntent(text);
+      if (!looksLikeCommand) {
+        answerDelivery(text);
+        return;
+      }
+      setPendingOrder(null);
+      setStage("idle");
     }
 
     if (stage === "confirm" && order && !switchingMenu) {
@@ -959,7 +986,9 @@ export function OrderChatbot() {
           botReply(() => push(botText(rangeLead(item)), { role: "bot", kind: "confirm" }));
           return;
         }
-        const next = makeOrder(item, newQty);
+        // 배달지·연락처는 지금 주문서의 것을 그대로 둔다
+        const info = order.address && order.phone ? { address: order.address, phone: order.phone } : delivery;
+        const next = makeOrder(item, newQty, hasDelivery(info) ? info : undefined);
         setOrder(next);
         botReply(() => push(botText(`수량을 ${newQty}${item.unit}로 바꿨어요.`), { role: "bot", kind: "order", order: next }));
         return;
@@ -1329,6 +1358,7 @@ export function OrderChatbot() {
   }
 
   function reset() {
+    conversationRef.current += 1;
     timersRef.current.forEach(window.clearTimeout);
     timersRef.current = [];
     setMessages(greeting());
@@ -1352,8 +1382,7 @@ export function OrderChatbot() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setMenuOpen(false);
-    handle(input);
-    setInput("");
+    if (handle(input)) setInput("");
   }
 
   function pickChoice(promptId: number, choice: Choice) {

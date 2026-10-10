@@ -98,6 +98,11 @@ export function findRestaurant(text: string, list: Restaurant[]): Restaurant | u
 }
 
 export const restaurantById = (id: string) => withStoreSettings(RESTAURANTS.find((r) => r.id === id)!);
+// 목록(catalog.json)이 바뀌어 더 이상 없는 매장이면 undefined (사장님 계정이 그 매장을 가리킬 수 있다)
+export const findRestaurantById = (id: string | undefined): Restaurant | undefined => {
+  const r = RESTAURANTS.find((x) => x.id === id);
+  return r && withStoreSettings(r);
+};
 
 export const km = (distanceKm: number) => `${distanceKm.toFixed(1)}km`;
 
@@ -165,7 +170,7 @@ const KOREAN_COUNTS: [string, number][] = [
 ];
 
 // 숫자 뒤에 이런 단위가 붙으면 수량이 아니다 ("10월 3일", "7시", "331호")
-const NOT_COUNT_UNIT = /^\s*(월|일|시|분|초|호|번|층|원|년|km|m|cm|kg|g|ml)/;
+const NOT_COUNT_UNIT = /^\s*(월|일|시|분|초|호|동|번|층|원|년|km|m|cm|kg|g|ml)/;
 
 export function parseQuantity(text: string): number | undefined {
   for (const m of text.matchAll(/\d+/g)) {

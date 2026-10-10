@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { DELIVERY_MENU, formatDate, restaurantById, won } from "../components/orderChatKnowledge";
+import { DELIVERY_MENU, findRestaurantById, formatDate, won } from "../components/orderChatKnowledge";
 import {
   setMenuItem,
   setOrderStatus,
@@ -87,7 +87,9 @@ function PendingApproval({ storeName }: { storeName: string }) {
 export function OwnerPage() {
   const session = useSession()!;
   const db = useDb();
-  const store = restaurantById(session.storeId!);
+  // 매장 목록이 바뀌어 내 매장이 사라졌으면 빈 매장 정보로 안내만 보여 준다 (아래에서 처리)
+  const store = findRestaurantById(session.storeId) ?? { id: session.storeId ?? "", name: "알 수 없는 매장", hours: "", address: "", signature: "", food: "", distanceKm: 0, rating: 0 };
+  const storeMissing = !findRestaurantById(session.storeId);
   const orders = db.orders.filter((o) => o.storeId === store.id);
   const reservations = db.reservations.filter((r) => r.restaurantId === store.id);
   const pending = orders.filter((o) => o.status === "접수").length;
@@ -103,6 +105,16 @@ export function OwnerPage() {
 
   const shownOrders = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
+  if (storeMissing) {
+    return (
+      <DashLayout title="사장님">
+        <section className="dash-section pending-approval">
+          <h2>매장 정보를 찾을 수 없어요</h2>
+          <p>이 계정에 연결된 매장이 지금 매장 목록에 없어요. 관리자에게 문의해 주세요.</p>
+        </section>
+      </DashLayout>
+    );
+  }
   if (session.approved === false) return <PendingApproval storeName={store.name} />;
 
   return (

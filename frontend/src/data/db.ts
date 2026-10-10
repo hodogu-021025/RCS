@@ -120,7 +120,9 @@ export const toDateKey = (d: Date) =>
 // ---- 바꾸는 요청들. 성공하면 관련된 것을 다시 받아 온다 ----
 export async function addOrder(order: Order, payment: string): Promise<OrderRecord> {
   const rec = await api<OrderRecord>("POST", "/api/orders", { order, payment });
-  if (rec.receipt) rememberReceipt(rec.receipt);
+  // 영수증 번호는 비회원 주문만 이 브라우저에 남긴다. 회원 주문까지 남기면 같은 기기에서 로그아웃한 뒤
+  // 다른 사람이 "내 주문"으로 그 주문(주소·연락처)을 보고 취소할 수 있다. 회원은 계정으로 조회한다
+  if (rec.receipt && !getSession()) rememberReceipt(rec.receipt);
   if (getSession()) await refresh(["records"]);
   return rec;
 }

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useSession, withdraw } from "../auth/auth";
-import { restaurantById } from "../components/orderChatKnowledge";
+import { findRestaurantById } from "../components/orderChatKnowledge";
 import { DashLayout } from "./DashLayout";
 import { PasswordField } from "./PasswordField";
 
@@ -42,7 +42,7 @@ export function AccountPage() {
           {owner && session.storeId && (
             <div>
               <dt>매장</dt>
-              <dd>{restaurantById(session.storeId).name}</dd>
+              <dd>{findRestaurantById(session.storeId)?.name ?? "알 수 없는 매장"}</dd>
             </div>
           )}
         </dl>

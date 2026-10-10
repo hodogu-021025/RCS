@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { PASSWORD_MIN, resetPassword } from "../auth/auth";
+import { PASSWORD_MIN, resetAuth, resetPassword } from "../auth/auth";
+import { setToken } from "../api/client";
 import { normalizeEmail, sendResetCode } from "../api/emailVerification";
 import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordField } from "./PasswordField";
@@ -28,6 +29,9 @@ export function ResetPasswordPage() {
       setError(result.error);
       return;
     }
+    // 서버가 이 계정의 로그인을 모두 끊었으므로, 이 브라우저에 남은 로그인 상태도 지운다
+    resetAuth();
+    setToken(null);
     setDoneFor(result.username);
   }
 

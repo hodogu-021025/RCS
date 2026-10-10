@@ -148,6 +148,12 @@ function StoresTab() {
 
   const waiting = owners.filter((o) => o.approved === false);
   const storeName = (id?: string) => RESTAURANTS.find((r) => r.id === id)?.name ?? id;
+  const [actionError, setActionError] = useState<string | null>(null);
+  // 승인·삭제가 실패하면(서버 거절, 연결 끊김) 이유를 보여 준다
+  const run = (work: Promise<unknown>) => {
+    setActionError(null);
+    work.catch((err: unknown) => setActionError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
+  };
 
   return (
     <>
@@ -175,10 +181,10 @@ function StoresTab() {
                   </div>
                 </dl>
                 <div className="record-actions">
-                  <button type="button" className="btn primary small" onClick={() => void approveOwner(o.username)}>
+                  <button type="button" className="btn primary small" onClick={() => run(approveOwner(o.username))}>
                     승인
                   </button>
-                  <button type="button" className="btn small" onClick={() => void removeOwner(o.username)}>
+                  <button type="button" className="btn small" onClick={() => run(removeOwner(o.username))}>
                     거절(삭제)
                   </button>
                 </div>
@@ -186,6 +192,11 @@ function StoresTab() {
             ))}
           </ul>
         </section>
+      )}
+      {actionError && (
+        <p className="form-error" role="alert">
+          {actionError}
+        </p>
       )}
       <section className="dash-section">
         <h2>매장과 사장님 계정</h2>
@@ -217,7 +228,7 @@ function StoresTab() {
                 {removable.length > 0 && (
                   <div className="record-actions">
                     {removable.map((o) => (
-                      <button key={o.username} type="button" className="btn small" onClick={() => removeOwner(o.username)}>
+                      <button key={o.username} type="button" className="btn small" onClick={() => run(removeOwner(o.username))}>
                         {o.username} 삭제
                       </button>
                     ))}

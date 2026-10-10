@@ -327,6 +327,93 @@ describe("배달지·연락처", () => {
   });
 });
 
+describe("점검에서 찾은 문제", () => {
+  it("주문 확인에서 수량을 바꿔도 배달지·연락처는 그대로다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리 시켜줘");
+    await say("3마리로 해줘");
+    expect(await find(/수량을 3마리로 바꿨어요/)).toBeTruthy();
+    expect(inCard("제천시 장락동 제천빌라 331호")).toBe(true);
+    expect(inCard("010-1234-5678")).toBe(true);
+  });
+
+  it("'101동 202호'의 101 은 수량이 아니다: 주소 바꾸기로 간다", async () => {
+    await renderChat();
+    await say("옛날통닭 1마리");
+    await say("주소를 하소동 101동 202호로 바꿔줘");
+    expect(await find(/새 배달지로 다시 만들어 드릴게요/)).toBeTruthy();
+  });
+
+  it("취소 확인에서 '취소 안 할래'는 그대로 둔다", async () => {
+    const id = guestOrder();
+    await renderChat();
+    await say("주문 취소할래");
+    await find(/주문을 취소할까요/);
+    await say("취소 안 할래");
+    expect(await find(/주문을 그대로 둘게요/)).toBeTruthy();
+    expect(server.db.orderById(id)?.status).toBe("접수");
+  });
+
+  it("취소 확인에서 '그냥 취소해줘'는 취소한다", async () => {
+    const id = guestOrder();
+    await renderChat();
+    await say("주문 취소할래");
+    await find(/주문을 취소할까요/);
+    await say("그냥 취소해줘");
+    expect(await find(/주문을 취소했어요/)).toBeTruthy();
+    expect(server.db.orderById(id)?.status).toBe("취소");
+  });
+
+  it("주소를 묻는 중에 다른 메뉴나 기능을 말하면 주소로 저장하지 않고 그 말로 넘어간다", async () => {
+    localStorage.removeItem("saylo.delivery");
+    await renderChat();
+    await say("간장치킨 1마리");
+    await find(/배달 받을 주소를 알려 주세요/);
+    await say("옛날통닭 두 마리 시켜줘");
+    // 새 메뉴로 다시 주문이 시작되고(주소는 아직 없으니 다시 묻는다), 주소로 저장되지 않았다
+    expect(await find(/배달 받을 주소를 알려 주세요/)).toBeTruthy();
+    expect(localStorage.getItem("saylo.delivery")).toBeNull();
+    await say("제천시 청전동 새집 3층으로 배달해 주세요"); // 주소 뒤의 "배달"은 주소의 일부로 본다
+    await say("010 2222 3333");
+    expect(await find(/^옛날통닭 2마리$/)).toBeTruthy();
+    expect(inCard("제천시 청전동 새집 3층으로 배달해 주세요")).toBe(true);
+  });
+
+  it("봇이 답하는 동안 보낸 글은 지워지지 않고 입력창에 남는다", async () => {
+    await renderChat();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "배달" } });
+    fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
+    await wait(50); // 아직 답하는 중
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "간장치킨" } });
+    fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
+    expect(screen.getByRole("textbox")).toHaveValue("간장치킨");
+    expect(await find(/답하는 중이에요/)).toBeTruthy();
+  });
+
+  it("서버에 물어보는 중에 새 대화를 시작하면 그 답은 새 대화에 끼어들지 않는다", async () => {
+    guestOrder();
+    await renderChat();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "주문 취소할래" } });
+    fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
+    await wait(30);
+    fireEvent.click(screen.getByRole("button", { name: "새 대화" }));
+    await wait(2000);
+    expect(screen.queryByText(/주문을 취소할까요/)).not.toBeInTheDocument();
+    expect(screen.getByText(/무엇을 주문해 드릴까요/)).toBeInTheDocument();
+  });
+
+  it("예약 날짜·시간을 묻는 중에 '아니 8시로'는 취소가 아니라 고치기다", async () => {
+    await renderChat();
+    await say("내일 4명 중식 예약");
+    await click(/장락반점/);
+    expect(await find(/몇 시에 방문하실 건가요/)).toBeTruthy();
+    await type("아니 8시로 해줘");
+    expect(screen.queryByText(/예약을 취소했어요/)).not.toBeInTheDocument();
+    expect(await find(/예약 내용을 확인해 주세요/)).toBeTruthy();
+    expect(screen.getAllByText("20:00").length).toBeGreaterThan(0);
+  });
+});
+
 describe("6. 앞에서 한 말 기억하기·고치기", () => {
   it("'그 식당'은 방금 말한 식당", async () => {
     await renderChat();

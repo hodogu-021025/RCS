@@ -66,8 +66,9 @@ export async function restoreSession() {
     if (!session) setToken(null);
     setState({ session, loaded: true });
   } catch (e) {
-    // 서버에 못 닿으면 토큰은 두고 로그인 안 된 것으로 보여 준다 (다시 열면 재시도)
-    if ((e as ApiError).status !== 401) setState({ session: null, loaded: true });
+    // 서버에 못 닿으면 토큰은 두고, 이미 로그인된 상태였으면 그대로 둔다 (승인 대기 사장님이 20초마다 확인할 때
+    // 잠깐 끊겼다고 로그아웃되지 않게). 처음 열 때라 세션이 없으면 로그인 안 된 것으로 보여 준다
+    if ((e as ApiError).status !== 401) setState({ session: state.session, loaded: true });
   }
 }
 
