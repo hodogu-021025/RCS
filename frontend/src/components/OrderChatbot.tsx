@@ -243,6 +243,12 @@ const MicIcon = () => (
     <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" {...ICON} />
   </svg>
 );
+const ChatIcon = ({ hidden }: { hidden: boolean }) => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <path d="M3 3h10a1.5 1.5 0 0 1 1.5 1.5v5.5a1.5 1.5 0 0 1-1.5 1.5H7.5L4.5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V4.5A1.5 1.5 0 0 1 3 3z" {...ICON} />
+    {hidden && <path d="M2 1.5l12 13" {...ICON} />}
+  </svg>
+);
 const SpeakerIcon = ({ muted }: { muted: boolean }) => (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
     <path d="M2.5 6h2.5l3-2.5v9l-3-2.5H2.5z" {...ICON} />
@@ -273,6 +279,8 @@ export function OrderChatbot() {
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  // 헤더의 채팅창 끄기: 말풍선 목록을 숨긴다 (대화는 그대로 이어진다)
+  const [chatHidden, setChatHidden] = useState(false);
   // "직접 입력" 을 누른 선택지 말풍선의 id. 그 말풍선이 최신 질문인 동안만 입력창이 열려 있다
   const [manualInputFor, setManualInputFor] = useState<number | null>(null);
   // 날짜·시간 질문에서 "직접 입력"으로 펼친 달력·시간 고르기의 말풍선 id
@@ -326,7 +334,8 @@ export function OrderChatbot() {
     lastBot?.role === "bot" && ((lastBot.kind === "text" && lastBot.choices) || lastBot.kind === "people" || lastBot.kind === "qty")
       ? lastBot
       : undefined;
-  const composerOpen = !activePrompt || manualInputFor === activePrompt.id;
+  // 채팅창을 숨기면 선택 버튼도 안 보이므로 입력창은 늘 열어 둔다
+  const composerOpen = chatHidden || !activePrompt || manualInputFor === activePrompt.id;
   // 선택 버튼은 그 질문이 대화의 마지막이고 봇이 답하는 중이 아닐 때만 누를 수 있다
   const activeChoicesId = activePrompt && messages.at(-1)?.id === activePrompt.id && !thinking ? activePrompt.id : undefined;
   const promptPlaceholder = activePrompt?.kind === "text" ? activePrompt.placeholder : undefined;
@@ -1245,13 +1254,23 @@ export function OrderChatbot() {
               <path d="M2.5 14.5a5.5 5.5 0 0 1 11 0" {...ICON} />
             </svg>
           </a>
+          {/* 채팅창(말풍선 목록) 보이기·숨기기. 숨기면 배경 구체만 남고 말·글로 계속 주문할 수 있다 */}
+          <button
+            className={"icon-btn" + (chatHidden ? "" : " on")}
+            type="button"
+            aria-label={chatHidden ? "채팅창 켜기" : "채팅창 끄기"}
+            title={chatHidden ? "채팅창 켜기" : "채팅창 끄기"}
+            onClick={() => setChatHidden((h) => !h)}
+          >
+            <ChatIcon hidden={chatHidden} />
+          </button>
           {tts.supported && (
             <button
               className={"icon-btn" + (tts.enabled ? " on" : "")}
               type="button"
               aria-pressed={tts.enabled}
-              aria-label={tts.enabled ? "답 읽어 주기 끄기" : "답 읽어 주기 켜기"}
-              title={tts.enabled ? "답 읽어 주기 끄기" : "답 읽어 주기 켜기"}
+              aria-label={tts.enabled ? "소리 끄기" : "소리 켜기"}
+              title={tts.enabled ? "소리 끄기" : "소리 켜기"}
               onClick={tts.toggle}
             >
               <SpeakerIcon muted={!tts.enabled} />
@@ -1261,8 +1280,8 @@ export function OrderChatbot() {
             className={"icon-btn mic" + (voice.listening ? " on" : "")}
             type="button"
             aria-pressed={voice.listening}
-            aria-label={voice.listening ? "듣기 멈추기" : "말로 입력"}
-            title={voice.supported ? (voice.listening ? "듣기 멈추기" : "말로 입력") : "이 브라우저는 음성 인식을 지원하지 않아요"}
+            aria-label={voice.listening ? "음성 모드 끄기" : "음성 모드"}
+            title={voice.supported ? (voice.listening ? "음성 모드 끄기" : "음성 모드") : "이 브라우저는 음성 인식을 지원하지 않아요"}
             disabled={!voice.supported}
             onClick={voice.toggle}
           >
@@ -1278,9 +1297,9 @@ export function OrderChatbot() {
       </header>
 
       {/* 메시지 영역 뒤에 영상을 고정으로 깔고, 그 위에서 메시지 목록만 스크롤한다 */}
-      <div className="chat-area">
+      <div className={"chat-area" + (chatHidden ? " chat-hidden" : "")}>
         <video className="chat-bg" src={backgroundVideo} autoPlay muted loop playsInline aria-hidden="true" />
-        <div className="chat" ref={listRef}>
+        <div className="chat" ref={listRef} inert={chatHidden}>
           {/* 같은 쪽이 연달아 말하면 cont 로 간격을 좁혀 한 묶음처럼 보이게 한다 */}
           {messages.map((m, i) => {
             const cont = messages[i - 1]?.role === m.role ? " cont" : "";

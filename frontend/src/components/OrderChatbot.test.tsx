@@ -564,6 +564,26 @@ describe("OrderChatbot", () => {
     expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });
 
+  it("채팅창 끄기를 누르면 말풍선이 숨고 입력창은 열려 계속 주문할 수 있으며, 채팅창 켜기로 다시 보인다", () => {
+    render(<OrderChatbot />);
+    send("배달");
+    wait(700);
+    // 선택지 질문이라 입력창이 접혀 있다
+    expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).toHaveAttribute("inert");
+
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 끄기" }));
+    const chat = document.querySelector(".chat")!;
+    expect(chat.closest(".chat-area")).toHaveClass("chat-hidden");
+    expect(chat).toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).not.toHaveAttribute("inert");
+
+    send("간장치킨 1마리 시켜줘");
+    wait(1000);
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+    expect(chat.closest(".chat-area")).not.toHaveClass("chat-hidden");
+    expect(screen.getByText("간장치킨 1마리")).toBeInTheDocument(); // 숨긴 동안의 대화도 그대로 있다
+  });
+
   it("주문 확인에서 다른 서비스(예매)를 말하면 '응'으로 보지 않고 그 서비스로 넘어간다", () => {
     render(<OrderChatbot />);
     send("옛날통닭 2마리 시켜줘");
@@ -642,11 +662,12 @@ function uninstallSpeech() {
   delete w.SpeechRecognition;
   delete w.speechSynthesis;
   delete w.SpeechSynthesisUtterance;
+  localStorage.removeItem("saylo.sound");
 }
 
 // 마이크를 누르고 한 문장을 말한다
 function speakInto(text: string) {
-  fireEvent.click(screen.getByRole("button", { name: "말로 입력" }));
+  fireEvent.click(screen.getByRole("button", { name: "음성 모드" }));
   act(() => FakeRecognition.latest().say(text));
 }
 
@@ -660,13 +681,13 @@ describe("음성", () => {
 
   it("마이크를 누르고 말하면 글자로 입력한 것과 똑같이 처리된다", () => {
     render(<OrderChatbot />);
-    const mic = screen.getByRole("button", { name: "말로 입력" });
+    const mic = screen.getByRole("button", { name: "음성 모드" });
     expect(mic).toBeEnabled();
 
     fireEvent.click(mic);
     expect(FakeRecognition.latest().lang).toBe("ko-KR");
     expect(screen.getByRole("status")).toHaveTextContent("듣고 있어요");
-    expect(screen.getByRole("button", { name: "듣기 멈추기" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "음성 모드 끄기" })).toHaveAttribute("aria-pressed", "true");
 
     // 중간 인식 결과가 띠에 보인다
     act(() => FakeRecognition.latest().say("간장치킨", false));
@@ -727,7 +748,7 @@ describe("음성", () => {
 
   it("말소리를 못 들으면 안내가 잠시 보였다가 사라진다", () => {
     render(<OrderChatbot />);
-    fireEvent.click(screen.getByRole("button", { name: "말로 입력" }));
+    fireEvent.click(screen.getByRole("button", { name: "음성 모드" }));
     act(() => {
       FakeRecognition.latest().onerror?.({ error: "no-speech" });
       FakeRecognition.latest().onend?.();
@@ -737,35 +758,43 @@ describe("음성", () => {
     expect(document.querySelector(".voice-bar")).not.toHaveClass("show"); // 카드는 남아서 내려가는 중
   });
 
-  it("읽어 주기를 켜면 새 봇 답을 선택지까지 읽어 준다 (켜기 전 것은 안 읽는다)", () => {
-    render(<OrderChatbot />);
-    expect(speakSpy).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "답 읽어 주기 켜기" }));
-    expect(speakSpy).not.toHaveBeenCalled();
+  it("소리는 처음부터 켜져 있어 봇 답을 선택지까지 읽어 주고, 소리 끄기를 누르면 멈추며 그 선택을 기억한다", () => {
+    const { unmount } = render(<OrderChatbot />);
+    const sound = screen.getByRole("button", { name: "소리 끄기" });
+    expect(sound).toHaveAttribute("aria-pressed", "true");
+    expect(speakSpy).toHaveBeenCalledTimes(1); // 첫 인사
+    expect((speakSpy.mock.calls[0][0] as FakeUtterance).text).toContain("Saylo예요");
 
     send("배달");
     wait(700);
-    expect(speakSpy).toHaveBeenCalledTimes(1);
-    const utterance = speakSpy.mock.calls[0][0] as FakeUtterance;
+    expect(speakSpy).toHaveBeenCalledTimes(2);
+    const utterance = speakSpy.mock.calls[1][0] as FakeUtterance;
     expect(utterance.lang).toBe("ko-KR");
     expect((utterance as unknown as { voice: { name: string } }).voice.name).toContain("SunHi"); // 자연 음성이 있으면 그걸 고른다
     expect((utterance as unknown as { pitch: number }).pitch).toBeGreaterThan(1);
     expect(utterance.text).toContain("어떤 음식을 배달해 드릴까요?");
     expect(utterance.text).toContain("옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이 중에서 말씀해 주세요.");
 
-    fireEvent.click(screen.getByRole("button", { name: "답 읽어 주기 끄기" }));
+    fireEvent.click(sound);
+    expect(screen.getByRole("button", { name: "소리 켜기" })).toHaveAttribute("aria-pressed", "false");
     send("옛날통닭");
     wait(700);
-    expect(speakSpy).toHaveBeenCalledTimes(1);
+    expect(speakSpy).toHaveBeenCalledTimes(2);
+
+    // 다시 열어도 꺼진 채로
+    unmount();
+    render(<OrderChatbot />);
+    expect(screen.getByRole("button", { name: "소리 켜기" })).toBeInTheDocument();
+    expect(speakSpy).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("음성 미지원 브라우저", () => {
   it("마이크 버튼이 비활성화되고 이유를 알려 주며, 스피커 버튼은 없다", () => {
     render(<OrderChatbot />);
-    const mic = screen.getByRole("button", { name: "말로 입력" });
+    const mic = screen.getByRole("button", { name: "음성 모드" });
     expect(mic).toBeDisabled();
     expect(mic).toHaveAttribute("title", "이 브라우저는 음성 인식을 지원하지 않아요");
-    expect(screen.queryByRole("button", { name: /읽어 주기/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /소리/ })).not.toBeInTheDocument();
   });
 });

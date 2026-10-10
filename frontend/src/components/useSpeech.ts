@@ -121,7 +121,7 @@ export function useVoiceInput(onResult: (text: string) => void) {
   return { supported, listening, interim, error, start, stop, toggle };
 }
 
-// 챗봇 답을 소리로 읽어 준다. 켜져 있을 때만 읽고, 새 답이 오면 읽던 것을 끊고 새 답을 읽는다
+// 챗봇 답을 소리로 읽어 준다 (기본은 켜짐). 켜져 있을 때만 읽고, 새 답이 오면 읽던 것을 끊고 새 답을 읽는다
 // 기기에 있는 한국어 목소리 중 자연스러운 젊은 여성 목소리를 앞에서부터 찾는다
 // (Edge: SunHi 자연 음성, iPhone·Mac: Yuna, 안드로이드 Chrome: Google 한국어, Windows 기본: Heami)
 const PREFERRED_VOICES = ["SunHi", "Yuna", "Google 한국의", "ko-KR-Wavenet", "Heami"];
@@ -135,9 +135,28 @@ function pickKoreanVoice(): SpeechSynthesisVoice | undefined {
   return voices[0];
 }
 
+// 소리는 처음에 켜져 있고, 끄면 그 선택을 이 브라우저에 기억한다
+const SOUND_KEY = "saylo.sound";
+function soundPreference(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
 export function useSpeechOutput() {
   const supported = useMemo(() => typeof window !== "undefined" && "speechSynthesis" in window, []);
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(soundPreference);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SOUND_KEY, enabled ? "on" : "off");
+    } catch {
+      // 저장이 막힌 브라우저면 이번 방문 동안만 기억한다
+    }
+    if (!enabled) window.speechSynthesis?.cancel();
+  }, [enabled]);
 
   const speak = useCallback(
     (text: string) => {
@@ -156,12 +175,7 @@ export function useSpeechOutput() {
     [enabled, supported],
   );
 
-  const toggle = useCallback(() => {
-    setEnabled((on) => {
-      if (on) window.speechSynthesis?.cancel();
-      return !on;
-    });
-  }, []);
+  const toggle = useCallback(() => setEnabled((on) => !on), []);
 
   useEffect(() => () => window.speechSynthesis?.cancel(), []);
 
