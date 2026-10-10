@@ -25,16 +25,22 @@ body {
 #root { display: flex; justify-content: center; align-items: center; }
 button { font-family: inherit; letter-spacing: inherit; }
 
-/* 휴대폰에서는 화면을 꽉 채우고, 넓은 화면에서는 둥근 카드로 띄운다 */
+/* 휴대폰에서는 화면을 꽉 채우고, 넓은 화면에서는 둥근 카드로 띄운다.
+   --app-height: 키보드가 올라오면 키보드 위 영역 높이 (viewport.ts). 없으면 화면 높이 */
 .app {
   width: 100%;
   max-width: 440px;
-  height: 100dvh;
+  height: var(--app-height, 100dvh);
   background: var(--panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+/* 휴대폰: 앱이 키보드 때문에 낮아져도 화면 위에 붙어 있게 한다 (가운데 정렬이면 키보드 뒤로 내려간다) */
+@media (max-width: 519px) {
+  #root { align-items: flex-start; }
+}
+html[data-keyboard]:has(.app), html[data-keyboard]:has(.app) body { overflow: hidden; } /* 채팅 화면만: 키보드가 떠도 페이지가 밀리지 않게 */
 @media (min-width: 520px) {
   .app {
     height: min(100dvh - 48px, 860px);
@@ -214,6 +220,10 @@ header .title {
   font-size: 21px; font-weight: 700; line-height: 1.55; letter-spacing: -.01em; color: var(--text);
 }
 .caption-text.long { font-size: 17px; }
+/* 키보드가 떠서 공간이 좁을 때는 여백과 글자를 줄여 자막이 남은 영역 안에 들어오게 한다 */
+html[data-keyboard] .voice-caption { padding: 16px 24px; }
+html[data-keyboard] .caption-text { font-size: 17px; line-height: 1.45; }
+html[data-keyboard] .caption-text.long { font-size: 15px; }
 .caption-dots { display: inline-flex; gap: 6px; }
 .caption-dots span {
   width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
@@ -495,7 +505,7 @@ header .title {
   flex: 1; min-width: 0; height: 46px;
   border: 1.5px solid transparent; border-radius: 999px;
   background: var(--surface); color: var(--text);
-  padding: 0 48px 0 18px; font-size: 15px; outline: none;
+  padding: 0 48px 0 18px; font-size: 16px; outline: none; /* 16px 보다 작으면 아이폰이 누를 때 화면을 확대한다 */
   font-family: inherit; letter-spacing: inherit;
   transition: background .15s, border-color .15s;
 }
