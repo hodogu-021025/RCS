@@ -7,6 +7,7 @@ import { addOrder, addReservation } from "../data/db";
 import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
+import { VoiceCaption } from "./VoiceCaption";
 import { FALLBACK_PROMPT, QUICK_MENUS, quickMenuReply } from "./quickMenu";
 import {
   MAX_SHOP_QTY,
@@ -279,8 +280,8 @@ export function OrderChatbot() {
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  // 헤더의 채팅창 끄기: 말풍선 목록을 숨긴다 (대화는 그대로 이어진다)
-  const [chatHidden, setChatHidden] = useState(false);
+  // 헤더의 채팅창 끄기: 말풍선 목록을 숨기고, 대신 봇이 소리로 하는 말만 가운데 자막으로 보여 준다 (기본은 꺼짐)
+  const [chatHidden, setChatHidden] = useState(true);
   // "직접 입력" 을 누른 선택지 말풍선의 id. 그 말풍선이 최신 질문인 동안만 입력창이 열려 있다
   const [manualInputFor, setManualInputFor] = useState<number | null>(null);
   // 날짜·시간 질문에서 "직접 입력"으로 펼친 달력·시간 고르기의 말풍선 id
@@ -334,6 +335,12 @@ export function OrderChatbot() {
     lastBot?.role === "bot" && ((lastBot.kind === "text" && lastBot.choices) || lastBot.kind === "people" || lastBot.kind === "qty")
       ? lastBot
       : undefined;
+  // 채팅창을 끈 동안의 가운데 자막: 마지막으로 사용자가 말한 뒤에 나온 봇 말풍선들을 읽어 주는 문장 그대로
+  const lastUserIndex = messages.findLastIndex((m) => m.role === "user");
+  const botTurn = messages.slice(lastUserIndex + 1);
+  const captionText = botTurn.map(spokenText).filter(Boolean).join(" ");
+  const captionId = botTurn.at(-1)?.id ?? null;
+
   // 채팅창을 숨기면 선택 버튼도 안 보이므로 입력창은 늘 열어 둔다
   const composerOpen = chatHidden || !activePrompt || manualInputFor === activePrompt.id;
   // 선택 버튼은 그 질문이 대화의 마지막이고 봇이 답하는 중이 아닐 때만 누를 수 있다
@@ -1327,6 +1334,8 @@ export function OrderChatbot() {
             </div>
           )}
         </div>
+
+        {chatHidden && <VoiceCaption id={captionId} text={captionText} thinking={thinking} />}
 
         {/* 음성 카드: 대화 영역 위에 겹쳐서 아래에서 올라오고(show) 내려간다. 내려가는 동안은 마지막 내용을 그대로 보여 준다.
             듣는 동안은 중간 인식 결과, 아니면 오류·안내 문구 */}

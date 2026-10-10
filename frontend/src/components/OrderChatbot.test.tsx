@@ -12,6 +12,13 @@ afterEach(() => {
 
 const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 
+// 채팅창은 기본으로 꺼져 있다. 말풍선·버튼으로 대화를 따라가는 테스트는 채팅창을 켜고 시작한다
+function renderChat() {
+  const result = render(<OrderChatbot />);
+  fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+  return result;
+}
+
 function send(text: string) {
   fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
   fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
@@ -27,7 +34,7 @@ function orderAndConfirm() {
 
 describe("OrderChatbot", () => {
   it("메뉴와 수량을 한 번에 말하면 매장·음식·가격·위치를 보여 준다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("간장치킨 1마리 시켜줘");
     wait(1000);
 
@@ -39,7 +46,7 @@ describe("OrderChatbot", () => {
   });
 
   it("배달: 메뉴 버튼을 고르면 단위에 맞춰 수량을 묻고, 수량을 고르면 주문서를 보여 준다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("배달");
     wait(700);
     expect(screen.getByText(/어떤 음식을 배달해 드릴까요\?/)).toBeInTheDocument();
@@ -62,7 +69,7 @@ describe("OrderChatbot", () => {
   });
 
   it("배달: 수량 단계는 버튼으로만 고르고(직접 입력 없음) 입력창은 접혀 있다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("옛날통닭 시켜줘");
     wait(700);
     expect(screen.getByText(/몇 마리 주문할까요\?/)).toBeInTheDocument();
@@ -79,7 +86,7 @@ describe("OrderChatbot", () => {
   });
 
   it("배달: 수량 카운터는 최대 10까지만 늘어난다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("국물떡볶이");
     wait(700);
     const plus = screen.getByRole("button", { name: "1인분 늘리기" });
@@ -89,7 +96,7 @@ describe("OrderChatbot", () => {
   });
 
   it("배달: 여러 메뉴에 걸리는 말이면 그 메뉴들 중에서 고르게 한다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("치킨 시켜줘");
     wait(700);
     expect(screen.getByText(/어떤 메뉴로 할까요\?/)).toBeInTheDocument();
@@ -99,7 +106,7 @@ describe("OrderChatbot", () => {
   });
 
   it("결제수단을 고르면 결제 팝업이 뜨고, 결제하면 완료 메시지를 보낸다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     orderAndConfirm();
 
     fireEvent.click(screen.getByRole("button", { name: /토스페이/ }));
@@ -120,7 +127,7 @@ describe("OrderChatbot", () => {
   });
 
   it("결제 동의를 끄면 결제 버튼이 비활성화된다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     orderAndConfirm();
     fireEvent.click(screen.getByRole("button", { name: /신용카드/ }));
     wait(300);
@@ -131,7 +138,7 @@ describe("OrderChatbot", () => {
   });
 
   it("결제 팝업의 카드 드롭다운: 목록을 펼쳐 고르고, Esc 는 목록만 닫는다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     orderAndConfirm();
     fireEvent.click(screen.getByRole("button", { name: /신용카드/ }));
     wait(300);
@@ -165,7 +172,7 @@ describe("OrderChatbot", () => {
   });
 
   it("팝업을 닫으면 결제가 취소되고 다시 결제수단을 고를 수 있다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     orderAndConfirm();
 
     fireEvent.click(screen.getByRole("button", { name: /카카오페이/ }));
@@ -180,7 +187,7 @@ describe("OrderChatbot", () => {
   });
 
   it("+ 를 누르면 빠른 메뉴가 열리고, 메뉴를 고르면 닫히면서 답한다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     const toggle = screen.getByRole("button", { name: "메뉴" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -195,7 +202,7 @@ describe("OrderChatbot", () => {
 
   it("쇼핑: 종류 → 상품 → 사이즈 → 수량 → 배송지 확인 → 주문서 → 결제까지", () => {
     vi.setSystemTime(new Date(2026, 9, 1, 10, 0));
-    render(<OrderChatbot />);
+    renderChat();
     send("쇼핑");
     wait(700);
     for (const name of ["옷", "신발", "장난감", "화장품", "책"]) expect(screen.getByRole("button", { name })).toBeEnabled();
@@ -237,7 +244,7 @@ describe("OrderChatbot", () => {
   });
 
   it("쇼핑: 다른 주소 입력으로 새 배송지를 받고, 3만원 미만이면 배송비가 붙는다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("쇼핑");
     wait(700);
     fireEvent.click(screen.getByRole("button", { name: "화장품" }));
@@ -264,7 +271,7 @@ describe("OrderChatbot", () => {
 
   it("예매: 종류 → 작품 → 날짜 → 회차 → 매수 → 예매 확인 → 결제 → 예매번호·좌석", () => {
     vi.setSystemTime(new Date(2026, 9, 1, 15, 0)); // 10월 1일(목) 오후 3시
-    render(<OrderChatbot />);
+    renderChat();
     send("예매");
     wait(700);
     for (const name of ["영화", "뮤지컬", "콘서트", "전시"]) expect(screen.getByRole("button", { name })).toBeEnabled();
@@ -301,7 +308,7 @@ describe("OrderChatbot", () => {
 
   it("예매: 날짜의 직접 입력은 2주 범위의 달력을 펼친다", () => {
     vi.setSystemTime(new Date(2026, 9, 1, 15, 0));
-    render(<OrderChatbot />);
+    renderChat();
     send("예매");
     wait(700);
     fireEvent.click(screen.getByRole("button", { name: "뮤지컬" }));
@@ -320,7 +327,7 @@ describe("OrderChatbot", () => {
   });
 
   it("식당: 음식 선택지를 버튼으로 보여 주고, 누르면 근처 식당 목록이 나온다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
@@ -336,7 +343,7 @@ describe("OrderChatbot", () => {
   });
 
   it("선택지가 떠 있으면 입력창이 접히고, 직접 입력을 누르면 열린다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     const form = screen.getByRole("button", { name: "Say 전송" }).closest("form")!;
     expect(form).not.toHaveAttribute("inert");
 
@@ -351,7 +358,7 @@ describe("OrderChatbot", () => {
   });
 
   it("식당: 직접 입력한 메뉴 이름으로도 찾고, 목록에서 고르면 상세 정보를 보여 준다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
@@ -373,7 +380,7 @@ describe("OrderChatbot", () => {
 
   it("식당: 식당을 고르면 날짜 → 시간 → 인원을 묻고 예약을 마친다", () => {
     vi.setSystemTime(new Date(2026, 9, 1, 10, 0)); // 10월 1일(목) 오전 10시
-    render(<OrderChatbot />);
+    renderChat();
     send("식당");
     wait(700);
     fireEvent.click(screen.getByRole("button", { name: "중식" }));
@@ -417,7 +424,7 @@ describe("OrderChatbot", () => {
 
   it("식당 예약: 인원 카운터는 1명 아래로 내려가지 않는다", () => {
     vi.setSystemTime(new Date(2026, 9, 1, 10, 0));
-    render(<OrderChatbot />);
+    renderChat();
     send("식당");
     wait(700);
     fireEvent.click(screen.getByRole("button", { name: "중식" }));
@@ -438,7 +445,7 @@ describe("OrderChatbot", () => {
   // 장락반점(11:00 - 21:00)까지 고른 상태로
   function startReservation() {
     vi.setSystemTime(new Date(2026, 9, 1, 10, 0)); // 10월 1일(목) 오전 10시
-    render(<OrderChatbot />);
+    renderChat();
     send("식당");
     wait(700);
     fireEvent.click(screen.getByRole("button", { name: "중식" }));
@@ -511,7 +518,7 @@ describe("OrderChatbot", () => {
   });
 
   it("식당: 모르는 음식이면 다시 물어본다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
@@ -525,7 +532,7 @@ describe("OrderChatbot", () => {
   });
 
   it("못 알아들으면 할 수 있는 서비스를 선택지로 보여 준다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("안녕");
     wait(700);
     expect(screen.getByText(/원하는 서비스를 골라 주세요/)).toBeInTheDocument();
@@ -534,7 +541,7 @@ describe("OrderChatbot", () => {
   });
 
   it("Say 전송 버튼은 입력이 비어 있으면 꺼져 있고, 글자를 쓰면 켜진다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     const sendButton = screen.getByRole("button", { name: "Say 전송" });
     expect(sendButton).toBeDisabled();
 
@@ -546,7 +553,7 @@ describe("OrderChatbot", () => {
   });
 
   it("빠른 메뉴는 바깥을 누르면 닫힌다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     const toggle = screen.getByRole("button", { name: "메뉴" });
     fireEvent.click(toggle);
     fireEvent.pointerDown(document.body);
@@ -554,7 +561,7 @@ describe("OrderChatbot", () => {
   });
 
   it("주문 확인에서 취소하면 주문을 접는다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("옛날통닭 2마리 시켜줘");
     wait(1000);
     fireEvent.click(screen.getByRole("button", { name: "취소" }));
@@ -564,28 +571,55 @@ describe("OrderChatbot", () => {
     expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });
 
-  it("채팅창 끄기를 누르면 말풍선이 숨고 입력창은 열려 계속 주문할 수 있으며, 채팅창 켜기로 다시 보인다", () => {
+  it("채팅창은 처음에 꺼져 있고, 켜면 말풍선이 보이며 다시 끌 수 있다 (꺼진 동안에도 입력창은 열려 있다)", () => {
     render(<OrderChatbot />);
-    send("배달");
-    wait(700);
-    // 선택지 질문이라 입력창이 접혀 있다
-    expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).toHaveAttribute("inert");
-
-    fireEvent.click(screen.getByRole("button", { name: "채팅창 끄기" }));
     const chat = document.querySelector(".chat")!;
     expect(chat.closest(".chat-area")).toHaveClass("chat-hidden");
     expect(chat).toHaveAttribute("inert");
-    expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).not.toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "채팅창 켜기" })).toBeInTheDocument();
 
+    send("배달");
+    wait(700);
+    // 선택지 질문이어도 채팅창이 꺼져 있으면 버튼이 안 보이므로 입력창을 열어 둔다
+    expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).not.toHaveAttribute("inert");
     send("간장치킨 1마리 시켜줘");
     wait(1000);
+
     fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
     expect(chat.closest(".chat-area")).not.toHaveClass("chat-hidden");
-    expect(screen.getByText("간장치킨 1마리")).toBeInTheDocument(); // 숨긴 동안의 대화도 그대로 있다
+    expect(document.querySelector(".voice-caption")).not.toBeInTheDocument();
+    expect(screen.getByText("간장치킨 1마리")).toBeInTheDocument(); // 꺼진 동안의 대화도 그대로 있다
+
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 끄기" }));
+    expect(chat.closest(".chat-area")).toHaveClass("chat-hidden");
+  });
+
+  it("채팅창이 꺼져 있으면 봇이 소리로 하는 말만 가운데에 한 글자씩 적히고, 답을 준비하는 동안은 점이 깜빡인다", () => {
+    render(<OrderChatbot />);
+    const caption = () => document.querySelector(".caption-text")?.textContent ?? "";
+    const full = "안녕하세요! Saylo예요. 무엇을 주문해 드릴까요?";
+    // 처음에는 비어 있다가 한 글자씩 늘어난다
+    expect(caption()).toBe("");
+    wait(45 * 5);
+    expect(caption()).toBe(full.slice(0, 5));
+    wait(10_000);
+    expect(caption()).toBe(full);
+    expect(document.querySelector(".caption-caret")).toHaveClass("done");
+    // 화면 읽기 프로그램에는 문장 전체가 한 번에 간다
+    expect(document.querySelector(".voice-caption [aria-live]")).toHaveTextContent(full);
+
+    send("배달");
+    expect(document.querySelector(".caption-dots")).toBeInTheDocument();
+    expect(caption()).toBe("");
+    wait(700);
+    expect(document.querySelector(".caption-dots")).not.toBeInTheDocument();
+    wait(10_000);
+    // 선택지까지 읽어 주는 문장 그대로 (사용자가 한 말은 자막에 없다)
+    expect(caption()).toBe("어떤 음식을 배달해 드릴까요? 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이 중에서 말씀해 주세요.");
   });
 
   it("주문 확인에서 다른 서비스(예매)를 말하면 '응'으로 보지 않고 그 서비스로 넘어간다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("옛날통닭 2마리 시켜줘");
     wait(1000);
     send("예매");
@@ -597,7 +631,7 @@ describe("OrderChatbot", () => {
   });
 
   it("배달 수량 단계에서 날짜 같은 숫자는 수량으로 보지 않는다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("옛날통닭 시켜줘");
     wait(700);
     send("10월 3일에 받을게요");
@@ -680,7 +714,7 @@ describe("음성", () => {
   afterEach(uninstallSpeech);
 
   it("마이크를 누르고 말하면 글자로 입력한 것과 똑같이 처리된다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     const mic = screen.getByRole("button", { name: "음성 모드" });
     expect(mic).toBeEnabled();
 
@@ -702,7 +736,7 @@ describe("음성", () => {
   });
 
   it("선택지가 떠서 입력창이 접혀 있어도 말로 답할 수 있다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     speakInto("식당이요");
     wait(700);
     expect(screen.getByText(/어떤 음식을 원하세요\?/)).toBeInTheDocument();
@@ -718,7 +752,7 @@ describe("음성", () => {
   });
 
   it("결제 화면이 떠 있을 때 '결제'라고 말하면 결제가 진행되고, '취소'는 닫는다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     orderAndConfirm();
     fireEvent.click(screen.getByRole("button", { name: /카카오페이/ }));
     wait(300);
@@ -737,7 +771,7 @@ describe("음성", () => {
   });
 
   it("봇이 답하는 중에 말하면 안내만 하고 버린다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     send("배달");
     speakInto("옛날통닭");
     expect(screen.getByRole("status")).toHaveTextContent("답하는 중이에요");
@@ -747,7 +781,7 @@ describe("음성", () => {
   });
 
   it("말소리를 못 들으면 안내가 잠시 보였다가 사라진다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     fireEvent.click(screen.getByRole("button", { name: "음성 모드" }));
     act(() => {
       FakeRecognition.latest().onerror?.({ error: "no-speech" });
@@ -759,7 +793,7 @@ describe("음성", () => {
   });
 
   it("소리는 처음부터 켜져 있어 봇 답을 선택지까지 읽어 주고, 소리 끄기를 누르면 멈추며 그 선택을 기억한다", () => {
-    const { unmount } = render(<OrderChatbot />);
+    const { unmount } = renderChat();
     const sound = screen.getByRole("button", { name: "소리 끄기" });
     expect(sound).toHaveAttribute("aria-pressed", "true");
     expect(speakSpy).toHaveBeenCalledTimes(1); // 첫 인사
@@ -783,7 +817,7 @@ describe("음성", () => {
 
     // 다시 열어도 꺼진 채로
     unmount();
-    render(<OrderChatbot />);
+    renderChat();
     expect(screen.getByRole("button", { name: "소리 켜기" })).toBeInTheDocument();
     expect(speakSpy).toHaveBeenCalledTimes(2);
   });
@@ -791,7 +825,7 @@ describe("음성", () => {
 
 describe("음성 미지원 브라우저", () => {
   it("마이크 버튼이 비활성화되고 이유를 알려 주며, 스피커 버튼은 없다", () => {
-    render(<OrderChatbot />);
+    renderChat();
     const mic = screen.getByRole("button", { name: "음성 모드" });
     expect(mic).toBeDisabled();
     expect(mic).toHaveAttribute("title", "이 브라우저는 음성 인식을 지원하지 않아요");
