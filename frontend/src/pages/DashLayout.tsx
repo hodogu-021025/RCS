@@ -20,7 +20,7 @@ export function DashLayout({ title, children }: Props) {
   return (
     <div className="dash">
       <header className="dash-head">
-        <a className="dash-logo" href="#/" aria-label="소비자 챗봇으로">
+        <a className="dash-logo" href="#/chat" aria-label="소비자 챗봇으로">
           Saylo
         </a>
         <span className="dash-title">{title}</span>

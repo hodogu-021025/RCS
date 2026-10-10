@@ -23,6 +23,23 @@ afterEach(() => {
   window.location.hash = "";
 });
 
+describe("첫 화면", () => {
+  it("주소 없이 열면 로그인 화면이 나오고, '로그인 없이 챗봇 쓰기'는 챗봇으로 간다", () => {
+    open("");
+    expect(window.location.hash).toBe("#/login");
+    expect(screen.getByRole("heading", { name: "로그인" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "로그인 없이 챗봇 쓰기" })).toHaveAttribute("href", "#/chat");
+  });
+
+  it("첫 화면에서 소비자로 로그인하면 챗봇으로 간다", () => {
+    open("#/");
+    fireEvent.click(screen.getByRole("button", { name: "소비자 · user" }));
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    expect(window.location.hash).toBe("#/chat");
+    expect(screen.getByRole("button", { name: "Say 전송" })).toBeInTheDocument();
+  });
+});
+
 describe("로그인 페이지", () => {
   it("틀리면 안내가 뜨고, 사장님으로 맞게 로그인하면 사장님 페이지로 간다", () => {
     open("#/login");
@@ -185,7 +202,7 @@ describe("내 주문 페이지", () => {
 describe("챗봇과 연결", () => {
   it("품절된 메뉴는 챗봇 배달 버튼에서 빠진다", () => {
     setMenuItem("h3", "d2", { soldOut: true });
-    open("#/");
+    open("#/chat");
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "배달" } });
     fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
     act(() => void vi.advanceTimersByTime(700));

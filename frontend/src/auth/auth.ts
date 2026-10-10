@@ -23,7 +23,7 @@ export const DEMO_ACCOUNTS: Account[] = [
 ];
 
 export const ROLE_LABEL: Record<Role, string> = { user: "소비자", owner: "사장님", admin: "관리자" };
-export const HOME_BY_ROLE: Record<Role, string> = { user: "/", owner: "/owner", admin: "/admin" };
+export const HOME_BY_ROLE: Record<Role, string> = { user: "/chat", owner: "/owner", admin: "/admin" };
 
 const KEY = "saylo.session";
 const listeners = new Set<() => void>();

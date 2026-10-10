@@ -25,7 +25,7 @@ export function LoginPage() {
   return (
     <div className="dash dash-center">
       <form className="dash-card login" onSubmit={onSubmit}>
-        <a className="dash-logo dark" href="#/">
+        <a className="dash-logo dark" href="#/chat">
           Saylo
         </a>
         <h1>로그인</h1>
@@ -45,7 +45,7 @@ export function LoginPage() {
         <button className="btn primary wide" type="submit" disabled={!username.trim() || !password}>
           로그인
         </button>
-        <a className="btn wide" href="#/">
+        <a className="btn wide" href="#/chat">
           로그인 없이 챗봇 쓰기
         </a>
 

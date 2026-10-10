@@ -11,7 +11,9 @@ export default function App() {
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<OrderChatbot />} />
+        {/* 첫 화면은 로그인. 챗봇은 #/chat (로그인 없이도 열 수 있다) */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/chat" element={<OrderChatbot />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/me"
