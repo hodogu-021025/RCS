@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { HOME_BY_ROLE, signup, useSession, type SignupInput } from "../auth/auth";
+import { HOME_BY_ROLE, PASSWORD_MIN, USERNAME_RULE, signup, useSession, type SignupInput } from "../auth/auth";
+import { normalizeEmail } from "../api/emailVerification";
 import { RESTAURANTS } from "../components/orderChatKnowledge";
+import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordField } from "./PasswordField";
 
 type SignupRole = SignupInput["role"];
@@ -18,6 +20,8 @@ export function SignupPage() {
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [storeId, setStoreId] = useState("");
+  const [email, setEmail] = useState("");
+  const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +30,16 @@ export function SignupPage() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const result = signup({ role, username, name, password, passwordConfirm, storeId: role === "owner" ? storeId : undefined });
+    const result = signup({
+      role,
+      username,
+      name,
+      email,
+      emailVerified: verifiedEmail !== null && verifiedEmail === normalizeEmail(email),
+      password,
+      passwordConfirm,
+      storeId: role === "owner" ? storeId : undefined,
+    });
     if ("error" in result) {
       setError(result.error);
       return;
@@ -59,7 +72,7 @@ export function SignupPage() {
 
         <label>
           <span>아이디</span>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="영문·숫자 3~20자" autoFocus />
+          <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder={USERNAME_RULE} autoFocus />
         </label>
         <label>
           <span>{role === "owner" ? "대표자 이름" : "이름"}</span>
@@ -78,7 +91,8 @@ export function SignupPage() {
             </select>
           </label>
         )}
-        <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder="4자 이상" />
+        <EmailVerifyField email={email} onEmailChange={setEmail} verifiedEmail={verifiedEmail} onVerified={setVerifiedEmail} />
+        <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder={`${PASSWORD_MIN}자 이상`} />
         <PasswordField
           label="비밀번호 확인"
           value={passwordConfirm}

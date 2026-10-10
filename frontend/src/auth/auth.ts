@@ -1,6 +1,7 @@
 // 데모 로그인: 아이디·비밀번호가 정해진 계정 3개(소비자·사장님·관리자) + 관리자가 만든 사장님 계정 + 회원가입한 소비자.
 // 로그인 상태는 브라우저(localStorage)에 남는다. 서버가 없으므로 실제 인증은 아니다.
 import { useSyncExternalStore } from "react";
+import { normalizeEmail } from "../api/emailVerification";
 import { addOwner, addUser, getDb, type OwnerAccount, type UserAccount } from "../data/db";
 
 export type Role = "user" | "owner" | "admin";
@@ -90,13 +91,21 @@ export function login(username: string, password: string): Session | null {
 }
 
 // 회원가입·사장님 계정 만들기가 함께 쓰는 입력 규칙. 문제가 없으면 null
+export const USERNAME_RULE = "영문·숫자 8~20자";
+export const PASSWORD_MIN = 8;
 export function usernameError(username: string): string | null {
-  if (!/^[a-z0-9_]{3,20}$/i.test(username)) return "아이디는 영문·숫자 3~20자로 적어 주세요.";
+  if (!/^[a-z0-9_]{8,20}$/i.test(username)) return `아이디는 ${USERNAME_RULE}로 적어 주세요.`;
   if (isUsernameTaken(username)) return "이미 있는 아이디예요.";
   return null;
 }
 export const passwordError = (password: string): string | null =>
-  password.length < 4 ? "비밀번호는 4자 이상이어야 해요." : null;
+  password.length < PASSWORD_MIN ? `비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요.` : null;
+
+// 이미 가입에 쓰인 이메일인지 (대소문자 무시)
+export const isEmailTaken = (email: string) => {
+  const e = normalizeEmail(email);
+  return [...getDb().users, ...getDb().owners].some((a) => a.email === e);
+};
 
 export interface SignupInput {
   role: "user" | "owner"; // 고객님 · 사장님
@@ -104,6 +113,8 @@ export interface SignupInput {
   password: string;
   passwordConfirm: string;
   name: string;
+  email: string;
+  emailVerified: boolean; // 인증번호 확인을 마쳤는지 (회원가입 화면이 서버에서 확인받은 뒤 true)
   storeId?: string; // 사장님만: 내 매장
 }
 
@@ -112,19 +123,22 @@ export interface SignupInput {
 export function signup(input: SignupInput): { error: string } | { session: Session } {
   const username = input.username.trim();
   const name = input.name.trim();
+  const email = normalizeEmail(input.email);
   const { password, role, storeId } = input;
   const error =
     usernameError(username) ??
     (!name ? "이름을 적어 주세요." : null) ??
     (role === "owner" && !storeId ? "매장을 골라 주세요." : null) ??
+    (!input.emailVerified ? "이메일 인증을 마쳐 주세요." : null) ??
+    (isEmailTaken(email) ? "이미 가입된 이메일이에요." : null) ??
     passwordError(password) ??
     (password !== input.passwordConfirm ? "비밀번호가 서로 달라요." : null);
   if (error) return { error };
   if (role === "owner") {
-    addOwner({ username, password, name, storeId: storeId! });
+    addOwner({ username, password, name, storeId: storeId!, email });
     return { session: startSession({ username, password, name, role, storeId }) };
   }
-  addUser({ username, password, name, createdAt: Date.now() });
+  addUser({ username, password, name, email, createdAt: Date.now() });
   return { session: startSession({ username, password, name, role }) };
 }
 

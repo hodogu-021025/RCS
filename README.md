@@ -26,13 +26,23 @@
 
 ## 실행
 
-Node 24 이상이 필요합니다.
+Node 24 이상이 필요합니다. 화면(frontend)과 이메일 인증 API(server)를 각각 띄웁니다.
 
 ```bash
-cd frontend
-npm install
-npm run dev        # http://localhost:5173
+cp .env.example .env     # 처음 한 번: RESEND_API_KEY 를 채운다 (아래 "이메일 인증" 참고)
+npm --prefix server run dev        # API     http://localhost:3001
+cd frontend && npm install && npm run dev   # 화면 http://localhost:5173 (/api 는 3001 로 넘어감)
 ```
+
+### 이메일 인증 (Resend)
+
+회원가입할 때 이메일로 6자리 인증번호를 보내고 확인합니다. Resend API 키는 브라우저에 넣으면 누구나 볼 수 있어서 `server/`(외부 패키지 없는 Node 서버)에만 둡니다.
+
+- 저장소 루트 `.env`(git 에 안 올라감)에 `RESEND_API_KEY`, `MAIL_FROM` 을 적습니다. 형식은 `.env.example`.
+- **보내는 주소**: Resend 에 도메인을 인증하기 전에는 `onboarding@resend.dev` 만 쓸 수 있고, 이때는 **Resend 계정 주인의 메일로만** 발송됩니다. 아무 주소로나 보내려면 Resend → Domains 에서 `sayloorder.com` 을 추가하고 가비아 DNS 에 안내된 레코드를 넣은 뒤 `MAIL_FROM=Saylo <no-reply@sayloorder.com>` 처럼 바꿉니다.
+- 키가 없을 때: 개발 중(`npm run dev`)에는 메일 대신 API 서버 콘솔에 인증번호를 찍고, Docker(운영 모드)에서는 발송을 거절합니다.
+- 규칙: 번호 유효 5분, 같은 주소 재발송 1분 뒤, 번호 하나로 5번까지 시도, 한 IP 당 10분에 5통.
+- 서버 테스트: `npm --prefix server test`
 
 | 명령 | 하는 일 |
 |---|---|
@@ -44,6 +54,8 @@ npm run dev        # http://localhost:5173
 
 ### Docker로 띄우기 (저장소 루트에서)
 
+화면(nginx)과 API 서버가 함께 뜨고, nginx 가 `/api/` 를 API 서버로 넘깁니다. `.env` 의 Resend 설정을 읽습니다.
+
 ```bash
 docker compose up -d --build                  # http://localhost:8080
 docker compose --profile tunnel up -d         # + 인터넷 임시 주소 (Cloudflare, 주소는 켤 때마다 바뀜)
@@ -53,8 +65,9 @@ docker compose --profile tunnel down          # 터널까지 모두 중지
 
 ## 배포
 
-정적 사이트라 `npm run build`로 나온 `frontend/dist/` 폴더를 어떤 정적 호스팅(Vercel, Netlify, Cloudflare Pages, nginx 등)에 올리면 됩니다.
+화면은 `npm run build`로 나온 `frontend/dist/` 정적 파일이고, 회원가입 이메일 인증에는 `server/` API 서버가 함께 있어야 합니다. 가장 간단한 방법은 `docker compose up -d --build` 그대로 서버에 올리는 것입니다 (화면과 API 가 같은 주소에서 동작).
 
+- 정적 호스팅(Vercel 등)에 화면만 올리면 회원가입의 인증번호 받기가 동작하지 않습니다. 그때는 API 서버를 따로 띄우고 그 호스팅에서 `/api/*` 를 API 서버로 넘기도록 설정해야 합니다.
 - 빌드 명령: `npm --prefix frontend run build` (저장소 루트 기준) 또는 `cd frontend && npm run build`
 - 결과물: `frontend/dist`
 - 페이지 이동은 해시 주소(`#/owner`)를 써서 별도 리라이트 설정이 필요 없습니다.
@@ -82,15 +95,23 @@ frontend/
     auth/auth.ts              데모 로그인·회원가입(계정·세션)
     data/db.ts                주문·예약·매장 설정·계정 저장소 (localStorage)
     data/seed.ts              처음 열 때 넣는 보기용 기록
-    pages/                    LoginPage, SignupPage(회원가입), OwnerPage(사장님), AdminPage(관리자), MyOrdersPage(내 주문), RequireRole(역할 검사)
+    api/emailVerification.ts  이메일 인증 API 호출 (/api/email/…)
+    pages/                    LoginPage, SignupPage(회원가입), EmailVerifyField(이메일 인증), PasswordField(눈 버튼),
+                              OwnerPage(사장님), AdminPage(관리자), MyOrdersPage(내 주문), RequireRole(역할 검사)
     App.tsx                   주소별 페이지 연결 (HashRouter)
     index.css                 챗봇 스타일 (평면 디자인, 브랜드 파란색 #007cfc)
     dashboard.css             로그인·사장님·관리자 페이지 스타일
     image/                    로고, 배경 영상
   scripts/build-html.mjs      HTML 한 파일 만들기
   Dockerfile
-deploy/nginx.conf             nginx 설정
-docker-compose.yml            로컬 Docker (+ 터널)
+server/
+  index.mjs                   API 서버 (/api/email/send-code, /api/email/verify), Resend 로 메일 발송
+  verification.mjs            인증번호 만들기·확인·재발송 제한
+  verification.test.mjs       서버 테스트 (node --test)
+  Dockerfile
+deploy/nginx.conf             nginx 설정 (/api/ → API 서버)
+docker-compose.yml            로컬 Docker: 화면 + API (+ 터널)
+.env.example                  Resend 설정 예시 (.env 로 복사해서 사용)
 ```
 
 ## 자주 바꾸는 것

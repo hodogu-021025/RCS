@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { login, logout } from "../auth/auth";
 import { DELIVERY_MENU, makeOrder } from "../components/orderChatKnowledge";
-import { addOrder, addOwner, addReservation, getDb, removeOwner, resetDb, setMenuItem, setStoreHours } from "../data/db";
+import { addOrder, addOwner, addReservation, addUser, getDb, removeOwner, resetDb, setMenuItem, setStoreHours } from "../data/db";
 
 // App 은 해시 주소(#/owner)로 페이지를 고른다
 function open(path: string) {
@@ -60,22 +60,57 @@ describe("회원가입", () => {
     for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
   }
 
-  it("고객님으로 가입하면 바로 로그인돼 챗봇으로 가고, 다음부터 그 계정으로 로그인할 수 있다", () => {
+  // 이메일 인증 API(server/) 대신 쓰는 가짜. 맞는 번호는 123456
+  function mockEmailServer() {
+    const calls: { path: string; body: Record<string, string> }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        calls.push({ path, body });
+        if (path === "/api/email/send-code") return Response.json({ ok: true, expiresIn: 300, resendIn: 60 });
+        if (path === "/api/email/verify") {
+          return body.code === "123456"
+            ? Response.json({ ok: true, verified: true })
+            : Response.json({ error: "인증번호가 맞지 않아요. (4번 더 시도할 수 있어요)" }, { status: 400 });
+        }
+        return new Response(null, { status: 404 });
+      }),
+    );
+    return calls;
+  }
+
+  const click = (name: string) => act(async () => void fireEvent.click(screen.getByRole("button", { name })));
+
+  async function verifyEmail(email: string) {
+    fill({ 이메일: email });
+    await click("인증번호 받기");
+    fill({ 인증번호: "123456" });
+    await click("확인");
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("고객님으로 가입하면 바로 로그인돼 챗봇으로 가고, 다음부터 그 계정으로 로그인할 수 있다", async () => {
+    mockEmailServer();
     open("#/signup");
     expect(screen.getByRole("radio", { name: "고객님" })).toBeChecked();
     expect(screen.queryByLabelText("매장")).not.toBeInTheDocument();
-    fill({ 아이디: "hong", 이름: "홍길동", 비밀번호: "pw1234", "비밀번호 확인": "pw1234" });
+    fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    await verifyEmail("Hong@Example.com");
     fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
 
     expect(window.location.hash).toBe("#/chat");
-    expect(getDb().users).toMatchObject([{ username: "hong", name: "홍길동" }]);
-    expect(login("hong", "pw1234")).toMatchObject({ role: "user", name: "홍길동" });
+    expect(getDb().users).toMatchObject([{ username: "hongildong", name: "홍길동", email: "hong@example.com" }]);
+    expect(login("hongildong", "password1")).toMatchObject({ role: "user", name: "홍길동" });
   });
 
-  it("사장님으로 가입하면 매장을 고르고, 가입 후 내 매장의 사장님 페이지로 간다", () => {
+  it("사장님으로 가입하면 매장을 고르고, 가입 후 내 매장의 사장님 페이지로 간다", async () => {
+    mockEmailServer();
     open("#/signup");
     fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
-    fill({ 아이디: "banjeom", "대표자 이름": "김사장", 비밀번호: "pw1234", "비밀번호 확인": "pw1234" });
+    fill({ 아이디: "banjeom01", "대표자 이름": "김사장", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    await verifyEmail("boss@example.com");
     fireEvent.click(screen.getByRole("button", { name: "사장님으로 가입하기" }));
     expect(screen.getByRole("alert")).toHaveTextContent("매장을 골라 주세요");
 
@@ -83,7 +118,69 @@ describe("회원가입", () => {
     fireEvent.click(screen.getByRole("button", { name: "사장님으로 가입하기" }));
     expect(window.location.hash).toBe("#/owner");
     expect(screen.getByText("장락반점 · 사장님")).toBeInTheDocument();
-    expect(getDb().owners).toMatchObject([{ username: "banjeom", storeId: "c1", name: "김사장" }]);
+    expect(getDb().owners).toMatchObject([{ username: "banjeom01", storeId: "c1", name: "김사장", email: "boss@example.com" }]);
+  });
+
+  it("이메일 인증: 번호를 받으면 5분 타이머가 돌고, 틀리면 안내, 맞으면 인증 완료로 바뀐다", async () => {
+    const calls = mockEmailServer();
+    open("#/signup");
+    fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("이메일 인증을 마쳐 주세요");
+
+    fill({ 이메일: "hong@example.com" });
+    await click("인증번호 받기");
+    expect(calls).toEqual([{ path: "/api/email/send-code", body: { email: "hong@example.com" } }]);
+    expect(screen.getByText("5:00")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 받기 60초" })).toBeDisabled();
+
+    act(() => void vi.advanceTimersByTime(60_000));
+    expect(screen.getByText("4:00")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 받기" })).toBeEnabled();
+
+    fill({ 인증번호: "000000" });
+    await click("확인");
+    expect(screen.getByText(/인증번호가 맞지 않아요/)).toBeInTheDocument();
+
+    fill({ 인증번호: "123456" });
+    await click("확인");
+    expect(screen.getByText("인증 완료")).toBeInTheDocument();
+    expect(screen.getByLabelText("이메일")).toHaveAttribute("readonly");
+    expect(screen.queryByLabelText("인증번호")).not.toBeInTheDocument();
+
+    // 변경을 누르면 다시 고칠 수 있고, 인증은 풀린다
+    fireEvent.click(screen.getByRole("button", { name: "변경" }));
+    expect(screen.getByLabelText("이메일")).not.toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "인증번호 받기" })).toBeInTheDocument();
+  });
+
+  it("이메일 인증: 5분이 지나면 만료되고, 형식이 틀리거나 이미 가입된 주소는 메일을 보내지 않는다", async () => {
+    const calls = mockEmailServer();
+    addUser({ username: "takenuser", password: "password1", name: "기존", email: "taken@example.com", createdAt: 0 });
+    open("#/signup");
+
+    fill({ 이메일: "not-an-email" });
+    await click("인증번호 받기");
+    expect(screen.getByText("이메일 주소를 다시 확인해 주세요.")).toBeInTheDocument();
+    fill({ 이메일: "TAKEN@example.com" });
+    await click("인증번호 받기");
+    expect(screen.getByText("이미 가입된 이메일이에요.")).toBeInTheDocument();
+    expect(calls).toEqual([]);
+
+    fill({ 이메일: "hong@example.com" });
+    await click("인증번호 받기");
+    act(() => void vi.advanceTimersByTime(5 * 60_000));
+    expect(screen.getByText("만료")).toBeInTheDocument();
+    expect(screen.getByText(/인증번호가 만료됐어요/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "확인" })).toBeDisabled();
+  });
+
+  it("인증 서버에 연결하지 못하면 안내한다", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
+    open("#/signup");
+    fill({ 이메일: "hong@example.com" });
+    await click("인증번호 받기");
+    expect(screen.getByText(/인증 서버에 연결하지 못했어요/)).toBeInTheDocument();
   });
 
   it("비밀번호는 처음에 가려져 있고, 눈을 누르면 보였다가 다시 누르면 가려진다 (칸마다 따로)", () => {
@@ -95,10 +192,10 @@ describe("회원가입", () => {
 
     const eye = screen.getByRole("button", { name: "비밀번호 보기" });
     expect(eye).toHaveAttribute("aria-pressed", "false");
-    fireEvent.change(pw, { target: { value: "pw1234" } });
+    fireEvent.change(pw, { target: { value: "password1" } });
     fireEvent.click(eye);
     expect(pw).toHaveAttribute("type", "text");
-    expect(pw).toHaveValue("pw1234");
+    expect(pw).toHaveValue("password1");
     expect(screen.getByRole("button", { name: "비밀번호 숨기기" })).toHaveAttribute("aria-pressed", "true");
     expect(confirm).toHaveAttribute("type", "password");
 
@@ -116,21 +213,29 @@ describe("회원가입", () => {
     expect(screen.getByRole("radio", { name: "고객님" })).not.toBeChecked();
   });
 
-  it("이미 있는 아이디, 짧은 비밀번호, 서로 다른 비밀번호 확인은 안내하고 가입하지 않는다", () => {
+  it("아이디 8~20자, 비밀번호 8자 이상, 이미 있는 아이디, 서로 다른 비밀번호 확인은 안내하고 가입하지 않는다", async () => {
+    mockEmailServer();
+    addUser({ username: "takenuser", password: "password1", name: "기존", createdAt: 0 });
     open("#/signup");
     const submit = () => fireEvent.click(screen.getByRole("button", { name: "고객님으로 가입하기" }));
-    fill({ 아이디: "owner", 이름: "누구", 비밀번호: "pw1234", "비밀번호 확인": "pw1234" });
+    await verifyEmail("new@example.com");
+
+    fill({ 아이디: "short1", 이름: "누구", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent("영문·숫자 8~20자");
+
+    fill({ 아이디: "takenuser" });
     submit();
     expect(screen.getByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
 
-    fill({ 아이디: "newbie", 비밀번호: "12" });
+    fill({ 아이디: "newuser01", 비밀번호: "1234567", "비밀번호 확인": "1234567" });
     submit();
-    expect(screen.getByRole("alert")).toHaveTextContent("4자 이상");
+    expect(screen.getByRole("alert")).toHaveTextContent("8자 이상");
 
-    fill({ 비밀번호: "pw1234", "비밀번호 확인": "pw9999" });
+    fill({ 비밀번호: "password1", "비밀번호 확인": "password2" });
     submit();
     expect(screen.getByRole("alert")).toHaveTextContent("비밀번호가 서로 달라요");
-    expect(getDb().users).toEqual([]);
+    expect(getDb().users.map((u) => u.username)).toEqual(["takenuser"]);
     expect(window.location.hash).toBe("#/signup");
   });
 });
@@ -262,13 +367,13 @@ describe("관리자 페이지", () => {
     fireEvent.click(screen.getByRole("tab", { name: "매장·사장님" }));
     expect(screen.getByText("11:00 - 18:00")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("아이디"), { target: { value: "jangrak" } });
-    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "pw1234" } });
+    fireEvent.change(screen.getByLabelText("아이디"), { target: { value: "jangrak01" } });
+    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "pw123456" } });
     fireEvent.change(screen.getByLabelText("매장"), { target: { value: "c1" } });
     fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
-    expect(screen.getByText("jangrak (장락반점 사장님)")).toBeInTheDocument();
-    expect(login("jangrak", "pw1234")).toMatchObject({ storeId: "c1" });
+    expect(screen.getByText("jangrak01 (장락반점 사장님)")).toBeInTheDocument();
+    expect(login("jangrak01", "pw123456")).toMatchObject({ storeId: "c1" });
   });
 
   it("통계 탭은 건수와 매출을 보여 준다", () => {

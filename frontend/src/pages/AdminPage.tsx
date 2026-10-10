@@ -310,6 +310,7 @@ function UsersTab({ rows }: { rows: Row[] }) {
                 <tr>
                   <th>아이디</th>
                   <th>이름</th>
+                  <th>이메일</th>
                   <th>가입 시각</th>
                 </tr>
               </thead>
@@ -318,6 +319,7 @@ function UsersTab({ rows }: { rows: Row[] }) {
                   <tr key={m.username}>
                     <td>{m.username}</td>
                     <td>{m.name}</td>
+                    <td>{m.email ?? "-"}</td>
                     <td>{formatDateTime(m.createdAt)}</td>
                   </tr>
                 ))}

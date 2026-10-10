@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { addOwner, removeOwner, resetDb } from "../data/db";
-import { accountExists, allOwners, getSession, isUsernameTaken, login, logout, signup, usernameError } from "./auth";
+import { addOwner, getDb, removeOwner, resetDb } from "../data/db";
+import { accountExists, allOwners, getSession, isEmailTaken, isUsernameTaken, login, logout, passwordError, signup, usernameError } from "./auth";
 
 afterEach(resetDb);
 
@@ -39,14 +39,27 @@ describe("로그인", () => {
     expect(accountExists(login("owner", "1234")!)).toBe(true);
   });
 
-  it("회원가입한 아이디는 다른 가입·사장님 계정 만들기에서 다시 쓸 수 없다", () => {
-    expect(signup({ role: "user", username: "hong", name: "홍길동", password: "pw1234", passwordConfirm: "pw1234" })).toHaveProperty("session");
-    expect(isUsernameTaken("hong")).toBe(true);
-    expect(usernameError("hong")).toBe("이미 있는 아이디예요.");
-    expect(signup({ role: "owner", username: "hong", name: "홍", storeId: "c1", password: "pw1234", passwordConfirm: "pw1234" })).toEqual({
-      error: "이미 있는 아이디예요.",
-    });
-    expect(usernameError("한글아이디")).toMatch(/영문·숫자/);
+  const base = { password: "password1", passwordConfirm: "password1", email: "hong@example.com", emailVerified: true };
+
+  it("회원가입한 아이디·이메일은 다른 가입·사장님 계정 만들기에서 다시 쓸 수 없다", () => {
+    expect(signup({ ...base, role: "user", username: "hongildong", name: "홍길동", email: "Hong@Example.com" })).toHaveProperty("session");
+    expect(getDb().users[0].email).toBe("hong@example.com"); // 소문자로 저장
+    expect(isUsernameTaken("hongildong")).toBe(true);
+    expect(usernameError("hongildong")).toBe("이미 있는 아이디예요.");
+    expect(signup({ ...base, role: "owner", username: "hongildong", name: "홍", storeId: "c1" })).toEqual({ error: "이미 있는 아이디예요." });
+    expect(isEmailTaken("HONG@example.com")).toBe(true);
+    expect(signup({ ...base, role: "user", username: "another01", name: "다른 사람" })).toEqual({ error: "이미 가입된 이메일이에요." });
+    expect(usernameError("한글아이디")).toMatch(/영문·숫자 8~20자/);
+  });
+
+  it("아이디는 8~20자, 비밀번호는 8자 이상이고, 이메일 인증을 마쳐야 가입된다", () => {
+    expect(usernameError("short12")).toMatch(/8~20자/); // 7자
+    expect(usernameError("abcdefgh")).toBeNull(); // 8자
+    expect(usernameError("a".repeat(21))).toMatch(/8~20자/);
+    expect(passwordError("1234567")).toBe("비밀번호는 8자 이상이어야 해요.");
+    expect(passwordError("12345678")).toBeNull();
+    expect(signup({ ...base, role: "user", username: "newuser01", name: "새 사람", emailVerified: false })).toEqual({ error: "이메일 인증을 마쳐 주세요." });
+    expect(login("user", "1234")).toMatchObject({ role: "user" }); // 기본 계정은 예전 규칙 그대로 로그인된다
   });
 
   it("저장된 세션이 손상돼 있으면 로그인 안 된 것으로 본다", () => {

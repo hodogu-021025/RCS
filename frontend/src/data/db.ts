@@ -41,6 +41,7 @@ export interface OwnerAccount {
   password: string; // 데모라서 그대로 저장한다
   name: string;
   storeId: string;
+  email?: string; // 회원가입한 사장님만 (관리자가 만든 계정은 없음)
 }
 
 // 회원가입한 소비자
@@ -48,6 +49,7 @@ export interface UserAccount {
   username: string;
   password: string; // 데모라서 그대로 저장한다
   name: string;
+  email?: string; // 인증한 이메일 (이메일 인증을 넣기 전에 가입한 계정은 없음)
   createdAt: number;
 }
 

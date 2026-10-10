@@ -14,6 +14,18 @@ services:
     image: rcs-chatbot:latest
     ports:
       - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # 이메일 인증 API (server/). 바깥에 포트를 열지 않고, chatbot 의 nginx 가 /api/ 를 여기로 넘긴다.
+  # Resend 키는 저장소 루트의 .env 에서 읽는다 (.env.example 참고). 없으면 인증 메일 발송이 거절된다
+  api:
+    build: ./server
+    image: rcs-api:latest
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped
 
   # Cloudflare 임시 터널(계정 불필요). 주소를 아는 누구나 접속할 수 있으니 필요할 때만 켠다
