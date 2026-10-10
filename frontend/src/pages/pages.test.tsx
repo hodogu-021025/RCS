@@ -278,6 +278,8 @@ describe("사장님 페이지", () => {
     open("#/owner");
 
     expect(await screen.findByText("간장치킨 2마리")).toBeInTheDocument();
+    // 손님 연락처가 보이고, 누르면 전화를 건다
+    expect(screen.getByRole("link", { name: "010-1234-5678" })).toHaveAttribute("href", "tel:01012345678");
     expect(screen.queryByText(/옛날통닭/)).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /주문·예약/ })).toHaveTextContent("1"); // 접수 배지
 

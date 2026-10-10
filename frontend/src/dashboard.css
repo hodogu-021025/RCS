@@ -255,7 +255,9 @@
   position: sticky; top: 0; z-index: 5;
   margin: 0 -12px 14px; padding: 0 12px; background: var(--panel);
 }
-.dash-mobile .dash-tabs button { flex: 1; justify-content: center; padding: 0 6px; }
+/* 탭 글자는 한 줄로 두고, 글자가 긴 탭(배지가 붙은 "매장·사장님" 등)이 더 넓게 갖는다 */
+.dash-mobile .dash-tabs button { flex: 1 1 auto; justify-content: center; gap: 4px; padding: 0 4px; white-space: nowrap; font-size: 13.5px; }
+.dash-mobile .dash-tabs .badge { min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; }
 .dash-mobile .dash-main > .dash-section:first-child { margin-top: 14px; } /* 탭이 없는 화면(내 주문) */
 .dash-mobile .dash-section { padding: 14px; margin-bottom: 14px; border-radius: 16px; }
 .dash-mobile .record dl { grid-template-columns: 1fr; }
@@ -303,3 +305,7 @@ label.consent-check > span { margin: 0; font-size: 13.5px; font-weight: 600; col
 .form-notice { margin: 0 0 14px; padding: 10px 12px; border-radius: 12px; background: var(--accent-weak); color: var(--accent); font-size: 13px; font-weight: 600; text-align: center; }
 .account-link { display: block; margin: 4px 0 8px; text-align: center; font-size: 12.5px; color: var(--muted); text-decoration: none; }
 .account-link:hover { color: var(--accent); }
+
+/* 사장님 주문 카드의 손님 연락처: 누르면 전화 */
+.record a.tel { color: var(--accent); font-weight: 600; text-decoration: none; }
+.record a.tel:hover { text-decoration: underline; }

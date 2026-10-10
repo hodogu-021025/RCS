@@ -179,6 +179,17 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
           <dt>주문자</dt>
           <dd>{o.customerName}</dd>
         </div>
+        {o.order.phone && (
+          <div>
+            <dt>연락처</dt>
+            {/* 휴대폰에서 누르면 바로 전화를 건다 */}
+            <dd>
+              <a className="tel" href={`tel:${o.order.phone.replace(/-/g, "")}`}>
+                {o.order.phone}
+              </a>
+            </dd>
+          </div>
+        )}
         <div>
           <dt>결제</dt>
           <dd>{o.payment}</dd>
