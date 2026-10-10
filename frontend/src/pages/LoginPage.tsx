@@ -26,7 +26,7 @@ export function LoginPage() {
   return (
     <div className="dash dash-center">
       <form className="dash-card login" onSubmit={onSubmit}>
-        <a className="dash-logo dark" href="#/chat">
+        <a className="dash-logo dark" href="#/login">
           Saylo
         </a>
         <h1>로그인</h1>

@@ -44,6 +44,8 @@ describe("첫 화면", () => {
     const controls = [...document.querySelectorAll("form button, form a")].map((el) => el.textContent);
     expect(controls.indexOf("회원가입")).toBe(controls.indexOf("로그인") + 1);
     expect(screen.getByRole("link", { name: "회원가입" })).toHaveAttribute("href", "#/signup");
+    // 로고를 누르면 챗봇이 아니라 로그인 화면 그대로
+    expect(screen.getByRole("link", { name: "Saylo" })).toHaveAttribute("href", "#/login");
     expect(screen.queryByText(/데모 계정/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /· owner/ })).not.toBeInTheDocument();
   });
