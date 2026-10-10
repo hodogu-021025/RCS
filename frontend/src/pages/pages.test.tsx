@@ -5,6 +5,18 @@ import { login, logout } from "../auth/auth";
 import { DELIVERY_MENU, makeOrder } from "../components/orderChatKnowledge";
 import { addOrder, addOwner, addReservation, addUser, getDb, removeOwner, resetDb, setMenuItem, setStoreHours } from "../data/db";
 
+// 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
+vi.mock("./routes", async () => {
+  const [login, signup, me, owner, admin] = await Promise.all([
+    import("./LoginPage"),
+    import("./SignupPage"),
+    import("./MyOrdersPage"),
+    import("./OwnerPage"),
+    import("./AdminPage"),
+  ]);
+  return { LoginPage: login.LoginPage, SignupPage: signup.SignupPage, MyOrdersPage: me.MyOrdersPage, OwnerPage: owner.OwnerPage, AdminPage: admin.AdminPage };
+});
+
 // App 은 해시 주소(#/owner)로 페이지를 고른다
 function open(path: string) {
   window.location.hash = path;
