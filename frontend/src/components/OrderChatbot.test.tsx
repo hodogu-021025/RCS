@@ -823,6 +823,69 @@ describe("음성", () => {
   });
 });
 
+describe("읽어 주기 목소리", () => {
+  const SUNHI = { name: "Microsoft SunHi Online (Natural) - Korean (Korea)", lang: "ko-KR" };
+  let voices: { name: string; lang: string }[];
+  let listeners: (() => void)[];
+  let cancel: ReturnType<typeof vi.fn>;
+
+  // 페이지를 막 열었을 때처럼 목소리 목록이 비어 있다가, voiceschanged 로 들어오는 브라우저
+  beforeEach(() => {
+    speakSpy.mockClear();
+    voices = [];
+    listeners = [];
+    cancel = vi.fn();
+    const w = window as unknown as Record<string, unknown>;
+    w.speechSynthesis = {
+      cancel,
+      speak: speakSpy,
+      getVoices: () => voices,
+      addEventListener: (_: string, f: () => void) => listeners.push(f),
+      removeEventListener: (_: string, f: () => void) => (listeners = listeners.filter((l) => l !== f)),
+    };
+    w.SpeechSynthesisUtterance = FakeUtterance;
+  });
+  afterEach(uninstallSpeech);
+
+  const voiceOf = (call: number) => (speakSpy.mock.calls[call][0] as unknown as { voice?: { name: string } }).voice?.name;
+
+  it("목소리 목록이 아직 없으면 기본 목소리로 먼저 읽지 않고, 목록이 오면 고른 목소리로 읽는다", () => {
+    renderChat();
+    expect(speakSpy).not.toHaveBeenCalled();
+    voices = [SUNHI];
+    act(() => listeners.forEach((f) => f()));
+    expect(speakSpy).toHaveBeenCalledTimes(1);
+    expect(voiceOf(0)).toContain("SunHi");
+    expect((speakSpy.mock.calls[0][0] as FakeUtterance).text).toContain("Saylo예요");
+  });
+
+  it("목록이 끝내 오지 않으면 1.5초 뒤에는 그대로 읽는다", () => {
+    renderChat();
+    wait(1400);
+    expect(speakSpy).not.toHaveBeenCalled();
+    wait(100);
+    expect(speakSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("기다리는 동안 새 답이 오면 이전 말은 버리고 새 말만 읽는다", () => {
+    renderChat();
+    send("배달");
+    wait(700);
+    voices = [SUNHI];
+    act(() => listeners.forEach((f) => f()));
+    expect(speakSpy).toHaveBeenCalledTimes(1);
+    expect((speakSpy.mock.calls[0][0] as FakeUtterance).text).toContain("어떤 음식을 배달해 드릴까요?");
+  });
+
+  it("처음 열 때와 페이지를 떠날 때 읽던 말을 끊는다 (새로고침 뒤 이전 말이 이어지지 않게)", () => {
+    renderChat();
+    expect(cancel).toHaveBeenCalled();
+    cancel.mockClear();
+    window.dispatchEvent(new Event("pagehide"));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("음성 미지원 브라우저", () => {
   it("마이크 버튼이 비활성화되고 이유를 알려 주며, 스피커 버튼은 없다", () => {
     renderChat();

@@ -145,9 +145,38 @@ function soundPreference(): boolean {
   }
 }
 
+// 페이지를 막 열었을 때 브라우저는 목소리 목록을 아직 안 준다 (getVoices() 가 빈 배열이고, 조금 뒤 voiceschanged 로 온다).
+// 그때 바로 읽으면 고른 목소리 없이 브라우저 기본 목소리로 나가므로, 목록이 올 때까지(최대 1.5초) 기다렸다 읽는다.
+// 돌려주는 함수를 부르면 기다리던 것을 취소한다
+const VOICES_WAIT_MS = 1500;
+function whenVoicesReady(run: () => void): () => void {
+  const synth = window.speechSynthesis;
+  if (synth.getVoices().length > 0) {
+    run();
+    return () => {};
+  }
+  let settled = false;
+  const go = () => {
+    if (settled) return;
+    settled = true;
+    synth.removeEventListener?.("voiceschanged", go);
+    window.clearTimeout(timer);
+    run();
+  };
+  synth.addEventListener?.("voiceschanged", go);
+  const timer = window.setTimeout(go, VOICES_WAIT_MS);
+  return () => {
+    settled = true;
+    synth.removeEventListener?.("voiceschanged", go);
+    window.clearTimeout(timer);
+  };
+}
+
 export function useSpeechOutput() {
   const supported = useMemo(() => typeof window !== "undefined" && "speechSynthesis" in window, []);
   const [enabled, setEnabled] = useState(soundPreference);
+  // 목소리 목록을 기다리는 중인 말 (새 말이 오면 이전 것은 버린다)
+  const pendingRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     try {
@@ -155,29 +184,47 @@ export function useSpeechOutput() {
     } catch {
       // 저장이 막힌 브라우저면 이번 방문 동안만 기억한다
     }
-    if (!enabled) window.speechSynthesis?.cancel();
+    if (!enabled) {
+      pendingRef.current();
+      window.speechSynthesis?.cancel();
+    }
   }, [enabled]);
+
+  // 새로고침·페이지 이동 때 읽던 말을 끊는다. Chrome 은 그냥 두면 새 페이지에서도 이전 말을 이어서 읽는다
+  useEffect(() => {
+    if (!supported) return;
+    const synth = window.speechSynthesis;
+    synth.cancel(); // 이전 페이지에서 남은 말
+    const stop = () => synth.cancel();
+    window.addEventListener("pagehide", stop);
+    return () => {
+      window.removeEventListener("pagehide", stop);
+      pendingRef.current();
+      synth.cancel();
+    };
+  }, [supported]);
 
   const speak = useCallback(
     (text: string) => {
       if (!enabled || !supported || !text.trim()) return;
-      const synth = window.speechSynthesis;
-      synth.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "ko-KR";
-      const voice = pickKoreanVoice();
-      if (voice) utterance.voice = voice;
-      // 조금 빠르고 살짝 높게: 같은 목소리라도 더 젊고 밝게 들린다
-      utterance.rate = 1.08;
-      utterance.pitch = 1.15;
-      synth.speak(utterance);
+      pendingRef.current();
+      pendingRef.current = whenVoicesReady(() => {
+        const synth = window.speechSynthesis;
+        synth.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "ko-KR";
+        const voice = pickKoreanVoice();
+        if (voice) utterance.voice = voice;
+        // 조금 빠르고 살짝 높게: 같은 목소리라도 더 젊고 밝게 들린다
+        utterance.rate = 1.08;
+        utterance.pitch = 1.15;
+        synth.speak(utterance);
+      });
     },
     [enabled, supported],
   );
 
   const toggle = useCallback(() => setEnabled((on) => !on), []);
-
-  useEffect(() => () => window.speechSynthesis?.cancel(), []);
 
   return { supported, enabled, toggle, speak };
 }
