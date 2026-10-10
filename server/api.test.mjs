@@ -208,3 +208,55 @@ describe("주문·예약과 권한", () => {
     assert.ok(users.every((u) => !("passwordHash" in u) && !("password_hash" in u)));
   });
 });
+
+describe("손님의 주문 조회·취소와 인기 통계", () => {
+  // 앞 테스트가 간장치킨을 품절로 남겨 두므로 같은 매장의 옛날통닭으로 주문한다
+  const tongdak = { ...chicken, storeId: "h1", item: "옛날통닭" };
+  it("비회원은 영수증 번호로 자기 주문을 보고, 접수 상태일 때만 취소한다", async () => {
+    const o = (await call("POST", "/api/orders", { order: tongdak, payment: "카카오페이" })).body;
+    assert.match(o.receipt, /^[A-Za-z0-9_-]{20,}$/);
+    const found = await call("POST", "/api/orders/lookup", { receipts: [o.receipt, "nope"] });
+    assert.deepEqual(found.body.map((x) => x.id), [o.id]);
+    assert.equal(found.body[0].receipt, o.receipt); // 화면이 주문과 번호를 짝지을 수 있게 보낸 번호를 붙여 준다
+
+    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, { receipt: "wrong" })).status, 403);
+    const cancelled = await call("POST", `/api/orders/${o.id}/cancel`, { receipt: o.receipt });
+    assert.equal(cancelled.body.status, "취소");
+    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, { receipt: o.receipt })).status, 409);
+
+    const started = (await call("POST", "/api/orders", { order: tongdak, payment: "카카오페이" })).body;
+    db.setOrderStatus(started.id, "준비 중");
+    const late = await call("POST", `/api/orders/${started.id}/cancel`, { receipt: started.receipt });
+    assert.equal(late.status, 409);
+    assert.match(late.body.error, /준비를 시작/);
+  });
+
+  it("인기 통계는 취소를 빼고 메뉴 id·식당 id 로 센다", async () => {
+    const before = (await call("GET", "/api/stats/popular")).body;
+    await call("POST", "/api/orders", { order: { ...chicken, storeId: "p1", item: "마르게리따 피자" }, payment: "카카오페이" });
+    await call("POST", "/api/orders", { order: { ...chicken, storeId: "p1", item: "마르게리따 피자" }, payment: "카카오페이" });
+    const c = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "p1", item: "마르게리따 피자" }, payment: "카카오페이" })).body;
+    await call("POST", `/api/orders/${c.id}/cancel`, { receipt: c.receipt });
+    await call("POST", "/api/reservations", { restaurantId: "c2", restaurantName: "하소 만리향", date: "2026-10-12", time: "19:00", people: 2 });
+    const after = (await call("GET", "/api/stats/popular")).body;
+    assert.equal((after.items.d3 ?? 0) - (before.items.d3 ?? 0), 2);
+    assert.equal((after.restaurants.c2 ?? 0) - (before.restaurants.c2 ?? 0), 1);
+  });
+
+  it("예전 DB(영수증 칸 없음)를 열어도 칸을 추가한다", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "saylo-"));
+    const file = join(dir, "old.db");
+    const old = new DatabaseSync(file);
+    old.exec("CREATE TABLE orders (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, status TEXT NOT NULL, customer TEXT NOT NULL, customer_name TEXT NOT NULL, payment TEXT NOT NULL, store_id TEXT NOT NULL, order_json TEXT NOT NULL)");
+    old.close();
+    const migrated = openDb(file);
+    const rec = migrated.addOrder({ customer: "guest", customerName: "비회원", payment: "x", storeId: "h3", order: { item: "간장치킨" }, receipt: "r1" });
+    assert.equal(migrated.orderByReceipt("r1").id, rec.id);
+    migrated.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

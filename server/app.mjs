@@ -10,10 +10,13 @@
 //   GET    /api/orders                 고객: 내 것 / 사장님: 내 매장 / 관리자: 전체
 //   POST   /api/orders                 { order, payment }             로그인 없이도 가능 (비회원)
 //   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자
+//   POST   /api/orders/lookup          { receipts }                   비회원: 주문할 때 받은 영수증 번호로 내 주문 보기
+//   POST   /api/orders/:id/cancel      { receipt? }                   손님 취소 (접수 상태일 때만)
 //   GET    /api/reservations           (주문과 같은 범위)
 //   POST   /api/reservations           { restaurantId, restaurantName, date, time, people }
 //   PATCH  /api/reservations/:id       { status }
 //   GET    /api/stores/settings        누구나 (챗봇이 영업시간·품절을 본다)
+//   GET    /api/stats/popular          누구나: 최근 30일 메뉴별 주문 수·식당별 예약 수 (챗봇 추천 순서)
 //   PATCH  /api/stores/:id/settings    { hours? } 또는 { item: { id, patch: { price?, soldOut? } } }  그 매장 사장님·관리자
 //   GET    /api/owners                 관리자
 //   POST   /api/owners                 { username, password, name?, storeId }   관리자
@@ -130,7 +133,25 @@ export function createApp({ db, verifier, mailer }) {
         ...(o.address ? { address: str(o.address) } : {}),
       };
       const who = user ?? GUEST;
-      return db.addOrder({ customer: who.username, customerName: who.name, payment: str(body.payment, 20) || "기타", storeId: o.storeId, order });
+      const receipt = newToken();
+      const rec = db.addOrder({ customer: who.username, customerName: who.name, payment: str(body.payment, 20) || "기타", storeId: o.storeId, order, receipt });
+      return { ...rec, receipt };
+    }],
+    // 비회원도 영수증 번호로 자기 주문을 본다 (로그인 손님은 GET /api/orders)
+    ["POST", "/api/orders/lookup", ({ body }) => {
+      const receipts = Array.isArray(body.receipts) ? body.receipts.slice(0, 20).map((r) => str(r, 100)) : [];
+      // 보낸 번호를 그대로 붙여 돌려준다 (손님이 이미 가진 번호라 새로 드러나는 것은 없다)
+      return receipts.flatMap((r) => { const rec = db.orderByReceipt(r); return rec ? [{ ...rec, receipt: r }] : []; });
+    }],
+    // 손님이 취소: 주문한 사람(로그인)이거나 영수증 번호가 맞고, 가게가 아직 준비를 시작하지 않았을 때만
+    ["POST", "/api/orders/:id/cancel", ({ params, body, user }) => {
+      const rec = db.orderById(params.id);
+      if (!rec) throw new HttpError(404, "없는 주문이에요.");
+      const mine = (user && user.username === rec.customer) || (body.receipt && body.receipt === db.receiptOf(rec.id));
+      if (!mine) throw forbidden();
+      if (rec.status !== "접수") throw new HttpError(409, rec.status === "취소" ? "이미 취소된 주문이에요." : "가게에서 이미 준비를 시작해서 취소할 수 없어요.");
+      db.setOrderStatus(rec.id, "취소");
+      return db.orderById(rec.id);
     }],
     ["PATCH", "/api/orders/:id", ({ params, body, user }) => {
       if (!user) throw needLogin();
@@ -175,6 +196,17 @@ export function createApp({ db, verifier, mailer }) {
 
     // ---- 매장 설정 ----
     ["GET", "/api/stores/settings", () => db.allStoreSettings()],
+    // 챗봇 추천용: 최근 30일 메뉴별 주문 수(배달 메뉴 id 로)와 식당별 예약 수. 개인 정보 없이 숫자만
+    ["GET", "/api/stats/popular", () => {
+      const { items, restaurants } = db.popularity(Date.now() - 30 * 24 * 60 * 60_000);
+      const byMenuId = {};
+      for (const [key, n] of Object.entries(items)) {
+        const [storeId, name] = key.split("|");
+        const item = findMenuItem(storeId, name);
+        if (item) byMenuId[item.id] = (byMenuId[item.id] ?? 0) + n;
+      }
+      return { items: byMenuId, restaurants };
+    }],
     ["PATCH", "/api/stores/:id/settings", ({ params, body, user }) => {
       if (!user) throw needLogin();
       if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");

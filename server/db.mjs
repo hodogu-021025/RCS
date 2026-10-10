@@ -85,6 +85,9 @@ export function openDb(path) {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  // 나중에 생긴 칸: 비회원이 자기 주문을 조회·취소할 때 쓰는 영수증 번호
+  if (!db.prepare("PRAGMA table_info(orders)").all().some((c) => c.name === "receipt")) db.exec("ALTER TABLE orders ADD COLUMN receipt TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_receipt ON orders(receipt)");
   const q = (sql) => db.prepare(sql);
 
   const stmts = {
@@ -100,8 +103,11 @@ export function openDb(path) {
     deleteSession: q("DELETE FROM sessions WHERE token = ?"),
     sweepSessions: q("DELETE FROM sessions WHERE expires_at <= ?"),
 
-    insertOrder: q("INSERT INTO orders (id, created_at, status, customer, customer_name, payment, store_id, order_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
+    insertOrder: q("INSERT INTO orders (id, created_at, status, customer, customer_name, payment, store_id, order_json, receipt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
     orderById: q("SELECT * FROM orders WHERE id = ?"),
+    orderByReceipt: q("SELECT * FROM orders WHERE receipt = ?"),
+    ordersSince: q("SELECT store_id, order_json, status FROM orders WHERE created_at >= ?"),
+    reservationsSince: q("SELECT restaurant_id, status FROM reservations WHERE created_at >= ?"),
     allOrders: q("SELECT * FROM orders ORDER BY created_at DESC"),
     ordersByStore: q("SELECT * FROM orders WHERE store_id = ? ORDER BY created_at DESC"),
     ordersByCustomer: q("SELECT * FROM orders WHERE customer = ? ORDER BY created_at DESC"),
@@ -146,12 +152,30 @@ export function openDb(path) {
     sweepSessions: () => stmts.sweepSessions.run(Date.now()),
 
     // ---- 주문 ----
-    addOrder({ customer, customerName, payment, storeId, order }) {
+    // receipt: 주문한 사람에게만 주는 번호 (비회원이 나중에 조회·취소할 때)
+    addOrder({ customer, customerName, payment, storeId, order, receipt = null }) {
       const id = newId("o");
-      stmts.insertOrder.run(id, Date.now(), "접수", customer, customerName, payment, storeId, JSON.stringify(order));
+      stmts.insertOrder.run(id, Date.now(), "접수", customer, customerName, payment, storeId, JSON.stringify(order), receipt);
       return toOrder(stmts.orderById.get(id));
     },
     orderById: (id) => (stmts.orderById.get(id) ? toOrder(stmts.orderById.get(id)) : null),
+    orderByReceipt: (receipt) => (stmts.orderByReceipt.get(receipt) ? toOrder(stmts.orderByReceipt.get(receipt)) : null),
+    receiptOf: (id) => stmts.orderById.get(id)?.receipt ?? null,
+    // since 이후 취소되지 않은 주문(메뉴 이름·매장별)과 예약(식당별) 수
+    popularity(since) {
+      const items = {};
+      const restaurants = {};
+      for (const r of stmts.ordersSince.all(since)) {
+        if (r.status === "취소") continue;
+        const key = `${r.store_id}|${JSON.parse(r.order_json).item}`;
+        items[key] = (items[key] ?? 0) + 1;
+      }
+      for (const r of stmts.reservationsSince.all(since)) {
+        if (r.status === "취소") continue;
+        restaurants[r.restaurant_id] = (restaurants[r.restaurant_id] ?? 0) + 1;
+      }
+      return { items, restaurants };
+    },
     listOrders: ({ storeId, customer } = {}) =>
       (storeId ? stmts.ordersByStore.all(storeId) : customer ? stmts.ordersByCustomer.all(customer) : stmts.allOrders.all()).map(toOrder),
     setOrderStatus: (id, status) => stmts.setOrderStatus.run(status, id).changes > 0,
