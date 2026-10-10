@@ -89,38 +89,33 @@ function AllTab({ rows }: { rows: Row[] }) {
         <input className="search" placeholder="메뉴·매장·이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="검색" />
       </div>
       <p className="hint">{shown.length}건</p>
-      <div className="table-wrap">
-        <table className="dash-table">
-          <thead>
-            <tr>
-              <th>시각</th>
-              <th>종류</th>
-              <th>내용</th>
-              <th>매장</th>
-              <th>고객</th>
-              <th>금액</th>
-              <th>상태</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r) => (
-              <tr key={r.id}>
-                <td>{formatDateTime(r.createdAt)}</td>
-                <td>
-                  <span className={"chip kind-" + r.kind}>{KIND_LABEL[r.kind]}</span>
-                </td>
-                <td>{r.what}</td>
-                <td>{r.where}</td>
-                <td>{r.who}</td>
-                <td>{r.amount !== undefined ? won(r.amount) : "-"}</td>
-                <td>
-                  <span className={"status s-" + r.status}>{r.status}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* 휴대폰 폭이라 표 대신 한 건에 카드 한 장 */}
+      <ul className="record-list">
+        {shown.map((r) => (
+          <li key={r.id} className="record">
+            <div className="record-head">
+              <span className={"chip kind-" + r.kind}>{KIND_LABEL[r.kind]}</span>
+              <b>{r.what}</b>
+              {r.amount !== undefined && <span className="price">{won(r.amount)}</span>}
+              <span className={"status s-" + r.status}>{r.status}</span>
+            </div>
+            <dl>
+              <div>
+                <dt>매장</dt>
+                <dd>{r.where}</dd>
+              </div>
+              <div>
+                <dt>고객</dt>
+                <dd>{r.who}</dd>
+              </div>
+              <div>
+                <dt>시각</dt>
+                <dd>{formatDateTime(r.createdAt)}</dd>
+              </div>
+            </dl>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -151,39 +146,38 @@ function StoresTab() {
     <>
       <section className="dash-section">
         <h2>매장과 사장님 계정</h2>
-        <div className="table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>매장</th>
-                <th>영업시간</th>
-                <th>사장님 계정</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {RESTAURANTS.map((r) => {
-                const mine = owners.filter((o) => o.storeId === r.id);
-                return (
-                  <tr key={r.id}>
-                    <td>{r.name}</td>
-                    <td>{withStoreSettings(r).hours}</td>
-                    <td>{mine.length ? mine.map((o) => `${o.username} (${o.name})`).join(", ") : <span className="muted">없음</span>}</td>
-                    <td>
-                      {mine
-                        .filter((o) => !o.builtIn)
-                        .map((o) => (
-                          <button key={o.username} type="button" className="btn small" onClick={() => removeOwner(o.username)}>
-                            {o.username} 삭제
-                          </button>
-                        ))}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ul className="record-list">
+          {RESTAURANTS.map((r) => {
+            const mine = owners.filter((o) => o.storeId === r.id);
+            const removable = mine.filter((o) => !o.builtIn);
+            return (
+              <li key={r.id} className="record">
+                <div className="record-head">
+                  <b>{r.name}</b>
+                </div>
+                <dl>
+                  <div>
+                    <dt>영업시간</dt>
+                    <dd>{withStoreSettings(r).hours}</dd>
+                  </div>
+                  <div>
+                    <dt>사장님</dt>
+                    <dd>{mine.length ? mine.map((o) => `${o.username} (${o.name})`).join(", ") : <span className="muted">없음</span>}</dd>
+                  </div>
+                </dl>
+                {removable.length > 0 && (
+                  <div className="record-actions">
+                    {removable.map((o) => (
+                      <button key={o.username} type="button" className="btn small" onClick={() => removeOwner(o.username)}>
+                        {o.username} 삭제
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       </section>
 
       <section className="dash-section">
@@ -303,55 +297,49 @@ function UsersTab({ rows }: { rows: Row[] }) {
       <section className="dash-section">
         <h2>가입한 고객님 ({members.length})</h2>
         {members.length === 0 && <p className="empty">아직 회원가입한 고객님이 없어요.</p>}
-        {members.length > 0 && (
-          <div className="table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>아이디</th>
-                  <th>이름</th>
-                  <th>이메일</th>
-                  <th>가입 시각</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((m) => (
-                  <tr key={m.username}>
-                    <td>{m.username}</td>
-                    <td>{m.name}</td>
-                    <td>{m.email ?? "-"}</td>
-                    <td>{formatDateTime(m.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <ul className="record-list">
+          {members.map((m) => (
+            <li key={m.username} className="record">
+              <div className="record-head">
+                <b>{m.name}</b>
+                <span className="muted">{m.username}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>이메일</dt>
+                  <dd>{m.email ?? "-"}</dd>
+                </div>
+                <div>
+                  <dt>가입</dt>
+                  <dd>{formatDateTime(m.createdAt)}</dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
       </section>
       <section className="dash-section">
         <h2>이용 내역 ({users.length})</h2>
-        <div className="table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>이름</th>
-                <th>주문·예약</th>
-                <th>결제 합계</th>
-                <th>마지막 이용</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(([name, u]) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td>{u.count}건</td>
-                  <td>{won(u.spent)}</td>
-                  <td>{formatDateTime(u.last)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul className="record-list">
+          {users.map(([name, u]) => (
+            <li key={name} className="record">
+              <div className="record-head">
+                <b>{name}</b>
+                <span className="price">{won(u.spent)}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>주문·예약</dt>
+                  <dd>{u.count}건</dd>
+                </div>
+                <div>
+                  <dt>마지막 이용</dt>
+                  <dd>{formatDateTime(u.last)}</dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
       </section>
     </>
   );

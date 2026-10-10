@@ -14,7 +14,6 @@
 .dash-logo { font-size: 22px; font-weight: 900; letter-spacing: -.03em; color: #fff; text-decoration: none; }
 .dash-logo.dark { color: var(--accent); display: block; margin-bottom: 4px; }
 .dash-title { font-weight: 700; opacity: .9; }
-.dash-user { margin-left: auto; font-size: 13px; opacity: .85; white-space: nowrap; }
 .dash-logout {
   height: 29px; padding: 0 11px; border: 1px solid rgba(255, 255, 255, .3); border-radius: 999px;
   background: rgba(255, 255, 255, .08); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;
@@ -235,4 +234,37 @@
   .dash-head { padding: 0 14px; gap: 10px; }
   .dash-title { display: none; }
   .record dl { grid-template-columns: 1fr; }
+}
+
+/* ---- 휴대폰 폭 앱 화면 (사장님·관리자·내 주문 모두) ----
+   소비자 채팅 화면(.app)과 같은 틀: 휴대폰은 꽉 채우고, 넓은 화면에서는 가운데 둥근 카드로 띄운다.
+   안쪽 내용만 스크롤하고, 탭은 위에 붙어 있다 */
+.dash.dash-mobile {
+  align-self: center; position: relative;
+  max-width: 440px; height: 100dvh; min-height: 0;
+  overflow: hidden;
+}
+@media (min-width: 520px) {
+  .dash.dash-mobile { height: min(100dvh - 48px, 860px); border-radius: 24px; border: 1px solid rgba(15, 23, 42, .06); }
+}
+.dash-mobile .dash-head { padding: 0 14px; gap: 10px; }
+.dash-mobile .dash-title {
+  display: block; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px;
+}
+.dash-mobile .dash-main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 28px; }
+.dash-mobile .dash-tabs {
+  position: sticky; top: 0; z-index: 5;
+  margin: 0 -12px 14px; padding: 0 12px; background: var(--panel);
+}
+.dash-mobile .dash-tabs button { flex: 1; justify-content: center; padding: 0 6px; }
+.dash-mobile .dash-main > .dash-section:first-child { margin-top: 14px; } /* 탭이 없는 화면(내 주문) */
+.dash-mobile .dash-section { padding: 14px; margin-bottom: 14px; border-radius: 16px; }
+.dash-mobile .record dl { grid-template-columns: 1fr; }
+.dash-mobile .tiles { grid-template-columns: 1fr 1fr; }
+.dash-mobile .tile b { font-size: 19px; }
+.dash-mobile .search { max-width: none; flex: 1 1 100%; }
+.dash-mobile .toast {
+  position: absolute; bottom: 20px;
+  max-width: calc(100% - 32px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }

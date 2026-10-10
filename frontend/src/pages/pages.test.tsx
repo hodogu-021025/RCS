@@ -349,17 +349,24 @@ describe("사장님 페이지", () => {
 });
 
 describe("관리자 페이지", () => {
-  it("모든 주문·예약이 한 표에 보이고 종류로 거를 수 있다", () => {
+  it("모든 주문·예약이 한 목록에 카드로 보이고 종류로 거를 수 있다 (휴대폰 폭이라 표는 없다)", () => {
     addOrder(makeOrder(chicken, 1), "토스페이");
     addReservation({ restaurantId: "c1", restaurantName: "장락반점", date: new Date(2026, 9, 10), time: "12:00", people: 2 });
     login("admin", "1234");
     open("#/admin");
 
-    const table = screen.getByRole("table");
-    expect(within(table).getAllByRole("row")).toHaveLength(3); // 머리 + 2
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    const cards = () => document.querySelectorAll(".record-list .record");
+    expect(cards()).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "식당 예약" }));
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(2);
-    expect(screen.getByText("장락반점")).toBeInTheDocument();
+    expect(cards()).toHaveLength(1);
+    expect(within(cards()[0] as HTMLElement).getByText("장락반점")).toBeInTheDocument();
+  });
+
+  it("관리자 화면도 휴대폰 폭 틀로 그린다", () => {
+    login("admin", "1234");
+    open("#/admin");
+    expect(document.querySelector(".dash")).toHaveClass("dash-mobile");
   });
 
   it("사장님 계정을 만들면 목록에 뜨고 그 계정으로 로그인할 수 있다", () => {
