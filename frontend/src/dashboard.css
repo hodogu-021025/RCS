@@ -196,6 +196,12 @@
 
 /* 매장·메뉴 */
 .field-row { display: flex; flex-wrap: wrap; gap: 16px; }
+/* 사장님 영업시간: 두 칸이 가로를 반씩 꽉 채운다. 제목 오른쪽에 짧은 안내 */
+.hours-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.hours-row label { min-width: 0; }
+.hours-row label > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.dash .hours-row input[type="time"] { width: 100%; min-width: 0; }
+.section-head .head-note { font-size: 12.5px; color: var(--muted); }
 .menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .menu-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
 .menu-list li b { flex: 1; min-width: 120px; }

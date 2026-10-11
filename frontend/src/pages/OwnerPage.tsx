@@ -376,8 +376,12 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
   return (
     <>
       <section className="dash-section">
-        <h2>영업시간</h2>
-        <div className="field-row">
+        <div className="section-head">
+          <h2>영업시간</h2>
+          <span className="head-note">예약은 마감 1시간 전까지 받아요.</span>
+        </div>
+        {/* 여는·닫는 시간 칸이 카드 가로를 반씩 나눠 꽉 채운다 */}
+        <div className="hours-row">
           <label>
             <span>여는 시간</span>
             <input type="time" value={open} onChange={(e) => e.target.value && setStoreHours(storeId, `${e.target.value} - ${close}`)} />
@@ -387,7 +391,6 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
             <input type="time" value={close} onChange={(e) => e.target.value && setStoreHours(storeId, `${open} - ${e.target.value}`)} />
           </label>
         </div>
-        <p className="hint">예약은 마감 1시간 전까지 받아요. 바꾸면 소비자 화면에 바로 반영됩니다.</p>
       </section>
 
       <section className="dash-section">
