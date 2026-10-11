@@ -376,7 +376,7 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
   return (
     <>
       <section className="dash-section">
-        <div className="section-head">
+        <div className="section-head hours-head">
           <h2>영업시간</h2>
           <span className="head-note">예약은 마감 1시간 전까지 받아요.</span>
         </div>
