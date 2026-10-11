@@ -42,7 +42,7 @@ function CaptionCards({ cards }: { cards: CaptionCard[] }) {
         <div key={c.key} className={"caption-card" + (c.list ? " list" : "")}>
           <dl>
             {c.rows.map((row, i) => (
-              <div key={row.label} className="caption-row" style={{ "--i": i } as CSSProperties}>
+              <div key={`${i}-${row.label}`} className="caption-row" style={{ "--i": i } as CSSProperties}>
                 <dt>{row.label}</dt>
                 <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
               </div>

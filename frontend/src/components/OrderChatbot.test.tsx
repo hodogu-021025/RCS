@@ -533,8 +533,11 @@ describe("OrderChatbot", () => {
     wait(700);
     expect(document.querySelector(".caption-dots")).not.toBeInTheDocument();
     wait(10_000);
-    // 선택지까지 읽어 주는 문장 그대로 (사용자가 한 말은 자막에 없다)
-    expect(caption()).toBe("오늘은 옛날통닭, 간장치킨, 마르게리따 피자, 국물떡볶이를 추천해요! 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
+    // 메뉴 추천은 이름을 자막에 늘어놓지 않고 짧은 안내만 적은 뒤, 아래 표로 메뉴·가격·가게를 보여 준다 (사용자가 한 말은 자막에 없다)
+    expect(caption()).toBe("오늘은 이런 메뉴 어떠세요? 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
+    const menuRows = [...document.querySelectorAll(".caption-card .caption-row")].map((r) => r.textContent);
+    expect(menuRows[0]).toBe("옛날통닭18,000원 · 장락 옛날통닭");
+    expect(menuRows).toHaveLength(4);
 
     // 표가 있는 답(주문서)은 자막에 제목·질문만 적고, 다 적은 뒤에 그 아래 표를 띄운다
     send("간장치킨 1마리 시켜줘");

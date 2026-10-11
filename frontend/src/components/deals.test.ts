@@ -44,7 +44,13 @@ describe("오늘의 메뉴·할인 안내 문장", () => {
     await refresh(["settings"]);
     const prompt = deliveryPrompt();
     expect(prompt.say).toMatch(/^오늘의 메뉴는 국물떡볶이예요! 간장치킨은 20% 할인 중이에요\. 오늘은 /);
-    expect(prompt.text).toContain("오늘의 메뉴: 국물떡볶이\n할인 중: 간장치킨 20%");
+    // 말풍선 글에는 메뉴 이름을 늘어놓지 않고, 오늘의 메뉴·할인은 표로 보여 준다
+    expect(prompt.text).toBe("오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
+    expect(prompt.dealRows).toEqual([
+      { label: "오늘의 메뉴", value: "국물떡볶이 6,000원", emphasis: true },
+      { label: "20% 할인", value: "간장치킨 20,000원 → 16,000원" },
+    ]);
+    expect(prompt.menu?.map((d) => d.id)).toEqual(["d4", "d2", "d1", "d3"]);
     expect(dealsSay([])).toBe("");
   });
 });

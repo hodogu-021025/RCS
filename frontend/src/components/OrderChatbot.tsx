@@ -27,6 +27,8 @@ import {
   deliveryPrompt,
   popularFirst,
   priceText,
+  dealRows,
+  restaurantById,
   FOOD_PROMPT,
   FOODS,
   MAX_DAYS_AHEAD,
@@ -132,6 +134,8 @@ type Message =
       directLabel?: string;
       noDirect?: boolean;
       say?: string;
+      menu?: DeliveryItem[]; // 추천 메뉴 (채팅창을 끈 동안 표로)
+      dealRows?: OrderRow[]; // 오늘의 메뉴·할인 표 (채팅 말풍선)
       picked?: string;
     }
   | { id: number; role: "bot"; kind: "order"; order: Order }
@@ -160,7 +164,7 @@ const GREETING = "안녕하세요! Saylo예요.\n무엇을 주문해 드릴까�
 
 let nextId = 1;
 const botText = (text: string): NewMessage => ({ role: "bot", kind: "text", text });
-const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect, say }: BotPrompt): NewMessage => ({
+const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect, say, menu, dealRows }: BotPrompt): NewMessage => ({
   role: "bot",
   kind: "text",
   text,
@@ -170,6 +174,8 @@ const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect, 
   directLabel,
   noDirect,
   say,
+  menu,
+  dealRows: dealRows?.length ? dealRows : undefined,
 });
 const DEFAULT_PLACEHOLDER = "메시지를 입력하세요";
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
@@ -285,6 +291,22 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
     }
     case "info":
       return { key, rows: m.card.rows };
+    case "text":
+      if (!m.menu?.length) return null;
+      return {
+        key,
+        list: true,
+        rows: m.menu.map((d) => ({
+          label: d.special ? `오늘의 메뉴 · ${d.name}` : d.name,
+          value: [
+            won(d.price),
+            d.discountPct ? `${d.discountPct}% 할인 (원래 ${won(d.listPrice ?? d.price)})` : "",
+            restaurantById(d.restaurantId).name,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        })),
+      };
     case "restaurants":
       return {
         key,
@@ -301,6 +323,8 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
 
 function captionLine(m: Message): string {
   if (m.role === "user") return "";
+  // 메뉴를 추천하는 말풍선: 이름은 아래 표로 보여 주므로 자막은 짧은 안내만
+  if (m.kind === "text" && m.menu?.length) return m.text.replace(/\n/g, " ");
   switch (m.kind) {
     case "order":
       return `${ORDER_CARD_TITLE} ${ORDER_CARD_QUESTION}`;
@@ -914,7 +938,7 @@ export function OrderChatbot() {
       push(
         botPrompt({
           ...pickDeliveryPrompt(deals),
-          text: `오늘의 메뉴와 할인 중인 메뉴예요!\n${lines.join("\n")}`,
+          text: "오늘의 메뉴와 할인 중인 메뉴예요!\n마음에 드는 걸로 골라 주세요.",
           say: `오늘의 메뉴와 할인 중인 메뉴예요! ${lines.join(". ")}. 마음에 드는 걸로 말씀해 주세요.`,
         }),
       ),
@@ -940,6 +964,8 @@ export function OrderChatbot() {
             { label: "식당 찾기", value: "식당" },
           ],
           placeholder: "예) 간장치킨",
+          menu: items,
+          dealRows: dealRows(items),
         }),
       ),
     );
@@ -1493,13 +1519,32 @@ export function OrderChatbot() {
   function renderBot(m: Exclude<Message, { role: "user" }>) {
     switch (m.kind) {
       case "text": {
-        if (!m.choices) return m.text;
+        const deals = m.dealRows && (
+          <div className="card deal-card">
+            <dl>
+              {m.dealRows.map((row) => (
+                <Fragment key={row.label + row.value}>
+                  <dt>{row.label}</dt>
+                  <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          </div>
+        );
+        if (!m.choices)
+          return (
+            <>
+              {m.text}
+              {deals}
+            </>
+          );
         const active = m.id === activeChoicesId;
         // 날짜·시간 질문은 "직접 입력"이 글자 입력창 대신 달력·시간 고르기를 펼친다
         const manual = m.picker ? pickerOpenFor === m.id : manualInputFor === m.id;
         return (
           <>
             {m.text}
+            {deals}
             <div className="choices">
               {m.choices.map((c) => (
                 <button

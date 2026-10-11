@@ -1,6 +1,7 @@
 // 챗봇이 여러 가지로 말해도 우리 기능(배달·식당 예약·주문 조회)으로 이어 가는지 실제 대화로 확인한다.
 // 시각은 2026-10-10(토) 18:30 저녁으로 고정한다
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { getMenu } from "../data/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderChatbot } from "./OrderChatbot";
 import { server } from "../test/setup";
@@ -338,8 +339,10 @@ describe("할인과 오늘의 메뉴", () => {
     await setDeals();
     await renderChat();
     await say("배달");
-    expect(await find(/오늘의 메뉴: 국물떡볶이/)).toBeTruthy();
-    expect(screen.getAllByText(/할인 중: 간장치킨 20%/).length).toBeGreaterThan(0);
+    // 오늘의 메뉴·할인은 말풍선 안 표로
+    await find(/오늘은 이런 메뉴 어떠세요/);
+    expect(inCard("국물떡볶이 6,000원")).toBe(true);
+    expect(inCard("간장치킨 20,000원 → 16,000원")).toBe(true);
     expect(buttonsIn(/오늘은 이런 메뉴 어떠세요/).slice(0, 2)).toEqual(["오늘의 메뉴 · 국물떡볶이", "간장치킨 · 20% 할인"]);
   });
 
@@ -356,8 +359,8 @@ describe("할인과 오늘의 메뉴", () => {
     await renderChat();
     await say("할인하는 거 있어?");
     expect(await find(/오늘의 메뉴와 할인 중인 메뉴예요/)).toBeTruthy();
-    expect(screen.getAllByText(/간장치킨 16,000원 \(20% 할인, 원래 20,000원\)/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/오늘의 메뉴 국물떡볶이 6,000원/).length).toBeGreaterThan(0);
+    expect(inCard("간장치킨 20,000원 → 16,000원")).toBe(true);
+    expect(inCard("국물떡볶이 6,000원")).toBe(true);
   });
 
   it("할인이나 오늘의 메뉴가 없으면 그렇다고 하고 다른 메뉴를 권한다", async () => {
@@ -385,6 +388,8 @@ describe("사장님이 추가한 메뉴", () => {
   it("판매 중지한 메뉴는 챗봇 추천에서 빠진다", async () => {
     menuDb().updateMenuItem("d1", { active: false }); // 옛날통닭
     await renderChat();
+    // 챗봇이 서버의 메뉴 목록을 받아 온 뒤에 말한다 (처음에는 목록 파일의 메뉴로 시작한다)
+    await waitFor(() => expect(getMenu().find((d) => d.id === "d1")?.active).toBe(false));
     await say("배달");
     const buttons = buttonsIn(/오늘은 이런 메뉴 어떠세요/);
     expect(buttons).not.toContain("옛날통닭");

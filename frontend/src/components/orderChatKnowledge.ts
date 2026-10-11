@@ -457,6 +457,10 @@ export interface BotPrompt {
   // 소리로 읽고 채팅창을 끈 동안 자막으로 보여 줄 문장. 선택지를 "중에서 고르세요"가 아니라 추천하듯 말한다.
   // 없으면 text 와 선택지로 만든다
   say?: string;
+  // 추천하는 배달 메뉴. 채팅창을 끈 동안에는 메뉴 이름을 자막에 늘어놓지 않고 이 목록을 표로 보여 준다
+  menu?: DeliveryItem[];
+  // 오늘의 메뉴·할인 표 (채팅 말풍선에 글줄 대신 작은 표로)
+  dealRows?: OrderRow[];
 }
 
 export const FOOD_PROMPT: BotPrompt = {
@@ -488,19 +492,25 @@ export function dealsSay(menu: DeliveryItem[]): string {
   return parts.length ? `${parts.join(" ")} ` : "";
 }
 
-// 채팅 말풍선용 오늘의 메뉴·할인 안내 한두 줄 (없으면 빈 문자열)
-export function dealsLine(menu: DeliveryItem[]): string {
-  const specials = menu.filter((d) => d.special).map((d) => d.name);
-  const sales = menu.filter((d) => d.discountPct).map((d) => `${d.name} ${d.discountPct}%`);
-  return [specials.length ? `오늘의 메뉴: ${specials.join(", ")}` : "", sales.length ? `할인 중: ${sales.join(", ")}` : ""].filter(Boolean).join("\n");
+// 채팅 말풍선의 오늘의 메뉴·할인 표: "오늘의 메뉴 | 간장치킨 20,000원 → 16,000원 (20% 할인)", "15% 할인 | 국물떡볶이 6,000원 → 5,100원"
+export function dealRows(menu: DeliveryItem[]): OrderRow[] {
+  return menu
+    .filter((d) => d.special || d.discountPct)
+    .map((d) => {
+      const price = d.discountPct ? `${won(d.listPrice ?? d.price)} → ${won(d.price)}` : won(d.price);
+      return d.special
+        ? { label: "오늘의 메뉴", value: `${d.name} ${price}${d.discountPct ? ` (${d.discountPct}% 할인)` : ""}`, emphasis: true }
+        : { label: `${d.discountPct}% 할인`, value: `${d.name} ${price}` };
+    });
 }
 
 // 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 하고, 인기 순서도 바뀐다
 export const deliveryPrompt = (): BotPrompt => {
   const menu = popularFirst(availableDeliveryMenu());
-  const deals = dealsLine(menu);
   return {
-    text: `오늘은 이런 메뉴 어떠세요?\n${deals ? `${deals}\n` : ""}드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`,
+    text: "오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.",
+    menu,
+    dealRows: dealRows(menu),
     say: menu.length
       ? `${dealsSay(menu)}오늘은 ${recommend(menu.map((d) => d.name))} 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
       : "어떤 음식을 배달해 드릴까요?",
@@ -513,8 +523,10 @@ export const deliveryPrompt = (): BotPrompt => {
 export const pickDeliveryPrompt = (items: DeliveryItem[]): BotPrompt => ({
   ...deliveryPrompt(),
   text: "이런 메뉴를 추천해요!\n마음에 드는 걸로 골라 주세요.",
-  say: `${recommend(items.map((d) => d.name))} 마음에 드는 걸로 말씀해 주세요.`,
+  say: `${dealsSay(items)}${recommend(items.map((d) => d.name))} 마음에 드는 걸로 말씀해 주세요.`,
   choices: deliveryChoices(items),
+  menu: items,
+  dealRows: dealRows(items),
 });
 
 // (빠른 메뉴 — 배달·식당 — 는 quickMenu.ts 에 있다)
