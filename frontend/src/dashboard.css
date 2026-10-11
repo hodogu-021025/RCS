@@ -205,7 +205,9 @@
 /* 메뉴 추가 칸: 휴대폰 폭이라 한 줄에 하나, 가격·단위만 나란히 */
 .menu-form label { display: block; margin-bottom: 12px; }
 .menu-form label > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-.menu-form-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
+.menu-form-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 10px; } /* minmax(0,…): 가격 칸이 기본 폭만큼 버텨 단위 칸을 밀어내지 않게 */
+.menu-form-row > label { min-width: 0; }
+.menu-form-row input { min-width: 0; }
 .menu-form .hint { margin: -4px 2px 12px; }
 .price-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .price-field input { width: 110px !important; height: 38px !important; }
