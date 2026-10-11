@@ -78,7 +78,7 @@ export function MyOrdersPage() {
         </ul>
       </section>
 
-      <a className="btn primary" href="#/chat">
+      <a className="btn primary wide" href="#/chat">
         챗봇으로 돌아가기
       </a>
     </DashLayout>
