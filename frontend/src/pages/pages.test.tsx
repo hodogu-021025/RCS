@@ -266,6 +266,35 @@ describe("회원가입", () => {
   });
 });
 
+describe("로고와 첫 화면", () => {
+  it("사장님은 로고가 사장님 화면으로 가고, 챗봇 주소로 들어와도 사장님 화면으로 돌아간다", async () => {
+    server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
+    await loginAs("chickenboss");
+    open("#/owner");
+    expect(await screen.findByRole("link", { name: "내 첫 화면으로" })).toHaveAttribute("href", "#/owner");
+    cleanup();
+    open("#/chat");
+    await waitFor(() => expect(window.location.hash).toBe("#/owner"));
+  });
+
+  it("관리자는 로고가 관리자 화면으로 가고, 챗봇의 계정 버튼도 관리자 화면으로 간다", async () => {
+    server.createAccount({ username: "adminuser", name: "관리자", role: "admin" });
+    await loginAs("adminuser");
+    open("#/admin");
+    expect(await screen.findByRole("link", { name: "내 첫 화면으로" })).toHaveAttribute("href", "#/admin");
+    cleanup();
+    open("#/chat");
+    expect(await screen.findByRole("link", { name: "관리자 · 관리자 화면" })).toHaveAttribute("href", "#/admin");
+  });
+
+  it("고객님은 로고가 챗봇으로 간다", async () => {
+    server.createAccount({ ...KIM });
+    await loginAs(KIM.username);
+    open("#/me");
+    expect(await screen.findByRole("link", { name: "챗봇으로" })).toHaveAttribute("href", "#/chat");
+  });
+});
+
 describe("사장님 페이지", () => {
   const boss = { username: "chickenboss", name: "치킨 사장", role: "owner" as const, storeId: "h3" };
 

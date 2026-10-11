@@ -1675,9 +1675,9 @@ export function OrderChatbot() {
           {/* 계정: 비로그인은 로그인 페이지로, 로그인 상태면 내 주문 페이지로 (해시 주소라 링크만으로 이동한다) */}
           <a
             className={"icon-btn" + (session ? " on" : "")}
-            href={session ? "#/me" : "#/login"}
-            aria-label={session ? `${session.name} · 내 주문` : "로그인"}
-            title={session ? `${session.name} · 내 주문` : "로그인"}
+            href={!session ? "#/login" : session.role === "admin" ? "#/admin" : "#/me"}
+            aria-label={!session ? "로그인" : session.role === "admin" ? `${session.name} · 관리자 화면` : `${session.name} · 내 주문`}
+            title={!session ? "로그인" : session.role === "admin" ? `${session.name} · 관리자 화면` : `${session.name} · 내 주문`}
           >
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
               <circle cx="8" cy="5.5" r="3" {...ICON} />

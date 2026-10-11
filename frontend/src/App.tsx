@@ -2,7 +2,15 @@ import { Suspense } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { OrderChatbot } from "./components/OrderChatbot";
 import { RequireRole } from "./pages/RequireRole";
+import { useSession } from "./auth/auth";
 import { AccountPage, AdminPage, LoginPage, MyOrdersPage, OwnerPage, PrivacyPage, ResetPasswordPage, SignupPage } from "./pages/routes";
+
+// 사장님 계정은 손님용 챗봇 대신 사장님 화면으로 보낸다 (주소를 직접 입력해도)
+function ChatRoute() {
+  const session = useSession();
+  if (session?.role === "owner") return <Navigate to="/owner" replace />;
+  return <OrderChatbot />;
+}
 
 // 화면을 받아 오는 동안 잠깐 보이는 빈 틀 (휴대폰 폭 카드 모양을 유지해 화면이 튀지 않게)
 const PageLoading = () => <div className="dash dash-mobile" aria-busy="true" />;
@@ -15,7 +23,7 @@ export default function App() {
         <Routes>
           {/* 첫 화면은 로그인. 챗봇은 #/chat (로그인 없이도 열 수 있다) */}
           <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="/chat" element={<OrderChatbot />} />
+          <Route path="/chat" element={<ChatRoute />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />

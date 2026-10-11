@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { logout, useSession } from "../auth/auth";
+import { HOME_BY_ROLE, logout, useSession } from "../auth/auth";
 
 interface Props {
   title: string;
@@ -22,7 +22,12 @@ export function DashLayout({ title, children, accountLink = true }: Props) {
   return (
     <div className="dash dash-mobile">
       <header className="dash-head">
-        <a className="dash-logo" href="#/chat" aria-label="소비자 챗봇으로">
+        {/* 로고는 내 첫 화면으로: 고객님은 챗봇, 사장님·관리자는 각자의 화면 (사장님이 챗봇으로 빠져 돌아오지 못하는 일이 없게) */}
+        <a
+          className="dash-logo"
+          href={`#${session ? HOME_BY_ROLE[session.role] : "/chat"}`}
+          aria-label={!session || session.role === "user" ? "챗봇으로" : "내 첫 화면으로"}
+        >
           Saylo
         </a>
         <span className="dash-title">{title}</span>
