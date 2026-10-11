@@ -127,6 +127,7 @@ function withParticle(word: string, afterConsonant: string, afterVowel: string):
 export const withObjectParticle = (word: string) => withParticle(word, "을", "를");
 export const withTopicParticle = (word: string) => withParticle(word, "은", "는");
 export const withSubjectParticle = (word: string) => withParticle(word, "이", "가");
+export const withCopula = (word: string) => withParticle(word, "이에요", "예요"); // 간장치킨이에요 / 피자예요
 
 // ---- 배달 ----
 // 배달 메뉴 (catalog.json 의 deliveryMenu). 매장은 식당 찾기의 식당과 같은 곳이다 (restaurantId).
@@ -476,7 +477,18 @@ export function popularFirst(menu: DeliveryItem[]): DeliveryItem[] {
     .map((x) => x.d);
 }
 
-// 오늘의 메뉴·할인 안내 한두 줄 (없으면 빈 문자열)
+// 소리·자막용 오늘의 메뉴·할인 안내: "오늘의 메뉴는 간장치킨이에요! 간장치킨은 20% 할인 중이에요. " (없으면 빈 문자열)
+export function dealsSay(menu: DeliveryItem[]): string {
+  const specials = menu.filter((d) => d.special).map((d) => d.name);
+  const sales = menu.filter((d) => d.discountPct);
+  const parts: string[] = [];
+  if (specials.length) parts.push(`오늘의 메뉴는 ${withCopula(specials.join(", "))}!`);
+  if (sales.length === 1) parts.push(`${withTopicParticle(sales[0].name)} ${sales[0].discountPct}% 할인 중이에요.`);
+  else if (sales.length > 1) parts.push(`${sales.map((d) => `${d.name} ${d.discountPct}%`).join(", ")} 할인 중이에요.`);
+  return parts.length ? `${parts.join(" ")} ` : "";
+}
+
+// 채팅 말풍선용 오늘의 메뉴·할인 안내 한두 줄 (없으면 빈 문자열)
 export function dealsLine(menu: DeliveryItem[]): string {
   const specials = menu.filter((d) => d.special).map((d) => d.name);
   const sales = menu.filter((d) => d.discountPct).map((d) => `${d.name} ${d.discountPct}%`);
@@ -490,7 +502,7 @@ export const deliveryPrompt = (): BotPrompt => {
   return {
     text: `오늘은 이런 메뉴 어떠세요?\n${deals ? `${deals}\n` : ""}드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`,
     say: menu.length
-      ? `오늘은 ${recommend(menu.map((d) => d.name))} ${deals ? `${deals.replace(/\n/g, ". ")}. ` : ""}드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
+      ? `${dealsSay(menu)}오늘은 ${recommend(menu.map((d) => d.name))} 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
       : "어떤 음식을 배달해 드릴까요?",
     choices: deliveryChoices(menu),
     placeholder: "예) 간장치킨",

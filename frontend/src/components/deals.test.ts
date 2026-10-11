@@ -35,3 +35,16 @@ describe("할인과 오늘의 메뉴 계산", () => {
     expect(specialItemId("s1")).toBeUndefined();
   });
 });
+
+describe("오늘의 메뉴·할인 안내 문장", () => {
+  it("소리·자막은 자연스러운 문장으로, 말풍선은 한눈에 보는 목록으로 말한다", async () => {
+    const { deliveryPrompt, dealsSay } = await import("./orderChatKnowledge");
+    server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { discountPct: 20 } } });
+    server.db.updateStoreSettings("s1", { special: { itemId: "d4", date: todayKST() } });
+    await refresh(["settings"]);
+    const prompt = deliveryPrompt();
+    expect(prompt.say).toMatch(/^오늘의 메뉴는 국물떡볶이예요! 간장치킨은 20% 할인 중이에요\. 오늘은 /);
+    expect(prompt.text).toContain("오늘의 메뉴: 국물떡볶이\n할인 중: 간장치킨 20%");
+    expect(dealsSay([])).toBe("");
+  });
+});
