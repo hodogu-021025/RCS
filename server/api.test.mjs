@@ -537,3 +537,68 @@ describe("사장님 배달 메뉴 관리", () => {
     assert.equal(bulgogi.source, undefined); // 파일에는 출처를 남기지 않는다
   });
 });
+
+describe("할인과 오늘의 메뉴", () => {
+  let owner;
+  before(async () => {
+    owner = await signup({ role: "owner", username: "dealboss01", email: "dealboss@example.com", storeId: "s1", name: "떡볶이 사장" });
+    db.approveOwner("dealboss01");
+  });
+  const order = (qty = 2) => call("POST", "/api/orders", { order: { ...chicken, storeId: "s1", item: "국물떡볶이", qty, price: 1 }, payment: "카드" });
+
+  it("할인율을 넣으면 주문 금액을 서버가 할인 가격으로 다시 계산한다 (10원 단위 반올림)", async () => {
+    const set = await call("PATCH", "/api/stores/s1/settings", { item: { id: "d4", patch: { discountPct: 15 } } }, owner);
+    assert.equal(set.body.items.d4.discountPct, 15);
+    const o = (await order(2)).body; // 6000원 × 0.85 = 5100원
+    assert.equal(o.order.price, 10200);
+    assert.equal(o.order.discountPct, 15);
+    assert.equal(o.order.listPrice, 12000);
+
+    // 사장님이 바꾼 가격에 할인을 적용한다: 6,500원 × 0.85 = 5,525 → 5,530원
+    await call("PATCH", "/api/stores/s1/settings", { item: { id: "d4", patch: { price: 6500 } } }, owner);
+    assert.equal((await order(1)).body.order.price, 5530);
+
+    // 0% 는 할인 끔: 기록에서도 빠진다
+    const off = await call("PATCH", "/api/stores/s1/settings", { item: { id: "d4", patch: { discountPct: 0 } } }, owner);
+    assert.equal(off.body.items.d4.discountPct, undefined);
+    const plain = (await order(1)).body.order;
+    assert.equal(plain.price, 6500);
+    assert.equal(plain.discountPct, undefined);
+  });
+
+  it("할인율은 0~90% 정수만 받는다", async () => {
+    for (const bad of [-5, 91, 12.5, "abc"]) {
+      const r = await call("PATCH", "/api/stores/s1/settings", { item: { id: "d4", patch: { discountPct: bad } } }, owner);
+      assert.equal(r.status, 400, String(bad));
+      assert.match(r.body.error, /할인율은/);
+    }
+  });
+
+  it("오늘의 메뉴는 이 매장에서 판매 중인 메뉴로만 고르고, 서버가 한국 날짜를 붙이며, null 로 해제한다", async () => {
+    const { todayKST } = await import("./stores.mjs");
+    const set = await call("PATCH", "/api/stores/s1/settings", { special: { itemId: "d4" } }, owner);
+    assert.deepEqual(set.body.special, { itemId: "d4", date: todayKST() });
+    assert.deepEqual((await call("GET", "/api/stores/settings")).body.s1.special, { itemId: "d4", date: todayKST() });
+
+    assert.match((await call("PATCH", "/api/stores/s1/settings", { special: { itemId: "d1" } }, owner)).body.error, /이 매장에서 판매 중인/); // 다른 매장 메뉴
+    db.updateMenuItem("d4", { active: false });
+    assert.equal((await call("PATCH", "/api/stores/s1/settings", { special: { itemId: "d4" } }, owner)).status, 400); // 판매 중지한 메뉴
+    db.updateMenuItem("d4", { active: true });
+
+    // 다른 설정을 바꿔도 오늘의 메뉴는 그대로
+    await call("PATCH", "/api/stores/s1/settings", { hours: "10:00 - 21:00" }, owner);
+    assert.equal((await call("GET", "/api/stores/settings")).body.s1.special.itemId, "d4");
+
+    const cleared = await call("PATCH", "/api/stores/s1/settings", { special: null }, owner);
+    assert.equal(cleared.body.special, undefined);
+  });
+
+  it("한국 날짜는 시간대와 상관없이 서울 기준이다", async () => {
+    const { todayKST, discountedPrice } = await import("./stores.mjs");
+    assert.equal(todayKST(new Date("2026-10-11T15:30:00Z")), "2026-10-12"); // 서울은 이미 다음 날 00:30
+    assert.equal(todayKST(new Date("2026-10-11T14:59:00Z")), "2026-10-11");
+    assert.equal(discountedPrice(19000, 0), 19000);
+    assert.equal(discountedPrice(19000, 10), 17100);
+    assert.equal(discountedPrice(18000, 33), 12060);
+  });
+});

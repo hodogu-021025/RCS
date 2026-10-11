@@ -65,6 +65,12 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS menu_store ON menu_items(restaurant_id);
 `;
 
+const toSettings = (r) => ({
+  ...(r.hours ? { hours: r.hours } : {}),
+  items: JSON.parse(r.items_json),
+  ...(r.special_json ? { special: JSON.parse(r.special_json) } : {}),
+});
+
 const toMenuItem = (r) =>
   r && {
     id: r.id,
@@ -131,6 +137,8 @@ export function openDb(path) {
   if (!userCols.includes("privacy_agreed_at")) db.exec("ALTER TABLE users ADD COLUMN privacy_agreed_at INTEGER");
   // 사장님 승인: 스스로 가입한 사장님은 관리자가 승인하기 전까지 매장 정보를 볼 수 없다. 이 칸이 생기기 전 계정은 승인된 것으로 본다
   if (!userCols.includes("approved")) db.exec("ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1");
+  // 오늘의 메뉴 { itemId, date }: 그 날짜(한국 시간)에만 오늘의 메뉴로 보인다
+  if (!db.prepare("PRAGMA table_info(store_settings)").all().some((c) => c.name === "special_json")) db.exec("ALTER TABLE store_settings ADD COLUMN special_json TEXT");
   const q = (sql) => db.prepare(sql);
 
   const stmts = {
@@ -183,7 +191,7 @@ export function openDb(path) {
     allSettings: q("SELECT * FROM store_settings"),
     settingsById: q("SELECT * FROM store_settings WHERE store_id = ?"),
     upsertSettings: q(
-      "INSERT INTO store_settings (store_id, hours, items_json) VALUES (?, ?, ?) ON CONFLICT(store_id) DO UPDATE SET hours = excluded.hours, items_json = excluded.items_json",
+      "INSERT INTO store_settings (store_id, hours, items_json, special_json) VALUES (?, ?, ?, ?) ON CONFLICT(store_id) DO UPDATE SET hours = excluded.hours, items_json = excluded.items_json, special_json = excluded.special_json",
     ),
   };
 
@@ -315,16 +323,22 @@ export function openDb(path) {
     // ---- 매장 설정 (사장님이 바꾼 값만) ----
     allStoreSettings() {
       const out = {};
-      for (const r of stmts.allSettings.all()) out[r.store_id] = { ...(r.hours ? { hours: r.hours } : {}), items: JSON.parse(r.items_json) };
+      for (const r of stmts.allSettings.all()) out[r.store_id] = toSettings(r);
       return out;
     },
+    // patch: { hours?, item?: { id, patch }, special?: { itemId, date } | null }
     updateStoreSettings(storeId, patch) {
       const cur = stmts.settingsById.get(storeId);
       const hours = patch.hours ?? cur?.hours ?? null;
       const items = cur ? JSON.parse(cur.items_json) : {};
-      if (patch.item) items[patch.item.id] = { ...items[patch.item.id], ...patch.item.patch };
-      stmts.upsertSettings.run(storeId, hours, JSON.stringify(items));
-      return { ...(hours ? { hours } : {}), items };
+      if (patch.item) {
+        const next = { ...items[patch.item.id], ...patch.item.patch };
+        if (!next.discountPct) delete next.discountPct; // 할인 0% 는 할인 끔
+        items[patch.item.id] = next;
+      }
+      const special = patch.special !== undefined ? patch.special : cur?.special_json ? JSON.parse(cur.special_json) : null;
+      stmts.upsertSettings.run(storeId, hours, JSON.stringify(items), special ? JSON.stringify(special) : null);
+      return toSettings({ hours, items_json: JSON.stringify(items), special_json: special ? JSON.stringify(special) : null });
     },
 
     close: () => db.close(),

@@ -23,7 +23,8 @@
 //   POST   /api/stores/:id/menu        { name, price, unit, keywords? }  그 매장 사장님(승인)·관리자: 메뉴 추가, 바로 판매
 //   PATCH  /api/stores/:id/menu/:itemId  { active }                 판매 중지(false)·다시 판매(true)
 //   GET    /api/stats/popular          누구나: 최근 30일 메뉴별 주문 수·식당별 예약 수 (챗봇 추천 순서)
-//   PATCH  /api/stores/:id/settings    { hours? } 또는 { item: { id, patch: { price?, soldOut? } } }  그 매장 사장님·관리자
+//   PATCH  /api/stores/:id/settings    { hours? } · { item: { id, patch: { price?, soldOut?, discountPct? } } } · { special: { itemId } | null }  그 매장 사장님·관리자
+//                                      (special: 오늘의 메뉴. 서버가 한국 날짜로 오늘을 붙이고, 그날만 보인다. discountPct 0 은 할인 끔)
 //   GET    /api/owners                 관리자
 //   POST   /api/owners                 { username, password, name?, storeId }   관리자
 //   POST   /api/owners/:username/approve  관리자: 스스로 가입한 사장님 승인 (승인 전에는 매장 주문·예약·설정에 접근할 수 없다)
@@ -34,6 +35,7 @@
 import { SESSION_TTL_MS, hashPassword, newToken, passwordError, usernameError, verifyPassword } from "./auth.mjs";
 import {
   DELIVERY_MENU,
+  DISCOUNT_MAX,
   MAX_PEOPLE,
   MAX_QTY,
   MENU_KEYWORDS_MAX,
@@ -44,8 +46,10 @@ import {
   ORDER_STATUSES,
   RESERVATION_STATUSES,
   STORE_IDS,
+  discountedPrice,
   foodLabelOf,
   restaurantName,
+  todayKST,
 } from "./stores.mjs";
 import { isValidEmail, normalizeEmail } from "./verification.mjs";
 import { ADDRESS_MAX, ADDRESS_MIN, normalizePhone } from "./contact.mjs";
@@ -265,6 +269,10 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (!item) throw bad(db.menuItemByName(o.storeId, str(o.item)) ? `${str(o.item)}은(는) 지금 판매하지 않아요.` : "메뉴를 알 수 없어요.");
       const setting = db.allStoreSettings()[o.storeId]?.items?.[item.id] ?? {};
       if (setting.soldOut) throw bad(`${item.name}은(는) 지금 품절이에요.`);
+      // 1단위 가격: 사장님이 바꾼 가격, 그다음 할인율 (10원 단위로 반올림)
+      const listPrice = setting.price ?? item.price;
+      const discountPct = setting.discountPct ?? 0;
+      const unitPrice = discountedPrice(listPrice, discountPct);
       // 배달지와 연락처는 꼭 받는다 (가게가 배달하고 연락할 수 있게)
       const address = str(o.address, ADDRESS_MAX);
       if (address.length < ADDRESS_MIN) throw bad("배달 받을 주소를 적어 주세요.");
@@ -276,7 +284,9 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
         item: item.name,
         qty,
         unit: item.unit,
-        price: (setting.price ?? item.price) * qty,
+        price: unitPrice * qty,
+        // 할인했으면 할인율과 할인 전 금액도 남긴다 (영수증·사장님 화면에 보여 준다)
+        ...(discountPct > 0 ? { discountPct, listPrice: listPrice * qty } : {}),
         address,
         phone,
       };
@@ -402,8 +412,22 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
           itemPatch.price = price;
         }
         if (p.soldOut !== undefined) itemPatch.soldOut = !!p.soldOut;
+        if (p.discountPct !== undefined) {
+          const pct = Number(p.discountPct);
+          if (!Number.isInteger(pct) || pct < 0 || pct > DISCOUNT_MAX) throw bad(`할인율은 0~${DISCOUNT_MAX}% 사이 정수로 적어 주세요.`);
+          itemPatch.discountPct = pct;
+        }
         if (!id) throw bad("메뉴를 알 수 없어요.");
         patch.item = { id, patch: itemPatch };
+      }
+      // 오늘의 메뉴: 그 매장에서 판매 중인 메뉴만. null 이면 해제
+      if (body.special !== undefined) {
+        if (body.special === null) patch.special = null;
+        else {
+          const item = db.menuItem(str(body.special?.itemId, 40));
+          if (!item || item.restaurantId !== params.id || !item.active) throw bad("오늘의 메뉴는 이 매장에서 판매 중인 메뉴로 골라 주세요.");
+          patch.special = { itemId: item.id, date: todayKST() };
+        }
       }
       return db.updateStoreSettings(params.id, patch);
     }],

@@ -40,7 +40,8 @@ export interface ReservationRecord {
 // 사장님이 바꾼 값만 담는다. 없는 항목은 코드의 기본값(orderChatKnowledge)을 쓴다
 export interface StoreSettings {
   hours?: string; // "11:00 - 21:00"
-  items?: Record<string, { price?: number; soldOut?: boolean }>; // 배달 메뉴 id 별
+  items?: Record<string, { price?: number; soldOut?: boolean; discountPct?: number }>; // 배달 메뉴 id 별 (discountPct: 할인율 %)
+  special?: { itemId: string; date: string }; // 오늘의 메뉴 (date 가 오늘(한국 날짜)일 때만 유효)
 }
 
 export interface Account {
@@ -218,8 +219,14 @@ export async function setStoreHours(storeId: string, hours: string) {
   await refresh(["settings"]);
 }
 
-export async function setMenuItem(storeId: string, itemId: string, itemPatch: { price?: number; soldOut?: boolean }) {
+export async function setMenuItem(storeId: string, itemId: string, itemPatch: { price?: number; soldOut?: boolean; discountPct?: number }) {
   await api("PATCH", `/api/stores/${storeId}/settings`, { item: { id: itemId, patch: itemPatch } });
+  await refresh(["settings"]);
+}
+
+// 오늘의 메뉴 정하기 (null 이면 해제). 서버가 오늘 날짜를 붙인다
+export async function setSpecialMenu(storeId: string, itemId: string | null) {
+  await api("PATCH", `/api/stores/${storeId}/settings`, { special: itemId ? { itemId } : null });
   await refresh(["settings"]);
 }
 

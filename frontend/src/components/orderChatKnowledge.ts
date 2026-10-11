@@ -2,6 +2,7 @@
 // (지금은 화면 확인용 가상 데이터이고, 실제 목록이 오면 그 파일만 바꾼다)
 import catalog from "../../../server/catalog.json";
 import { getMenu, getPopularity, getStoreSettings } from "../data/db";
+import { discountedPrice, specialItemId } from "./deals";
 
 export interface Store {
   name: string;
@@ -17,7 +18,9 @@ export interface Order {
   item: string; // 메뉴 이름
   qty: number;
   unit: string; // 마리·판·인분
-  price: number; // 결제 금액
+  price: number; // 결제 금액 (할인했으면 할인한 금액)
+  discountPct?: number; // 할인율 (%)
+  listPrice?: number; // 할인 전 금액
   address?: string; // 배달지
   phone?: string; // 가게가 연락할 전화번호
   storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
@@ -138,6 +141,10 @@ export interface DeliveryItem {
   // 메뉴 이름 일부나 종류로 말해도 찾는다. 여러 메뉴에 걸리는 말(예: "치킨")이면 그중에서 고르게 한다
   keywords: string[];
   active?: boolean; // false 면 판매 중지 (사장님 화면에서만 보인다)
+  // 아래는 availableDeliveryMenu 가 매장 설정으로 채운다
+  listPrice?: number; // 할인 전 1단위 가격 (할인 중일 때만)
+  discountPct?: number; // 할인율 (%)
+  special?: boolean; // 오늘의 메뉴
   source?: "catalog" | "owner"; // 목록 파일의 메뉴인지, 사장님이 추가한 메뉴인지
 }
 
@@ -149,13 +156,27 @@ export const MAX_QTY = 10;
 
 // 메뉴 이름이 그대로 들어 있으면 그 메뉴 하나, 아니면 키워드에 걸리는 메뉴 전부
 // 사장님이 바꾼 가격을 입히고, 품절 메뉴는 뺀 배달 메뉴
+// 할인 중이면 price 는 할인한 가격이고 listPrice 에 원래 가격, 오늘의 메뉴면 special
 export function availableDeliveryMenu(): DeliveryItem[] {
   return deliveryMenu().flatMap((d) => {
     const s = getStoreSettings(d.restaurantId).items?.[d.id];
     if (s?.soldOut) return [];
-    return [s?.price ? { ...d, price: s.price } : d];
+    const list = s?.price ?? d.price;
+    const pct = s?.discountPct ?? 0;
+    return [
+      {
+        ...d,
+        price: discountedPrice(list, pct),
+        ...(pct > 0 ? { listPrice: list, discountPct: pct } : {}),
+        ...(specialItemId(d.restaurantId) === d.id ? { special: true } : {}),
+      },
+    ];
   });
 }
+
+// 메뉴 가격을 말로: "16,000원 (20% 할인, 원래 20,000원)"
+export const priceText = (d: DeliveryItem) =>
+  d.discountPct ? `${won(d.price)} (${d.discountPct}% 할인, 원래 ${won(d.listPrice ?? d.price)})` : won(d.price);
 
 export function findDeliveryItems(text: string): DeliveryItem[] {
   const typed = squash(text);
@@ -165,7 +186,9 @@ export function findDeliveryItems(text: string): DeliveryItem[] {
   return menu.filter((d) => d.keywords.some((k) => typed.includes(k)));
 }
 
-const deliveryChoices = (items: DeliveryItem[]): Choice[] => items.map((d) => ({ label: d.name, value: d.name }));
+// 버튼 글자: 오늘의 메뉴·할인 중이면 짧게 표시한다 (누르면 메뉴 이름으로 처리)
+const choiceLabel = (d: DeliveryItem) => [d.special ? "오늘의 메뉴" : "", d.name, d.discountPct ? `${d.discountPct}% 할인` : ""].filter(Boolean).join(" · ");
+const deliveryChoices = (items: DeliveryItem[]): Choice[] => items.map((d) => ({ label: choiceLabel(d), value: d.name }));
 
 // "2", "2마리", "두 마리", "둘", "세 명" 같은 수량 표현. 없으면 undefined (범위 확인은 부르는 쪽에서)
 const KOREAN_COUNTS: [string, number][] = [
@@ -192,7 +215,10 @@ export function parseQuantity(text: string): number | undefined {
 // 메뉴를 고른 뒤 수량 질문. 수량은 화면에서 −/+ 카운터 버튼으로 고른다 (1 ~ MAX_QTY)
 export function quantityQuestion(item: DeliveryItem, lead?: string): string {
   const store = restaurantById(item.restaurantId);
-  const info = `${withTopicParticle(item.name)} ${store.name}에서 1${item.unit} ${won(item.price)}이에요.`;
+  const head = item.special ? `오늘의 메뉴 ${item.name}` : item.name;
+  const info = item.discountPct
+    ? `${withTopicParticle(head)} ${store.name}에서 1${item.unit} ${won(item.price)}이에요. (${item.discountPct}% 할인, 원래 ${won(item.listPrice ?? item.price)})`
+    : `${withTopicParticle(head)} ${store.name}에서 1${item.unit} ${won(item.price)}이에요.`;
   return `${lead ?? info}\n몇 ${item.unit} 주문할까요?`;
 }
 
@@ -206,6 +232,7 @@ export function makeOrder(item: DeliveryItem, qty: number, delivery?: { address:
     qty,
     unit: item.unit,
     price: item.price * qty,
+    ...(item.discountPct ? { discountPct: item.discountPct, listPrice: (item.listPrice ?? item.price) * qty } : {}),
     ...(delivery ? { address: delivery.address, phone: delivery.phone } : {}),
   };
 }
@@ -439,18 +466,31 @@ export const FOOD_PROMPT: BotPrompt = {
 };
 
 // 최근 많이 주문된 메뉴부터 (같으면 목록 순서)
+// 오늘의 메뉴 → 할인 중 → 최근 많이 주문된 순 (같으면 목록 순서)
 export function popularFirst(menu: DeliveryItem[]): DeliveryItem[] {
   const counts = getPopularity().items;
-  return menu.map((d, i) => ({ d, i })).sort((a, b) => (counts[b.d.id] ?? 0) - (counts[a.d.id] ?? 0) || a.i - b.i).map((x) => x.d);
+  const rank = (d: DeliveryItem) => (d.special ? 2 : 0) + (d.discountPct ? 1 : 0);
+  return menu
+    .map((d, i) => ({ d, i }))
+    .sort((a, b) => rank(b.d) - rank(a.d) || (counts[b.d.id] ?? 0) - (counts[a.d.id] ?? 0) || a.i - b.i)
+    .map((x) => x.d);
+}
+
+// 오늘의 메뉴·할인 안내 한두 줄 (없으면 빈 문자열)
+export function dealsLine(menu: DeliveryItem[]): string {
+  const specials = menu.filter((d) => d.special).map((d) => d.name);
+  const sales = menu.filter((d) => d.discountPct).map((d) => `${d.name} ${d.discountPct}%`);
+  return [specials.length ? `오늘의 메뉴: ${specials.join(", ")}` : "", sales.length ? `할인 중: ${sales.join(", ")}` : ""].filter(Boolean).join("\n");
 }
 
 // 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 하고, 인기 순서도 바뀐다
 export const deliveryPrompt = (): BotPrompt => {
   const menu = popularFirst(availableDeliveryMenu());
+  const deals = dealsLine(menu);
   return {
-    text: "오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.",
+    text: `오늘은 이런 메뉴 어떠세요?\n${deals ? `${deals}\n` : ""}드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`,
     say: menu.length
-      ? `오늘은 ${recommend(menu.map((d) => d.name))} 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
+      ? `오늘은 ${recommend(menu.map((d) => d.name))} ${deals ? `${deals.replace(/\n/g, ". ")}. ` : ""}드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
       : "어떤 음식을 배달해 드릴까요?",
     choices: deliveryChoices(menu),
     placeholder: "예) 간장치킨",
@@ -514,7 +554,7 @@ export function orderCardRows(order: Order): OrderRow[] {
   return [
     { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
     { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
-    { label: "가격", value: won(order.price), emphasis: true },
+    { label: "가격", value: order.discountPct ? `${won(order.price)} (${order.discountPct}% 할인)` : won(order.price), emphasis: true },
     { label: "배달지", value: order.address ?? "" },
     ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
   ];

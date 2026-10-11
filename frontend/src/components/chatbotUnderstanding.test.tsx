@@ -327,6 +327,46 @@ describe("배달지·연락처", () => {
   });
 });
 
+describe("할인과 오늘의 메뉴", () => {
+  const setDeals = async () => {
+    const { todayKST } = await import("./deals");
+    server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { discountPct: 20 } } });
+    server.db.updateStoreSettings("s1", { special: { itemId: "d4", date: todayKST() } } as never);
+  };
+
+  it("배달 추천에서 오늘의 메뉴가 맨 앞, 할인 메뉴가 그다음이고 버튼에 표시된다", async () => {
+    await setDeals();
+    await renderChat();
+    await say("배달");
+    expect(await find(/오늘의 메뉴: 국물떡볶이/)).toBeTruthy();
+    expect(screen.getAllByText(/할인 중: 간장치킨 20%/).length).toBeGreaterThan(0);
+    expect(buttonsIn(/오늘은 이런 메뉴 어떠세요/).slice(0, 2)).toEqual(["오늘의 메뉴 · 국물떡볶이", "간장치킨 · 20% 할인"]);
+  });
+
+  it("할인 메뉴를 주문하면 할인 가격으로 주문서를 만든다", async () => {
+    await setDeals();
+    await renderChat();
+    await say("간장치킨 2마리");
+    expect(await find(/^간장치킨 2마리$/)).toBeTruthy();
+    expect(inCard("32,000원 (20% 할인)")).toBe(true);
+  });
+
+  it("'할인하는 거 있어?'라고 물으면 오늘의 메뉴와 할인 메뉴를 알려 준다", async () => {
+    await setDeals();
+    await renderChat();
+    await say("할인하는 거 있어?");
+    expect(await find(/오늘의 메뉴와 할인 중인 메뉴예요/)).toBeTruthy();
+    expect(screen.getAllByText(/간장치킨 16,000원 \(20% 할인, 원래 20,000원\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/오늘의 메뉴 국물떡볶이 6,000원/).length).toBeGreaterThan(0);
+  });
+
+  it("할인이나 오늘의 메뉴가 없으면 그렇다고 하고 다른 메뉴를 권한다", async () => {
+    await renderChat();
+    await say("오늘의 메뉴 뭐야?");
+    expect(await find(/지금 진행 중인 할인이나 오늘의 메뉴는 없어요/)).toBeTruthy();
+  });
+});
+
 describe("사장님이 추가한 메뉴", () => {
   type MenuDb = { addMenuItem(i: object): { id: string }; updateMenuItem(id: string, p: object): unknown };
   const menuDb = () => server.db as unknown as MenuDb;

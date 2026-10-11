@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
 import { findRestaurantById, formatDate, won } from "../components/orderChatKnowledge";
+import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
   addMenuItem,
   setMenuActive,
   setMenuItem,
+  setSpecialMenu,
   setOrderStatus,
   setReservationStatus,
   setStoreHours,
@@ -362,10 +364,13 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
   const db = useDb(["settings", "menu"]);
   const [menuError, setMenuError] = useState<string | null>(null);
   // 판매 중지·다시 판매가 실패하면(연결 끊김 등) 이유를 보여 준다
-  const toggle = (itemId: string, active: boolean) => {
+  // 서버에 바꾸라고 보내고, 실패하면(연결 끊김·서버가 거절) 이유를 보여 준다
+  const run = (work: Promise<unknown>) => {
     setMenuError(null);
-    setMenuActive(storeId, itemId, active).catch((err: unknown) => setMenuError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
+    work.catch((err: unknown) => setMenuError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
   };
+  const toggle = (itemId: string, active: boolean) => run(setMenuActive(storeId, itemId, active));
+  const special = specialItemId(storeId);
   // 자정 마감은 데이터에 "24:00"으로 적혀 있지만 시간 입력칸은 "00:00"까지만 받는다 (예약 시간 계산은 둘 다 자정으로 본다)
   const [open, close] = hours.split("-").map((s) => s.trim()).map((t) => (t === "24:00" ? "00:00" : t));
   const mine = db.menu.filter((d) => d.restaurantId === storeId);
@@ -396,12 +401,32 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
       <section className="dash-section">
         <h2>배달 메뉴</h2>
         {items.length === 0 && <p className="empty">이 매장에 등록된 배달 메뉴가 없어요.</p>}
+        {items.length > 0 && (
+          // 오늘의 메뉴: 오늘(한국 시간) 자정까지 챗봇이 가장 먼저 추천한다
+          <label className="special-field">
+            <span>오늘의 메뉴</span>
+            <select aria-label="오늘의 메뉴" value={special ?? ""} onChange={(e) => run(setSpecialMenu(storeId, e.target.value || null))}>
+              <option value="">없음</option>
+              {items.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <small>오늘 자정까지 챗봇이 가장 먼저 추천해요. 내일이 되면 자동으로 풀려요.</small>
+          </label>
+        )}
         <ul className="menu-list">
           {items.map((d) => {
             const s = settings[d.id] ?? {};
+            const pct = s.discountPct ?? 0;
+            const list = s.price ?? d.price;
             return (
               <li key={d.id} className={s.soldOut ? "sold-out" : undefined}>
-                <b>{d.name}</b>
+                <b>
+                  {d.name}
+                  {special === d.id && <span className="badge-special">오늘의 메뉴</span>}
+                </b>
                 <label className="price-field">
                   <input
                     type="number"
@@ -415,6 +440,29 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
                     }}
                   />
                   <span>원 / 1{d.unit}</span>
+                </label>
+                <label className="discount-field">
+                  <input
+                    type="number"
+                    min={0}
+                    max={DISCOUNT_MAX}
+                    step={5}
+                    defaultValue={pct || ""}
+                    placeholder="0"
+                    aria-label={`${d.name} 할인율`}
+                    onBlur={(e) => {
+                      const v = e.target.value === "" ? 0 : Number(e.target.value);
+                      if (v === pct) return;
+                      if (!Number.isInteger(v) || v < 0 || v > DISCOUNT_MAX) {
+                        setMenuError(`할인율은 0~${DISCOUNT_MAX}% 사이 정수로 적어 주세요.`);
+                        e.target.value = pct ? String(pct) : "";
+                        return;
+                      }
+                      run(setMenuItem(storeId, d.id, { discountPct: v }));
+                    }}
+                  />
+                  <span>% 할인</span>
+                  {pct > 0 && <span className="sale-price">→ {won(discountedPrice(list, pct))}</span>}
                 </label>
                 <label className="toggle">
                   <input type="checkbox" checked={!!s.soldOut} onChange={(e) => setMenuItem(storeId, d.id, { soldOut: e.target.checked })} />

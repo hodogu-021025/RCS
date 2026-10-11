@@ -377,6 +377,29 @@ describe("사장님 페이지", () => {
     expect(screen.queryByText(/^판매 중지한 메뉴 \(\d+\)$/)).not.toBeInTheDocument();
   });
 
+  it("매장·메뉴 탭에서 오늘의 메뉴를 고르고 메뉴별 할인율을 정하면 서버에 저장된다", async () => {
+    server.createAccount(boss);
+    await loginAs("chickenboss");
+    open("#/owner");
+    fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
+
+    fill({ "오늘의 메뉴": "d2" });
+    await waitFor(() => expect(server.db.allStoreSettings().h3 as unknown as { special?: { itemId: string } }).toMatchObject({ special: { itemId: "d2" } }));
+    expect(await screen.findByText("오늘의 메뉴", { selector: ".badge-special" })).toBeInTheDocument();
+
+    const pct = screen.getByRole("spinbutton", { name: "간장치킨 할인율" });
+    fireEvent.change(pct, { target: { value: "95" } });
+    fireEvent.blur(pct);
+    expect(await screen.findByRole("alert")).toHaveTextContent("할인율은 0~90%");
+    fireEvent.change(pct, { target: { value: "25" } });
+    fireEvent.blur(pct);
+    await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2 as { discountPct?: number }).toMatchObject({ discountPct: 25 }));
+    expect(await screen.findByText("→ 15,000원")).toBeInTheDocument();
+
+    fill({ "오늘의 메뉴": "" });
+    await waitFor(() => expect((server.db.allStoreSettings().h3 as unknown as { special?: unknown }).special).toBeUndefined());
+  });
+
   it("예약은 방문 완료로 바꿀 수 있고, 자정(24:00)에 닫는 매장은 닫는 시간이 00:00 으로 보인다", async () => {
     server.createAccount({ username: "tongdakboss", name: "옛날통닭 사장님", role: "owner", storeId: "h1" }); // 15:00 - 24:00
     const rsv = server.db.addReservation({ ...GUEST, customer: "guest", customerName: "비회원", restaurantId: "h1", restaurantName: "장락 옛날통닭", date: "2026-10-10", time: "19:00", people: 3 });

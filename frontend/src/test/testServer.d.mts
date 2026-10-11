@@ -15,8 +15,11 @@ export interface TestDb {
   addReservation(rec: { customer: string; customerName: string; restaurantId: string; restaurantName: string; date: string; time: string; people: number }): { id: string };
   orderById(id: string): { status: string } | null;
   reservationById(id: string): { status: string } | null;
-  allStoreSettings(): Record<string, { hours?: string; items: Record<string, { price?: number; soldOut?: boolean }> }>;
-  updateStoreSettings(storeId: string, patch: { hours?: string; item?: { id: string; patch: { price?: number; soldOut?: boolean } } }): object;
+  allStoreSettings(): Record<string, { hours?: string; items: Record<string, { price?: number; soldOut?: boolean; discountPct?: number }>; special?: { itemId: string; date: string } }>;
+  updateStoreSettings(
+    storeId: string,
+    patch: { hours?: string; item?: { id: string; patch: { price?: number; soldOut?: boolean; discountPct?: number } }; special?: { itemId: string; date: string } | null },
+  ): object;
   deleteUser(username: string): boolean;
   findUser(username: string): { username: string; role: string; storeId?: string } | null;
 }

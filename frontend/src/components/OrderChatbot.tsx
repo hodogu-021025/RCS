@@ -25,6 +25,8 @@ import { FALLBACK_PROMPT, QUICK_MENUS, menuIntent, menuReply, quickMenuReply } f
 import {
   DEFAULT_PEOPLE,
   deliveryPrompt,
+  popularFirst,
+  priceText,
   FOOD_PROMPT,
   FOODS,
   MAX_DAYS_AHEAD,
@@ -898,6 +900,27 @@ export function OrderChatbot() {
     botReply(() => push({ role: "bot", kind: "info", card: storeInfoCard(r, new Date()) }, botPrompt({ text: next, choices })));
   }
 
+  // 오늘의 메뉴와 할인 중인 메뉴 ("할인하는 거 있어?", "오늘의 메뉴 뭐야?")
+  function showDeals() {
+    const deals = popularFirst(availableDeliveryMenu()).filter((d) => d.special || d.discountPct);
+    startFresh();
+    setStage("menu");
+    if (deals.length === 0) {
+      botReply(() => push(botPrompt({ ...deliveryPrompt(), text: "지금 진행 중인 할인이나 오늘의 메뉴는 없어요.\n대신 이런 메뉴는 어떠세요?" })));
+      return;
+    }
+    const lines = deals.map((d) => `${d.special ? "오늘의 메뉴 " : ""}${d.name} ${priceText(d)}`);
+    botReply(() =>
+      push(
+        botPrompt({
+          ...pickDeliveryPrompt(deals),
+          text: `오늘의 메뉴와 할인 중인 메뉴예요!\n${lines.join("\n")}`,
+          say: `오늘의 메뉴와 할인 중인 메뉴예요! ${lines.join(". ")}. 마음에 드는 걸로 말씀해 주세요.`,
+        }),
+      ),
+    );
+  }
+
   // 시간대에 어울리고 많이 주문된 메뉴를 추천한다 ("배고파", "뭐 먹지", "메뉴 뭐 있어")
   function showRecommendations() {
     const now = new Date();
@@ -1258,6 +1281,7 @@ export function OrderChatbot() {
       return;
     }
 
+    if (intent === "deals") return showDeals();
     if (intent === "hungry") return showRecommendations();
 
     if (intent === "greeting" || intent === "thanks") {

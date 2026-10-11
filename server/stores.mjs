@@ -19,6 +19,13 @@ export const RESERVATION_STATUSES = new Set(["예약 확정", "방문 완료", "
 export const MAX_PEOPLE = 20;
 export const MAX_QTY = 10;
 
+// ---- 할인·오늘의 메뉴 (화면 frontend/src/components/deals.ts 도 같은 규칙) ----
+export const DISCOUNT_MAX = 90; // 할인율 상한 (%)
+// 할인한 1단위 가격. 10원 단위로 반올림한다
+export const discountedPrice = (price, pct) => (pct > 0 ? Math.round((price * (100 - pct)) / 100 / 10) * 10 : price);
+// 한국 날짜 "YYYY-MM-DD" (오늘의 메뉴는 그날 자정까지만)
+export const todayKST = (now = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
+
 // 메뉴 입력 규칙 (화면 frontend/src/pages/OwnerPage.tsx 도 같은 범위로 미리 검사한다)
 export const MENU_NAME_MAX = 30;
 export const MENU_PRICE_MIN = 100;
