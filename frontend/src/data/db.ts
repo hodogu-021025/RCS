@@ -3,7 +3,11 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../api/client";
 import { getSession } from "../auth/auth";
-import type { Order } from "../components/orderChatKnowledge";
+import catalog from "../../../server/catalog.json";
+import type { DeliveryItem, Order } from "../components/orderChatKnowledge";
+
+// 서버에서 메뉴 목록을 받기 전에 쓰는 처음 목록 (서버도 이 파일로 시작한다)
+const CATALOG_MENU = catalog.deliveryMenu as DeliveryItem[];
 
 export type OrderStatus = "접수" | "준비 중" | "완료" | "취소";
 export type ReservationStatus = "예약 확정" | "방문 완료" | "취소";
@@ -56,6 +60,7 @@ export interface Popularity {
 
 interface Db {
   popular: Popularity;
+  menu: DeliveryItem[]; // 배달 메뉴 전체 (판매 중지는 active: false). 사장님이 추가한 메뉴도 들어 있다
   orders: OrderRecord[];
   reservations: ReservationRecord[];
   storeSettings: Record<string, StoreSettings>;
@@ -65,10 +70,10 @@ interface Db {
 }
 
 // 어떤 것을 받아 올지. settings: 영업시간·품절(누구나), popular: 인기 통계(누구나), records: 주문·예약(로그인한 사람의 범위), accounts: 사장님·고객님 목록(관리자)
-export type DbPart = "settings" | "popular" | "records" | "accounts";
+export type DbPart = "settings" | "popular" | "menu" | "records" | "accounts";
 export const POLL_MS = 5000;
 
-let db: Db = { popular: { items: {}, restaurants: {} }, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false };
+let db: Db = { popular: { items: {}, restaurants: {} }, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false };
 const listeners = new Set<() => void>();
 function patch(next: Partial<Db>) {
   db = { ...db, ...next };
@@ -85,6 +90,7 @@ export async function refresh(parts: DbPart[]) {
   const session = getSession();
   const jobs: Promise<void>[] = [];
   if (parts.includes("settings")) jobs.push(api<Db["storeSettings"]>("GET", "/api/stores/settings").then((storeSettings) => patch({ storeSettings })));
+  if (parts.includes("menu")) jobs.push(api<DeliveryItem[]>("GET", "/api/menu").then((menu) => patch({ menu })));
   if (parts.includes("popular")) jobs.push(api<Popularity>("GET", "/api/stats/popular").then((popular) => patch({ popular })));
   if (parts.includes("records") && session) {
     jobs.push(api<OrderRecord[]>("GET", "/api/orders").then((orders) => patch({ orders, recordsLoaded: true })));
@@ -173,6 +179,21 @@ export async function cancelMyOrder(id: string): Promise<OrderRecord> {
 }
 
 export const getPopularity = (): Popularity => db.popular;
+export const getMenu = (): DeliveryItem[] => db.menu;
+
+// ---- 사장님 배달 메뉴 관리 ----
+// 메뉴 추가: 바로 판매되고 챗봇에 나온다. keywords 는 손님이 부를 다른 이름 (매장 음식 종류 이름은 서버가 넣는다)
+export async function addMenuItem(storeId: string, item: { name: string; price: number; unit: string; keywords: string[] }) {
+  const rec = await api<DeliveryItem>("POST", `/api/stores/${storeId}/menu`, item);
+  await refresh(["menu"]);
+  return rec;
+}
+
+// 판매 중지(false)·다시 판매(true). 지우지 않고 숨긴다 (지난 주문 기록은 그대로)
+export async function setMenuActive(storeId: string, itemId: string, active: boolean) {
+  await api("PATCH", `/api/stores/${storeId}/menu/${itemId}`, { active });
+  await refresh(["menu"]);
+}
 
 export async function setOrderStatus(id: string, status: OrderStatus) {
   await api("PATCH", `/api/orders/${id}`, { status });
@@ -220,6 +241,6 @@ export async function removeOwner(username: string) {
 
 // 테스트용: 들고 있던 값을 비운다
 export function resetDb() {
-  patch({ popular: { items: {}, restaurants: {} }, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false });
+  patch({ popular: { items: {}, restaurants: {} }, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false });
   receiptById.clear();
 }

@@ -392,8 +392,8 @@ export function OrderChatbot() {
   const tts = useSpeechOutput();
   // 로그인한 소비자면 주문·예약 기록에 이름이 남고, 아니면 비회원으로 남는다
   const session = useSession();
-  // 사장님이 바꾼 영업시간·품절과 인기 통계를 서버에서 받아 온다 (메뉴 버튼·추천 순서와 예약 시간에 반영)
-  useDb(["settings", "popular"]);
+  // 사장님이 바꾼 영업시간·품절·메뉴와 인기 통계를 서버에서 받아 온다 (메뉴 버튼·추천 순서와 예약 시간에 반영)
+  useDb(["settings", "popular", "menu"]);
 
   // 로그인한 고객님이 이 브라우저에서 처음 주문하면, 다른 기기에서 했던 지난 주문의 배달지·연락처를 이어서 쓴다
   const knownDelivery = hasDelivery(delivery);

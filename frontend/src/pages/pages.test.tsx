@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { login, logout } from "../auth/auth";
 import { getToken } from "../api/client";
-import { DELIVERY_MENU, makeOrder } from "../components/orderChatKnowledge";
+import { deliveryMenu, makeOrder } from "../components/orderChatKnowledge";
 import { getDb, refresh } from "../data/db";
 import { server, TEST_CODE } from "../test/setup";
 
@@ -37,8 +37,8 @@ function open(path: string) {
   return render(<App />);
 }
 
-const chicken = DELIVERY_MENU.find((d) => d.name === "간장치킨")!;
-const tongdak = DELIVERY_MENU.find((d) => d.name === "옛날통닭")!;
+const chicken = deliveryMenu().find((d) => d.name === "간장치킨")!;
+const tongdak = deliveryMenu().find((d) => d.name === "옛날통닭")!;
 const loginAs = async (username: string) => {
   const r = await login(username, "password1");
   if ("error" in r) throw new Error(r.error);
@@ -347,6 +347,34 @@ describe("사장님 페이지", () => {
     await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2?.price).toBe(23000));
     fireEvent.change(screen.getByLabelText("닫는 시간"), { target: { value: "23:00" } });
     await waitFor(() => expect(server.db.allStoreSettings().h3?.hours).toBe("16:00 - 23:00"));
+  });
+
+  it("매장·메뉴 탭에서 메뉴를 추가하면 바로 판매되고, 판매 중지하면 아래로 내려가 다시 판매할 수 있다", async () => {
+    server.createAccount(boss);
+    await loginAs("chickenboss");
+    open("#/owner");
+    fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
+
+    // 화면에서 먼저 거르는 입력
+    fill({ "메뉴 이름": "양념치킨", "가격 (원)": "50" });
+    await click("메뉴 추가");
+    expect(await screen.findByRole("alert")).toHaveTextContent("가격은 100원부터");
+
+    fill({ "메뉴 이름": "양념치킨", "가격 (원)": "21000", "손님이 부를 다른 이름 (선택, 쉼표로 구분)": "양념, 양념통닭" });
+    await click("메뉴 추가");
+    expect(await screen.findByRole("status")).toHaveTextContent("양념치킨 메뉴를 추가했어요");
+    const added = (server.db as unknown as { listMenu(): { id: string; name: string; price: number; keywords: string[]; active: boolean }[] }).listMenu().find((d) => d.name === "양념치킨")!;
+    expect(added).toMatchObject({ price: 21000, active: true });
+    expect(added.keywords).toEqual(["양념", "양념통닭", "치킨"]);
+    expect(await screen.findByRole("spinbutton", { name: "양념치킨 가격" })).toHaveValue(21000);
+
+    await click("양념치킨 판매 중지");
+    expect(await screen.findByText("판매 중지한 메뉴 (1)")).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "양념치킨 가격" })).not.toBeInTheDocument();
+    await click("양념치킨 다시 판매");
+    expect(await screen.findByRole("spinbutton", { name: "양념치킨 가격" })).toBeInTheDocument();
+    // 목록 제목만 찾는다 (안내 문장에도 "판매 중지한 메뉴"가 들어 있다)
+    expect(screen.queryByText(/^판매 중지한 메뉴 \(\d+\)$/)).not.toBeInTheDocument();
   });
 
   it("예약은 방문 완료로 바꿀 수 있고, 자정(24:00)에 닫는 매장은 닫는 시간이 00:00 으로 보인다", async () => {

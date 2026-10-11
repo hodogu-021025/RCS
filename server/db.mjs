@@ -49,7 +49,33 @@ const SCHEMA = `
     hours      TEXT,
     items_json TEXT NOT NULL DEFAULT '{}'
   );
+  -- 배달 메뉴. 목록 파일(catalog.json)의 메뉴(source=catalog)와 사장님이 추가한 메뉴(source=owner).
+  -- 삭제하지 않고 active=0 (판매 중지)로 숨긴다: 지난 주문 기록이 메뉴 이름을 그대로 가리키게
+  CREATE TABLE IF NOT EXISTS menu_items (
+    id            TEXT PRIMARY KEY,
+    restaurant_id TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    price         INTEGER NOT NULL,
+    unit          TEXT NOT NULL,
+    keywords_json TEXT NOT NULL DEFAULT '[]',
+    active        INTEGER NOT NULL DEFAULT 1,
+    source        TEXT NOT NULL DEFAULT 'catalog',
+    created_at    INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS menu_store ON menu_items(restaurant_id);
 `;
+
+const toMenuItem = (r) =>
+  r && {
+    id: r.id,
+    restaurantId: r.restaurant_id,
+    name: r.name,
+    price: r.price,
+    unit: r.unit,
+    keywords: JSON.parse(r.keywords_json),
+    active: r.active !== 0,
+    source: r.source,
+  };
 
 const newId = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
@@ -118,6 +144,12 @@ export function openDb(path) {
     deleteSessionsOf: q("DELETE FROM sessions WHERE username = ?"),
     privacyConsent: q("SELECT privacy_version, privacy_agreed_at FROM users WHERE username = ?"),
     deleteUser: q("DELETE FROM users WHERE username = ?"),
+    insertMenuIfMissing: q("INSERT OR IGNORE INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', ?)"),
+    insertMenu: q("INSERT INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'owner', ?)"),
+    listMenu: q("SELECT * FROM menu_items ORDER BY rowid"),
+    menuById: q("SELECT * FROM menu_items WHERE id = ?"),
+    menuByName: q("SELECT * FROM menu_items WHERE restaurant_id = ? AND name = ? ORDER BY active DESC, rowid DESC LIMIT 1"),
+    updateMenu: q("UPDATE menu_items SET name = ?, unit = ?, keywords_json = ?, active = ? WHERE id = ?"),
     anonymizeOrders: q("UPDATE orders SET customer = ?, customer_name = ?, receipt = NULL WHERE customer = ?"),
     ordersOf: q("SELECT id, order_json FROM orders WHERE customer = ?"),
     setOrderJson: q("UPDATE orders SET order_json = ? WHERE id = ?"),
@@ -180,6 +212,31 @@ export function openDb(path) {
       return toUser(stmts.userByName.get(username));
     },
     deleteUser: (username) => stmts.deleteUser.run(username).changes > 0,
+
+    // ---- 배달 메뉴 ----
+    // 목록 파일의 메뉴 중 DB 에 없는 것만 넣는다 (이미 있는 메뉴는 사장님이 바꾼 그대로 둔다)
+    seedMenu(items) {
+      const now = Date.now();
+      for (const d of items) {
+        stmts.insertMenuIfMissing.run(d.id, d.restaurantId, d.name, d.price, d.unit, JSON.stringify(d.keywords ?? []), d.active === false ? 0 : 1, now);
+      }
+    },
+    listMenu: () => stmts.listMenu.all().map(toMenuItem),
+    menuItem: (id) => toMenuItem(stmts.menuById.get(id)) ?? null,
+    // 그 매장의 그 이름 메뉴 (같은 이름이 있으면 판매 중인 것, 그다음 최근 것)
+    menuItemByName: (storeId, name) => toMenuItem(stmts.menuByName.get(storeId, name)) ?? null,
+    addMenuItem({ restaurantId, name, price, unit, keywords }) {
+      const id = newId("m");
+      stmts.insertMenu.run(id, restaurantId, name, price, unit, JSON.stringify(keywords), Date.now());
+      return toMenuItem(stmts.menuById.get(id));
+    },
+    updateMenuItem(id, patch) {
+      const cur = toMenuItem(stmts.menuById.get(id));
+      if (!cur) return null;
+      const next = { ...cur, ...patch };
+      stmts.updateMenu.run(next.name, next.unit, JSON.stringify(next.keywords), next.active ? 1 : 0, id);
+      return toMenuItem(stmts.menuById.get(id));
+    },
     // 회원 탈퇴: 계정(과 세션)은 지우고, 법에 따라 보관하는 주문·예약 기록은 누구 것인지 알 수 없게 바꿔 남긴다.
     // WITHDRAWN 은 아이디 규칙(영문·숫자·_)에 맞지 않아 같은 이름으로 새로 가입해 옛 기록을 볼 수 없다
     withdrawUser(username) {

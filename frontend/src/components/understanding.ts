@@ -1,7 +1,7 @@
 // 챗봇이 "모르겠어요" 대신 우리 기능(배달·식당 예약·주문 조회)으로 이어 가게 돕는 말 해석 모음.
 // 외부 AI 없이 규칙과 가게·메뉴 목록(catalog.json)만 쓴다. 가게·메뉴 이름을 코드에 직접 적지 않는다
 import {
-  DELIVERY_MENU,
+  deliveryMenu,
   FOODS,
   MAX_PEOPLE,
   RESTAURANTS,
@@ -202,7 +202,7 @@ function fuzzyTargets(): { hit: FuzzyHit; word: string }[] {
   const add = (hit: FuzzyHit, name: string) => {
     for (const w of new Set([squash(name), ...name.split(/\s+/).map(squash)])) if ([...w].length >= 3) targets.push({ hit, word: w });
   };
-  for (const item of DELIVERY_MENU) add({ kind: "menu", item, name: item.name }, item.name);
+  for (const item of deliveryMenu()) add({ kind: "menu", item, name: item.name }, item.name);
   for (const restaurant of allRestaurants()) add({ kind: "restaurant", restaurant, name: restaurant.name }, restaurant.name);
   return targets;
 }
@@ -232,7 +232,7 @@ export function fuzzyFind(text: string): FuzzyHit | undefined {
 export function soldOutItemNamed(text: string): DeliveryItem | undefined {
   const typed = squash(text);
   const available = new Set(availableDeliveryMenu().map((d) => d.id));
-  return DELIVERY_MENU.find((d) => typed.includes(squash(d.name)) && !available.has(d.id));
+  return deliveryMenu().find((d) => typed.includes(squash(d.name)) && !available.has(d.id));
 }
 
 // 품절 메뉴 대신 권할 메뉴: 키워드가 겹치거나 같은 음식 종류인 것 먼저, 없으면 주문할 수 있는 메뉴 전부

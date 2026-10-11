@@ -462,3 +462,78 @@ describe("점검에서 찾은 서버 문제", () => {
     for (const a of ["8.8.8.8", "172.32.0.1", "::ffff:203.0.113.5", "2001:db8::1", ""]) assert.equal(isPrivateAddress(a), false, a);
   });
 });
+
+describe("사장님 배달 메뉴 관리", () => {
+  let owner;
+  let otherOwner;
+  let pending;
+  before(async () => {
+    owner = await signup({ role: "owner", username: "menuboss01", email: "menuboss@example.com", storeId: "p2", name: "피자 사장" });
+    db.approveOwner("menuboss01");
+    otherOwner = await signup({ role: "owner", username: "menuboss02", email: "menuboss2@example.com", storeId: "m1", name: "고기 사장" });
+    db.approveOwner("menuboss02");
+    pending = await signup({ role: "owner", username: "menuwait01", email: "menuwait@example.com", storeId: "p2", name: "대기" });
+  });
+
+  it("목록 파일의 메뉴가 DB 에 들어가 메뉴 목록으로 나온다", async () => {
+    const menu = (await call("GET", "/api/menu")).body;
+    assert.ok(menu.find((d) => d.id === "d1" && d.name === "옛날통닭" && d.active === true && d.source === "catalog"));
+  });
+
+  it("사장님이 메뉴를 추가하면 바로 판매되고, 매장 음식 종류가 키워드에 들어가며, 주문 금액도 그 가격으로 정해진다", async () => {
+    const added = await call("POST", "/api/stores/p2/menu", { name: "불고기 피자", price: 21000, unit: "판", keywords: ["불고기", "Bulgogi Pizza"] }, owner);
+    assert.equal(added.status, 200, JSON.stringify(added.body));
+    assert.deepEqual(added.body.keywords, ["불고기", "bulgogipizza", "피자"]);
+    assert.equal(added.body.source, "owner");
+    assert.ok((await call("GET", "/api/menu")).body.some((d) => d.id === added.body.id && d.active));
+
+    const order = await call("POST", "/api/orders", { order: { ...chicken, storeId: "p2", item: "불고기 피자", qty: 2, price: 1 }, payment: "카드" });
+    assert.equal(order.status, 200, JSON.stringify(order.body));
+    assert.equal(order.body.order.price, 42000);
+    assert.equal(order.body.order.unit, "판");
+  });
+
+  it("입력 규칙과 권한을 서버가 검사한다", async () => {
+    const add = (body, token = owner) => call("POST", "/api/stores/p2/menu", body, token);
+    assert.match((await add({ name: "", price: 10000, unit: "판" })).body.error, /메뉴 이름/);
+    assert.match((await add({ name: "치즈 피자", price: 50, unit: "판" })).body.error, /가격은/);
+    assert.match((await add({ name: "치즈 피자", price: 10000, unit: "" })).body.error, /단위/);
+    assert.match((await add({ name: "불고기 피자", price: 10000, unit: "판" })).body.error, /이미 판매 중/);
+    assert.equal((await add({ name: "치즈 피자", price: 10000, unit: "판" }, otherOwner)).status, 403); // 다른 매장 사장님
+    assert.match((await add({ name: "치즈 피자", price: 10000, unit: "판" }, pending)).body.error, /관리자 승인/); // 승인 전
+    assert.equal((await add({ name: "치즈 피자", price: 10000, unit: "판" }, null)).status, 401);
+  });
+
+  it("판매 중지하면 주문을 받지 않고 목록에 active: false 로 남으며, 다시 판매할 수 있다", async () => {
+    const item = (await call("GET", "/api/menu")).body.find((d) => d.name === "불고기 피자");
+    const stop = await call("PATCH", `/api/stores/p2/menu/${item.id}`, { active: false }, owner);
+    assert.equal(stop.body.active, false);
+    const refused = await call("POST", "/api/orders", { order: { ...chicken, storeId: "p2", item: "불고기 피자", qty: 1 }, payment: "카드" });
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /지금 판매하지 않아요/);
+    assert.equal((await call("GET", "/api/menu")).body.find((d) => d.id === item.id).active, false);
+
+    assert.equal((await call("PATCH", `/api/stores/m1/menu/${item.id}`, { active: true }, otherOwner)).status, 404); // 다른 매장 메뉴
+    assert.equal((await call("PATCH", `/api/stores/p2/menu/${item.id}`, { active: true }, owner)).body.active, true);
+  });
+
+  it("목록 파일의 메뉴도 판매 중지할 수 있고, 서버를 다시 켜도(목록 다시 채우기) 그대로 유지된다", async () => {
+    assert.equal((await call("PATCH", "/api/stores/h1/menu/d1", { active: false }, null)).status, 401);
+    db.seedMenu([{ id: "d1", restaurantId: "h1", name: "옛날통닭", price: 18000, unit: "마리", keywords: [] }]);
+    db.updateMenuItem("d1", { active: false });
+    db.seedMenu([{ id: "d1", restaurantId: "h1", name: "옛날통닭", price: 18000, unit: "마리", keywords: [] }]); // 이미 있으면 건드리지 않는다
+    assert.equal(db.menuItem("d1").active, false);
+    db.updateMenuItem("d1", { active: true });
+  });
+
+  it("DB 의 지금 목록을 catalog.json 모양으로 내보낸다 (바꾼 가격·추가 메뉴·판매 중지 포함)", async () => {
+    const { catalogWithMenu } = await import("./stores.mjs");
+    db.updateStoreSettings("p2", { item: { id: (await call("GET", "/api/menu")).body.find((d) => d.name === "불고기 피자").id, patch: { price: 23000 } } });
+    const exported = catalogWithMenu(db);
+    assert.ok(exported.restaurants.length > 0 && exported.foods.length > 0);
+    const bulgogi = exported.deliveryMenu.find((d) => d.name === "불고기 피자");
+    assert.equal(bulgogi.price, 23000);
+    assert.equal(bulgogi.active, undefined); // 판매 중이면 적지 않는다
+    assert.equal(bulgogi.source, undefined); // 파일에는 출처를 남기지 않는다
+  });
+});

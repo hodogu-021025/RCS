@@ -154,10 +154,13 @@ deploy/Caddyfile              HTTPS 앞단 설정 (도메인은 .env 의 DOMAIN)
 
 ## 자주 바꾸는 것
 
-- 매장·메뉴·가격, 식당 목록: `orderChatKnowledge.ts`의 배열을 고치면 화면에 바로 반영됩니다.
-- 배달지 기본 주소: `orderChatKnowledge.ts`의 `ADDRESS`
+- 가게·식당 목록과 처음 배달 메뉴: `server/catalog.json` 하나만 고치면 서버와 화면에 같이 반영됩니다.
+- 배달 메뉴 추가·판매 중지: 사장님 화면의 "매장·메뉴" 탭에서 바로 합니다 (추가하면 바로 판매). 서버가 켜질 때 `catalog.json`의 메뉴 중 DB에 없는 것만 채워 넣으므로, 사장님이 바꾼 내용은 그대로 유지됩니다.
+- 서버의 지금 메뉴 목록(사장님이 추가한 메뉴 포함)을 `catalog.json`에 되돌려 쓰기:
+  - 운영 서버: `docker compose -f docker-compose.prod.yml exec -T api node export-catalog.mjs > server/catalog.new.json` 후 확인하고 `server/catalog.json`으로 바꿔 커밋
+  - 로컬 개발: `node server/export-catalog.mjs --out server/catalog.json` (`>` 로 같은 파일에 받으면 파일이 먼저 비워져 목록이 날아갑니다)
+- 배달지: 손님이 첫 주문 때 챗봇에 알려 주고, 그 브라우저에 기억됩니다.
 - 관리자 계정: `.env`의 `ADMIN_USERNAME` / `ADMIN_PASSWORD` (서버에 관리자가 없을 때 처음 한 번 만듦)
-- 식당을 추가할 때: `orderChatKnowledge.ts`의 `RESTAURANTS`와 `server/stores.mjs`의 `STORE_IDS` 둘 다
 - 색·여백: `index.css` 맨 위의 CSS 변수
 
 ## 대화 흐름 요약

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DELIVERY_MENU,
+  deliveryMenu,
   deliveryPrompt,
   RESTAURANTS,
   bookableTimes,
@@ -36,7 +36,7 @@ import {
   won,
 } from "./orderChatKnowledge";
 
-const item = (name: string) => DELIVERY_MENU.find((d) => d.name === name)!;
+const item = (name: string) => deliveryMenu().find((d) => d.name === name)!;
 
 describe("isYes / isNo", () => {
   it("긍정·부정 답을 구분한다", () => {
@@ -59,7 +59,7 @@ describe("isYes / isNo", () => {
 describe("배달 메뉴", () => {
   it("배달·식당 어디에도 황금올리브는 없고, 배달 예시는 다른 메뉴들이다", () => {
     expect(deliveryPrompt().choices?.map((c) => c.label)).toEqual(["옛날통닭", "간장치킨", "마르게리따 피자", "국물떡볶이"]);
-    expect(DELIVERY_MENU.some((d) => d.name.includes("황금올리브"))).toBe(false);
+    expect(deliveryMenu().some((d) => d.name.includes("황금올리브"))).toBe(false);
     expect(RESTAURANTS.some((r) => r.signature.includes("황금올리브") || r.name.includes("BBQ"))).toBe(false);
   });
 

@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { DELIVERY_MENU, findRestaurantById, formatDate, won } from "../components/orderChatKnowledge";
+import { findRestaurantById, formatDate, won } from "../components/orderChatKnowledge";
 import {
+  addMenuItem,
+  setMenuActive,
   setMenuItem,
   setOrderStatus,
   setReservationStatus,
@@ -266,12 +268,109 @@ function ReservationRow({ record: r }: { record: ReservationRecord }) {
   );
 }
 
-// 영업시간과 배달 메뉴(가격·품절). 바꾸면 소비자 챗봇에 바로 반영된다
+// 메뉴 추가 칸에서 고르는 수량 단위
+const UNITS = ["마리", "판", "인분", "개", "그릇", "세트", "잔", "병"];
+const PRICE_MIN = 100;
+const PRICE_MAX = 1_000_000;
+
+// 메뉴 추가: 이름·가격·단위·손님이 부를 다른 이름. 추가하면 바로 판매되고 소비자 챗봇에 나온다
+function AddMenuForm({ storeId }: { storeId: string }) {
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [unit, setUnit] = useState(UNITS[0]);
+  const [aliases, setAliases] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setDone(null);
+    const n = name.trim();
+    const p = Number(price);
+    const invalid = !n
+      ? "메뉴 이름을 적어 주세요."
+      : !Number.isInteger(p) || p < PRICE_MIN || p > PRICE_MAX
+        ? `가격은 ${PRICE_MIN.toLocaleString("ko-KR")}원부터 ${PRICE_MAX.toLocaleString("ko-KR")}원까지 적어 주세요.`
+        : null;
+    if (invalid) return setError(invalid);
+    setBusy(true);
+    try {
+      const keywords = aliases.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
+      await addMenuItem(storeId, { name: n, price: p, unit, keywords });
+      setName("");
+      setPrice("");
+      setAliases("");
+      setError(null);
+      setDone(`${n} 메뉴를 추가했어요. 소비자 챗봇에 바로 보여요.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="dash-section">
+      <h2>메뉴 추가</h2>
+      <form className="menu-form" onSubmit={onSubmit} noValidate>
+        <label>
+          <span>메뉴 이름</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={30} placeholder="예) 양념치킨" />
+        </label>
+        <div className="menu-form-row">
+          <label>
+            <span>가격 (원)</span>
+            <input type="number" inputMode="numeric" min={PRICE_MIN} step={500} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="예) 19000" />
+          </label>
+          <label>
+            <span>단위</span>
+            <select value={unit} onChange={(e) => setUnit(e.target.value)}>
+              {UNITS.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <label>
+          <span>손님이 부를 다른 이름 (선택, 쉼표로 구분)</span>
+          <input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="예) 양념, 양념통닭" />
+        </label>
+        <p className="hint">매장 음식 종류 이름(예: 치킨)은 자동으로 들어가서, 손님이 "치킨"이라고만 말해도 이 메뉴를 추천해요.</p>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        {done && (
+          <p className="form-notice" role="status">
+            {done}
+          </p>
+        )}
+        <button className="btn primary wide" type="submit" disabled={busy}>
+          {busy ? "추가하는 중…" : "메뉴 추가"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+// 영업시간과 배달 메뉴(가격·품절·판매 중지, 메뉴 추가). 바꾸면 소비자 챗봇에 바로 반영된다
 function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
-  const db = useDb();
+  const db = useDb(["settings", "menu"]);
+  const [menuError, setMenuError] = useState<string | null>(null);
+  // 판매 중지·다시 판매가 실패하면(연결 끊김 등) 이유를 보여 준다
+  const toggle = (itemId: string, active: boolean) => {
+    setMenuError(null);
+    setMenuActive(storeId, itemId, active).catch((err: unknown) => setMenuError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
+  };
   // 자정 마감은 데이터에 "24:00"으로 적혀 있지만 시간 입력칸은 "00:00"까지만 받는다 (예약 시간 계산은 둘 다 자정으로 본다)
   const [open, close] = hours.split("-").map((s) => s.trim()).map((t) => (t === "24:00" ? "00:00" : t));
-  const items = DELIVERY_MENU.filter((d) => d.restaurantId === storeId);
+  const mine = db.menu.filter((d) => d.restaurantId === storeId);
+  const items = mine.filter((d) => d.active !== false);
+  const stopped = mine.filter((d) => d.active === false);
   const settings = db.storeSettings[storeId]?.items ?? {};
 
   return (
@@ -318,11 +417,41 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
                   <input type="checkbox" checked={!!s.soldOut} onChange={(e) => setMenuItem(storeId, d.id, { soldOut: e.target.checked })} />
                   품절
                 </label>
+                <button type="button" className="btn small" onClick={() => toggle(d.id, false)} aria-label={`${d.name} 판매 중지`}>
+                  판매 중지
+                </button>
               </li>
             );
           })}
         </ul>
+        <p className="hint">품절은 오늘처럼 잠깐 못 파는 것, 판매 중지는 메뉴에서 내리는 것이에요. 판매 중지한 메뉴는 아래에서 다시 판매할 수 있어요.</p>
+        {menuError && (
+          <p className="form-error" role="alert">
+            {menuError}
+          </p>
+        )}
       </section>
+
+      <AddMenuForm storeId={storeId} />
+
+      {stopped.length > 0 && (
+        <section className="dash-section">
+          <h2>판매 중지한 메뉴 ({stopped.length})</h2>
+          <ul className="menu-list">
+            {stopped.map((d) => (
+              <li key={d.id} className="stopped">
+                <b>{d.name}</b>
+                <span className="muted">
+                  {won(settings[d.id]?.price ?? d.price)} / 1{d.unit}
+                </span>
+                <button type="button" className="btn small" onClick={() => toggle(d.id, true)} aria-label={`${d.name} 다시 판매`}>
+                  다시 판매
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </>
   );
 }

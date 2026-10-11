@@ -327,6 +327,31 @@ describe("배달지·연락처", () => {
   });
 });
 
+describe("사장님이 추가한 메뉴", () => {
+  type MenuDb = { addMenuItem(i: object): { id: string }; updateMenuItem(id: string, p: object): unknown };
+  const menuDb = () => server.db as unknown as MenuDb;
+
+  it("사장님이 추가한 메뉴를 챗봇이 바로 주문받고, '치킨'이라고만 해도 추천한다", async () => {
+    menuDb().addMenuItem({ restaurantId: "h3", name: "양념치킨", price: 21000, unit: "마리", keywords: ["양념", "치킨"] });
+    await renderChat();
+    await say("양념치킨 1마리");
+    expect(await find(/^양념치킨 1마리$/)).toBeTruthy();
+    expect(inCard("21,000원")).toBe(true);
+    await say("취소");
+    await say("치킨 시켜줘");
+    expect(buttonsIn(/이런 메뉴를 추천해요/)).toContain("양념치킨");
+  });
+
+  it("판매 중지한 메뉴는 챗봇 추천에서 빠진다", async () => {
+    menuDb().updateMenuItem("d1", { active: false }); // 옛날통닭
+    await renderChat();
+    await say("배달");
+    const buttons = buttonsIn(/오늘은 이런 메뉴 어떠세요/);
+    expect(buttons).not.toContain("옛날통닭");
+    expect(buttons).toContain("간장치킨");
+  });
+});
+
 describe("점검에서 찾은 문제", () => {
   it("주문 확인에서 수량을 바꿔도 배달지·연락처는 그대로다", async () => {
     await renderChat();

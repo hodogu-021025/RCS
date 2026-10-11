@@ -200,6 +200,13 @@
 .menu-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
 .menu-list li b { flex: 1; min-width: 120px; }
 .menu-list li.sold-out b { color: var(--muted); text-decoration: line-through; }
+.menu-list li.stopped { background: var(--surface); }
+.menu-list li.stopped b { color: var(--muted); }
+/* 메뉴 추가 칸: 휴대폰 폭이라 한 줄에 하나, 가격·단위만 나란히 */
+.menu-form label { display: block; margin-bottom: 12px; }
+.menu-form label > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.menu-form-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
+.menu-form .hint { margin: -4px 2px 12px; }
 .price-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .price-field input { width: 110px !important; height: 38px !important; }
 .toggle { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; cursor: pointer; }

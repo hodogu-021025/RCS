@@ -3,7 +3,7 @@
     "Saylo 가게·메뉴 목록. 화면(frontend)과 서버(server)가 함께 읽는다. 지금 값은 화면 확인용 가상 데이터라 실제 목록이 오면 이 파일만 바꾼다.",
     "foods: 음식 종류. keywords 가 문장에 들어 있으면 그 종류로 본다. meals: 추천할 시간대 (breakfast 6-10시, lunch 11-14시, afternoon 14-17시, dinner 17-21시, late 21시 이후)",
     "restaurants: id 는 바꾸지 않는다 (주문·예약·사장님 계정이 이 id 로 이어진다). food 는 foods 의 key, hours 는 \"HH:MM - HH:MM\" (자정 넘김 가능)",
-    "deliveryMenu: 배달 메뉴. restaurantId 는 restaurants 의 id, unit 은 수량 단위(마리·판·인분 등), keywords 는 메뉴 이름 말고도 알아들을 말"
+    "deliveryMenu: 배달 메뉴. restaurantId 는 restaurants 의 id, unit 은 수량 단위(마리·판·인분 등), keywords 는 메뉴 이름 말고도 알아들을 말. 서버가 켜질 때 DB 로 옮겨 담고(없는 것만), 그 뒤로는 사장님이 사장님 화면에서 메뉴를 추가하거나 판매 중지(active: false)할 수 있다. 서버의 지금 목록은 export-catalog.mjs 로 이 파일 모양으로 내보낸다"
   ],
   "foods": [
     {

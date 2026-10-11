@@ -1,7 +1,7 @@
 // 주문 챗봇의 문장 해석 규칙과 주문서 모델. 가게·메뉴 목록은 서버와 같이 쓰는 server/catalog.json 에서 읽는다
 // (지금은 화면 확인용 가상 데이터이고, 실제 목록이 오면 그 파일만 바꾼다)
 import catalog from "../../../server/catalog.json";
-import { getPopularity, getStoreSettings } from "../data/db";
+import { getMenu, getPopularity, getStoreSettings } from "../data/db";
 
 export interface Store {
   name: string;
@@ -137,16 +137,20 @@ export interface DeliveryItem {
   unit: Unit;
   // 메뉴 이름 일부나 종류로 말해도 찾는다. 여러 메뉴에 걸리는 말(예: "치킨")이면 그중에서 고르게 한다
   keywords: string[];
+  active?: boolean; // false 면 판매 중지 (사장님 화면에서만 보인다)
+  source?: "catalog" | "owner"; // 목록 파일의 메뉴인지, 사장님이 추가한 메뉴인지
 }
 
-export const DELIVERY_MENU: DeliveryItem[] = catalog.deliveryMenu as DeliveryItem[];
+// 판매 중인 배달 메뉴. 서버의 메뉴 목록을 쓰므로 사장님이 추가하거나 판매 중지하면 바로 바뀐다
+// (서버에서 받기 전에는 catalog.json 의 메뉴)
+export const deliveryMenu = (): DeliveryItem[] => getMenu().filter((d) => d.active !== false);
 
 export const MAX_QTY = 10;
 
 // 메뉴 이름이 그대로 들어 있으면 그 메뉴 하나, 아니면 키워드에 걸리는 메뉴 전부
 // 사장님이 바꾼 가격을 입히고, 품절 메뉴는 뺀 배달 메뉴
 export function availableDeliveryMenu(): DeliveryItem[] {
-  return DELIVERY_MENU.flatMap((d) => {
+  return deliveryMenu().flatMap((d) => {
     const s = getStoreSettings(d.restaurantId).items?.[d.id];
     if (s?.soldOut) return [];
     return [s?.price ? { ...d, price: s.price } : d];
@@ -157,7 +161,7 @@ export function findDeliveryItems(text: string): DeliveryItem[] {
   const typed = squash(text);
   const menu = availableDeliveryMenu();
   // 메뉴 이름을 그대로 말했는데 품절이면, 비슷한 다른 메뉴로 바꿔치기하지 않고 못 찾은 것으로 본다
-  if (DELIVERY_MENU.some((d) => typed.includes(squash(d.name)))) return menu.filter((d) => typed.includes(squash(d.name)));
+  if (deliveryMenu().some((d) => typed.includes(squash(d.name)))) return menu.filter((d) => typed.includes(squash(d.name)));
   return menu.filter((d) => d.keywords.some((k) => typed.includes(k)));
 }
 

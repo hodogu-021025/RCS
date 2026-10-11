@@ -19,6 +19,9 @@
 //   POST   /api/reservations           { restaurantId, restaurantName, date, time, people }
 //   PATCH  /api/reservations/:id       { status }
 //   GET    /api/stores/settings        누구나 (챗봇이 영업시간·품절을 본다)
+//   GET    /api/menu                   누구나: 배달 메뉴 전체 (판매 중지는 active: false)
+//   POST   /api/stores/:id/menu        { name, price, unit, keywords? }  그 매장 사장님(승인)·관리자: 메뉴 추가, 바로 판매
+//   PATCH  /api/stores/:id/menu/:itemId  { active }                 판매 중지(false)·다시 판매(true)
 //   GET    /api/stats/popular          누구나: 최근 30일 메뉴별 주문 수·식당별 예약 수 (챗봇 추천 순서)
 //   PATCH  /api/stores/:id/settings    { hours? } 또는 { item: { id, patch: { price?, soldOut? } } }  그 매장 사장님·관리자
 //   GET    /api/owners                 관리자
@@ -29,7 +32,21 @@
 //
 // 로그인 상태는 Authorization: Bearer <token> 헤더로 보낸다. 토큰은 서버 DB 의 sessions 에 있고 30일 뒤 만료된다.
 import { SESSION_TTL_MS, hashPassword, newToken, passwordError, usernameError, verifyPassword } from "./auth.mjs";
-import { MAX_PEOPLE, MAX_QTY, ORDER_STATUSES, RESERVATION_STATUSES, STORE_IDS, findMenuItem, restaurantName } from "./stores.mjs";
+import {
+  DELIVERY_MENU,
+  MAX_PEOPLE,
+  MAX_QTY,
+  MENU_KEYWORDS_MAX,
+  MENU_NAME_MAX,
+  MENU_PRICE_MAX,
+  MENU_PRICE_MIN,
+  MENU_UNIT_MAX,
+  ORDER_STATUSES,
+  RESERVATION_STATUSES,
+  STORE_IDS,
+  foodLabelOf,
+  restaurantName,
+} from "./stores.mjs";
 import { isValidEmail, normalizeEmail } from "./verification.mjs";
 import { ADDRESS_MAX, ADDRESS_MIN, normalizePhone } from "./contact.mjs";
 
@@ -71,6 +88,14 @@ const str = (v, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : 
 // db: openDb() 결과, verifier: createVerifier() 결과, mailer: createMailer() 결과
 // now: 시계 (테스트에서 로그인 제한 시간을 넘길 때)
 export function createApp({ db, verifier, mailer, now = Date.now }) {
+  // 목록 파일의 배달 메뉴 중 DB 에 없는 것을 채워 넣는다 (사장님이 추가·판매 중지한 메뉴는 그대로)
+  db.seedMenu(DELIVERY_MENU);
+  // 판매 중인 그 매장의 그 이름 메뉴
+  const activeMenuItem = (storeId, name) => {
+    const item = db.menuItemByName(storeId, name);
+    return item?.active ? item : null;
+  };
+
   // ---- 권한 ----
   // 주문·예약을 볼 수 있는 범위. 승인 전 사장님은 막는다
   function recordScope(user) {
@@ -236,8 +261,8 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) throw bad("주문 내용이 맞지 않아요.");
       if (!STORE_IDS.has(o.storeId)) throw bad("매장을 알 수 없어요.");
       // 메뉴·단위·금액은 화면이 보낸 값을 믿지 않고 목록(catalog.json)과 사장님 설정(가격·품절)으로 다시 정한다
-      const item = findMenuItem(o.storeId, str(o.item));
-      if (!item) throw bad("메뉴를 알 수 없어요.");
+      const item = activeMenuItem(o.storeId, str(o.item));
+      if (!item) throw bad(db.menuItemByName(o.storeId, str(o.item)) ? `${str(o.item)}은(는) 지금 판매하지 않아요.` : "메뉴를 알 수 없어요.");
       const setting = db.allStoreSettings()[o.storeId]?.items?.[item.id] ?? {};
       if (setting.soldOut) throw bad(`${item.name}은(는) 지금 품절이에요.`);
       // 배달지와 연락처는 꼭 받는다 (가게가 배달하고 연락할 수 있게)
@@ -322,11 +347,42 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       const byMenuId = {};
       for (const [key, n] of Object.entries(items)) {
         const [storeId, name] = key.split("|");
-        const item = findMenuItem(storeId, name);
+        const item = db.menuItemByName(storeId, name);
         if (item) byMenuId[item.id] = (byMenuId[item.id] ?? 0) + n;
       }
       return { items: byMenuId, restaurants };
     }],
+    // ---- 배달 메뉴 ----
+    ["GET", "/api/menu", () => db.listMenu()],
+    // 사장님이 메뉴 추가: 바로 판매된다. 그 매장의 음식 종류 이름("치킨")은 자동으로 키워드에 넣어 챗봇이 찾을 수 있게
+    ["POST", "/api/stores/:id/menu", ({ params, body, user }) => {
+      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      assertManages(user, params.id);
+      const name = str(body.name, MENU_NAME_MAX + 1);
+      if (!name || name.length > MENU_NAME_MAX) throw bad(`메뉴 이름을 1~${MENU_NAME_MAX}자로 적어 주세요.`);
+      if (activeMenuItem(params.id, name)) throw bad("이미 판매 중인 같은 이름의 메뉴가 있어요.");
+      const price = Number(body.price);
+      if (!Number.isInteger(price) || price < MENU_PRICE_MIN || price > MENU_PRICE_MAX) {
+        throw bad(`가격은 ${MENU_PRICE_MIN.toLocaleString("ko-KR")}원부터 ${MENU_PRICE_MAX.toLocaleString("ko-KR")}원까지 적어 주세요.`);
+      }
+      const unit = str(body.unit, MENU_UNIT_MAX + 1);
+      if (!unit || unit.length > MENU_UNIT_MAX) throw bad("단위(마리·판·인분 등)를 골라 주세요.");
+      const given = Array.isArray(body.keywords) ? body.keywords : [];
+      const squash = (s) => String(s).replace(/\s+/g, "").toLowerCase();
+      const keywords = [...new Set([...given.map(squash), squash(foodLabelOf(params.id) ?? "")])].filter((k) => k && k.length <= 15).slice(0, MENU_KEYWORDS_MAX);
+      return db.addMenuItem({ restaurantId: params.id, name, price, unit, keywords });
+    }],
+    // 판매 중지·다시 판매. 지운 것처럼 챗봇과 주문에서 빠지지만, 지난 주문 기록은 그대로 남는다
+    ["PATCH", "/api/stores/:id/menu/:itemId", ({ params, body, user }) => {
+      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      assertManages(user, params.id);
+      const item = db.menuItem(params.itemId);
+      if (!item || item.restaurantId !== params.id) throw new HttpError(404, "없는 메뉴예요.");
+      if (typeof body.active !== "boolean") throw bad("판매 여부(active)를 보내 주세요.");
+      if (body.active && !item.active && activeMenuItem(params.id, item.name)) throw bad("같은 이름의 메뉴가 이미 판매 중이에요.");
+      return db.updateMenuItem(item.id, { active: body.active });
+    }],
+
     ["PATCH", "/api/stores/:id/settings", ({ params, body, user }) => {
       if (!user) throw needLogin();
       if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
