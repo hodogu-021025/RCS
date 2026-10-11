@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { findRestaurantById, formatDate, won } from "../components/orderChatKnowledge";
+import { findRestaurantById, formatDate, orderPriceLabel, won } from "../components/orderChatKnowledge";
+import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
   addMenuItem,
@@ -56,7 +57,7 @@ function NewOrderToast({ record }: { record: OrderRecord }) {
   return (
     <div className="toast" role="status">
       새 주문: {record.order.item} {record.order.qty}
-      {record.order.unit} · {won(record.order.price)}
+      {record.order.unit} · {orderPriceLabel(record.order)}
     </div>
   );
 }
@@ -102,8 +103,10 @@ export function OwnerPage() {
   const [filter, setFilter] = useState<Filter>("all");
   // 페이지를 열 때 이미 있던 주문에는 알리지 않는다: 서버에서 처음 받아 온 뒤의 맨 위 주문을 기억해 두고, 그 뒤에 생긴 것만 알린다
   // (렌더 중에 상태를 맞추는 React 의 파생 상태 방식)
-  const [seenAtOpen, setSeenAtOpen] = useState<string | null | undefined>(undefined);
-  if (db.recordsLoaded && seenAtOpen === undefined) setSeenAtOpen(orders[0]?.id ?? null);
+  // 계정이 바뀌면(같은 기기에서 다른 사장님 로그인) 기준도 다시 잡는다
+  const [seen, setSeen] = useState<{ user: string; id: string | null } | undefined>(undefined);
+  const seenAtOpen = seen?.user === session.username ? seen.id : undefined;
+  if (db.recordsLoaded && seenAtOpen === undefined) setSeen({ user: session.username, id: orders[0]?.id ?? null });
   const latest = orders[0];
   const isNew = seenAtOpen !== undefined && latest && latest.id !== seenAtOpen && latest.status === "접수";
 
@@ -181,7 +184,7 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
           {o.order.item} {o.order.qty}
           {o.order.unit}
         </b>
-        <span className="price">{won(o.order.price)}</span>
+        <span className="price">{orderPriceLabel(o.order)}</span>
         <span className={"status s-" + o.status}>{o.status}</span>
       </div>
       <dl>
@@ -258,7 +261,8 @@ function ReservationRow({ record: r }: { record: ReservationRecord }) {
       </dl>
       {r.status === "예약 확정" && (
         <div className="record-actions">
-          <button type="button" className="btn primary" onClick={() => setReservationStatus(r.id, "방문 완료")}>
+          {/* 방문일이 되기 전에는 방문 완료를 누를 수 없다 (서버도 막는다) */}
+          <button type="button" className="btn primary" disabled={r.date > todayKST()} onClick={() => setReservationStatus(r.id, "방문 완료")}>
             방문 완료
           </button>
           <button type="button" className="btn" onClick={() => setReservationStatus(r.id, "취소")}>
@@ -363,11 +367,12 @@ function AddMenuForm({ storeId }: { storeId: string }) {
 function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
   const db = useDb(["settings", "menu"]);
   const [menuError, setMenuError] = useState<string | null>(null);
-  // 판매 중지·다시 판매가 실패하면(연결 끊김 등) 이유를 보여 준다
-  // 서버에 바꾸라고 보내고, 실패하면(연결 끊김·서버가 거절) 이유를 보여 준다
-  const run = (work: Promise<unknown>) => {
-    setMenuError(null);
-    work.catch((err: unknown) => setMenuError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
+  const [hoursError, setHoursError] = useState<string | null>(null);
+  // 서버에 바꾸라고 보내고, 실패하면(연결 끊김·서버가 거절) 이유를 보여 준다. 영업시간 오류는 영업시간 칸 위에
+  const run = (work: Promise<unknown>, where: "menu" | "hours" = "menu") => {
+    const show = where === "hours" ? setHoursError : setMenuError;
+    show(null);
+    work.catch((err: unknown) => show(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
   };
   const toggle = (itemId: string, active: boolean) => run(setMenuActive(storeId, itemId, active));
   const special = specialItemId(storeId);
@@ -386,14 +391,19 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
           <span className="head-note">예약은 마감 1시간 전까지 받아요.</span>
         </div>
         {/* 여는·닫는 시간 칸이 카드 가로를 반씩 나눠 꽉 채운다 */}
+        {hoursError && (
+          <p className="form-error" role="alert">
+            {hoursError}
+          </p>
+        )}
         <div className="hours-row">
           <label>
             <span>여는 시간</span>
-            <input type="time" value={open} onChange={(e) => e.target.value && setStoreHours(storeId, `${e.target.value} - ${close}`)} />
+            <input type="time" value={open} onChange={(e) => e.target.value && run(setStoreHours(storeId, `${e.target.value} - ${close}`), "hours")} />
           </label>
           <label>
             <span>닫는 시간</span>
-            <input type="time" value={close} onChange={(e) => e.target.value && setStoreHours(storeId, `${open} - ${e.target.value}`)} />
+            <input type="time" value={close} onChange={(e) => e.target.value && run(setStoreHours(storeId, `${open} - ${e.target.value}`), "hours")} />
           </label>
         </div>
       </section>
@@ -429,6 +439,7 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
                 </b>
                 <label className="price-field">
                   <input
+                    key={`${d.id}:${s.price ?? d.price}`} // 서버 값이 바뀌면(저장 실패로 되돌아오거나 다른 기기에서 바꾸면) 칸도 그 값으로
                     type="number"
                     min={0}
                     step={500}
@@ -436,13 +447,14 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
                     aria-label={`${d.name} 가격`}
                     onBlur={(e) => {
                       const v = Number(e.target.value);
-                      if (v > 0 && v !== (s.price ?? d.price)) setMenuItem(storeId, d.id, { price: v });
+                      if (v > 0 && v !== (s.price ?? d.price)) run(setMenuItem(storeId, d.id, { price: v }));
                     }}
                   />
                   <span>원 / 1{d.unit}</span>
                 </label>
                 <label className="discount-field">
                   <input
+                    key={`${d.id}:${pct}`}
                     type="number"
                     min={0}
                     max={DISCOUNT_MAX}
@@ -465,7 +477,7 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
                   {pct > 0 && <span className="sale-price">→ {won(discountedPrice(list, pct))}</span>}
                 </label>
                 <label className="toggle">
-                  <input type="checkbox" checked={!!s.soldOut} onChange={(e) => setMenuItem(storeId, d.id, { soldOut: e.target.checked })} />
+                  <input type="checkbox" checked={!!s.soldOut} onChange={(e) => run(setMenuItem(storeId, d.id, { soldOut: e.target.checked }))} />
                   품절
                 </label>
                 <button type="button" className="btn small" onClick={() => toggle(d.id, false)} aria-label={`${d.name} 판매 중지`}>

@@ -552,6 +552,8 @@ export function findPayment(text: string): PaymentMethod | undefined {
 }
 
 export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
+// 주문 금액 표시. 할인된 주문이면 할인율도 같이 ("32,000원 (20% 할인)")
+export const orderPriceLabel = (order: Order) => (order.discountPct ? `${won(order.price)} (${order.discountPct}% 할인)` : won(order.price));
 
 export function completionCard(order: Order, method: PaymentMethod, now = new Date()): InfoCard {
   const eta = new Date(now.getTime() + 40 * 60_000);
@@ -578,7 +580,7 @@ export function orderCardRows(order: Order): OrderRow[] {
   return [
     { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
     { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
-    { label: "가격", value: order.discountPct ? `${won(order.price)} (${order.discountPct}% 할인)` : won(order.price), emphasis: true },
+    { label: "가격", value: orderPriceLabel(order), emphasis: true },
     { label: "배달지", value: order.address ?? "" },
     ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
   ];

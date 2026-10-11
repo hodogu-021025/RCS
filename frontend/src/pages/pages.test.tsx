@@ -467,7 +467,7 @@ describe("관리자 페이지", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "사용자" }));
     expect(await screen.findByText("kim@example.com")).toBeInTheDocument();
-    expect(screen.getByText("customer01")).toBeInTheDocument();
+    expect(screen.getAllByText("customer01").length).toBeGreaterThan(0);
   });
 });
 
@@ -561,6 +561,78 @@ describe("계정 관리·회원 탈퇴", () => {
     await logout();
     const res = await fetch(server.base + "/api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
     expect((await res.json()).session).toBeNull();
+  });
+});
+
+describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
+  const boss = { username: "chickenboss", name: "치킨 사장", role: "owner" as const, storeId: "h3" };
+  type MenuDb = { addMenuItem(i: object): { id: string }; allStoreSettings(): Record<string, { items: Record<string, { price?: number; soldOut?: boolean }> }> };
+
+  it("사장님이 추가한 메뉴(긴 id)의 가격·품절이 저장되고, 할인된 주문은 금액 옆에 할인율이 보인다", async () => {
+    server.createAccount(boss);
+    const added = (server.db as unknown as MenuDb).addMenuItem({ restaurantId: "h3", name: "마늘치킨", price: 22000, unit: "마리", keywords: [] });
+    seedOrder(GUEST, chicken, 2, "카카오페이");
+    server.db.addOrder({ customer: "guest", customerName: "비회원", payment: "카드", storeId: "h3", order: { ...makeOrder(chicken, 1, TEST_DELIVERY), price: 16000, discountPct: 20, listPrice: 20000 } });
+    await loginAs("chickenboss");
+    open("#/owner");
+    expect(await screen.findByText("16,000원 (20% 할인)")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "매장·메뉴" }));
+    await act(async () => void fireEvent.click(await screen.findByRole("checkbox", { name: "품절", hidden: false }, { timeout: 3000 }).then((el) => el).catch(() => screen.getAllByRole("checkbox", { name: "품절" }).at(-1)!)));
+    const price = await screen.findByRole("spinbutton", { name: "마늘치킨 가격" });
+    fireEvent.change(price, { target: { value: "24000" } });
+    fireEvent.blur(price);
+    await waitFor(() => expect((server.db as unknown as MenuDb).allStoreSettings().h3?.items[added.id]?.price).toBe(24000));
+  });
+
+  it("같은 기기에서 다른 사장님으로 로그인하면 전 계정의 주문이 새 주문 알림 기준이 되지 않는다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    server.createAccount(boss);
+    server.createAccount({ username: "tongdakboss", name: "통닭 사장", role: "owner", storeId: "h1" });
+    seedOrder(GUEST, chicken, 3); // h3 의 주문
+    seedOrder(GUEST, tongdak, 1); // h1 의 오래된 접수 주문
+    await loginAs("chickenboss");
+    open("#/owner");
+    expect(await screen.findByText("간장치킨 3마리")).toBeInTheDocument();
+    await click("로그아웃");
+    await waitFor(() => expect(window.location.hash).toBe("#/login"));
+    cleanup();
+
+    await loginAs("tongdakboss");
+    open("#/owner");
+    expect(await screen.findByText("옛날통닭 1마리")).toBeInTheDocument();
+    act(() => void vi.advanceTimersByTime(5000));
+    await act(async () => void (await Promise.resolve()));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument(); // 열기 전부터 있던 주문이라 알리지 않는다
+  });
+
+  it("아직 오지 않은 날짜의 예약은 방문 완료를 누를 수 없다", async () => {
+    server.createAccount(boss);
+    server.db.addReservation({ customer: "guest", customerName: "비회원", restaurantId: "h3", restaurantName: "청전 치킨공방", date: "2099-01-01", time: "19:00", people: 2 });
+    await loginAs("chickenboss");
+    open("#/owner");
+    expect(await screen.findByRole("button", { name: "방문 완료" })).toBeDisabled();
+  });
+
+  it("관리자 이용 내역은 이름이 아니라 아이디로 묶고, 매장이 사라진 사장님은 따로 보여 준다", async () => {
+    server.createAccount({ username: "adminuser", name: "관리자", role: "admin" });
+    server.createAccount({ username: "kim00001", name: "김소비", email: "a@example.com" });
+    server.createAccount({ username: "kim00002", name: "김소비", email: "b@example.com" });
+    server.createAccount({ username: "lostboss01", name: "사라진 매장 사장", role: "owner", storeId: "zz9" });
+    seedOrder({ username: "kim00001", name: "김소비" }, chicken, 1);
+    seedOrder({ username: "kim00002", name: "김소비" }, chicken, 2);
+    await loginAs("adminuser");
+    open("#/admin");
+    fireEvent.click(await screen.findByRole("tab", { name: "사용자" }));
+    expect(await screen.findByText("이용 내역 (2)")).toBeInTheDocument();
+    // 가입 목록과 이용 내역 양쪽에 아이디가 보인다 (이름이 같은 두 사람이 한 줄로 합쳐지지 않는다)
+    expect(screen.getAllByText("kim00001").length).toBe(2);
+    expect(screen.getAllByText("kim00002").length).toBe(2);
+
+    fireEvent.click(screen.getByRole("tab", { name: /매장·사장님/ }));
+    expect(await screen.findByText("매장을 찾을 수 없는 사장님 (1)")).toBeInTheDocument();
+    await click("lostboss01 삭제");
+    await waitFor(() => expect(server.db.findUser("lostboss01")).toBeNull());
   });
 });
 

@@ -43,8 +43,11 @@ import {
   MENU_PRICE_MAX,
   MENU_PRICE_MIN,
   MENU_UNIT_MAX,
+  ORDER_NEXT,
   ORDER_STATUSES,
+  RESERVATION_NEXT,
   RESERVATION_STATUSES,
+  hoursError,
   STORE_IDS,
   discountedPrice,
   foodLabelOf,
@@ -317,6 +320,7 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (!rec) throw new HttpError(404, "없는 주문이에요.");
       assertManages(user, rec.storeId);
       if (!ORDER_STATUSES.has(body.status)) throw bad("상태 값이 맞지 않아요.");
+      if (!ORDER_NEXT[rec.status].includes(body.status)) throw new HttpError(409, `${rec.status} 상태의 주문은 ${body.status}(으)로 바꿀 수 없어요.`);
       db.setOrderStatus(rec.id, body.status);
       return db.orderById(rec.id);
     }],
@@ -345,6 +349,8 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (!rec) throw new HttpError(404, "없는 예약이에요.");
       assertManages(user, rec.restaurantId);
       if (!RESERVATION_STATUSES.has(body.status)) throw bad("상태 값이 맞지 않아요.");
+      if (!RESERVATION_NEXT[rec.status].includes(body.status)) throw new HttpError(409, `${rec.status} 상태의 예약은 ${body.status}(으)로 바꿀 수 없어요.`);
+      if (body.status === "방문 완료" && rec.date > todayKST()) throw new HttpError(409, "방문일이 되기 전에는 방문 완료로 바꿀 수 없어요.");
       db.setReservationStatus(rec.id, body.status);
       return db.reservationById(rec.id);
     }],
@@ -390,7 +396,10 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (!item || item.restaurantId !== params.id) throw new HttpError(404, "없는 메뉴예요.");
       if (typeof body.active !== "boolean") throw bad("판매 여부(active)를 보내 주세요.");
       if (body.active && !item.active && activeMenuItem(params.id, item.name)) throw bad("같은 이름의 메뉴가 이미 판매 중이에요.");
-      return db.updateMenuItem(item.id, { active: body.active });
+      const updated = db.updateMenuItem(item.id, { active: body.active });
+      // 오늘의 메뉴였던 걸 내리면 오늘의 메뉴도 푼다
+      if (!body.active && db.allStoreSettings()[params.id]?.special?.itemId === item.id) db.updateStoreSettings(params.id, { special: null });
+      return updated;
     }],
 
     ["PATCH", "/api/stores/:id/settings", ({ params, body, user }) => {
@@ -399,11 +408,13 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       assertManages(user, params.id);
       const patch = {};
       if (body.hours !== undefined) {
-        if (!/^\d{2}:\d{2} - \d{2}:\d{2}$/.test(String(body.hours))) throw bad("영업시간 형식이 맞지 않아요.");
+        const err = hoursError(body.hours);
+        if (err) throw bad(err);
         patch.hours = body.hours;
       }
       if (body.item) {
-        const id = str(body.item.id, 10);
+        const id = str(body.item.id, 40);
+        if (db.menuItem(id)?.restaurantId !== params.id) throw bad("메뉴를 알 수 없어요.");
         const p = body.item.patch ?? {};
         const itemPatch = {};
         if (p.price !== undefined) {

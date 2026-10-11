@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { RESTAURANTS, formatDate, withStoreSettings, won } from "../components/orderChatKnowledge";
+import { RESTAURANTS, formatDate, orderPriceLabel, withStoreSettings, won } from "../components/orderChatKnowledge";
 import { addOwner, approveOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
@@ -20,7 +20,9 @@ interface Row {
   what: string;
   where: string;
   who: string;
+  customer: string; // 아이디 (비회원·탈퇴한 회원은 이름과 같다). 이용 내역은 이것으로 묶는다
   amount?: number;
+  amountLabel?: string; // "32,000원 (20% 할인)"
   status: string;
 }
 
@@ -31,7 +33,9 @@ const toRow = (o: OrderRecord): Row => ({
   what: `${o.order.item} ${o.order.qty}${o.order.unit}`,
   where: o.order.store.name,
   who: o.customerName,
+  customer: o.customer,
   amount: o.order.price,
+  amountLabel: orderPriceLabel(o.order),
   status: o.status,
 });
 const rsvToRow = (r: ReservationRecord): Row => ({
@@ -41,6 +45,7 @@ const rsvToRow = (r: ReservationRecord): Row => ({
   what: `${formatDate(new Date(r.date))} ${r.time} · ${r.people}명`,
   where: r.restaurantName,
   who: r.customerName,
+  customer: r.customer,
   status: r.status,
 });
 
@@ -97,7 +102,7 @@ function AllTab({ rows }: { rows: Row[] }) {
             <div className="record-head">
               <span className={"chip kind-" + r.kind}>{KIND_LABEL[r.kind]}</span>
               <b>{r.what}</b>
-              {r.amount !== undefined && <span className="price">{won(r.amount)}</span>}
+              {r.amount !== undefined && <span className="price">{r.amountLabel ?? won(r.amount)}</span>}
               <span className={"status s-" + r.status}>{r.status}</span>
             </div>
             <dl>
@@ -147,6 +152,7 @@ function StoresTab() {
   }
 
   const waiting = owners.filter((o) => o.approved === false);
+  const orphans = owners.filter((o) => !RESTAURANTS.some((r) => r.id === o.storeId));
   const storeName = (id?: string) => RESTAURANTS.find((r) => r.id === id)?.name ?? id;
   const [actionError, setActionError] = useState<string | null>(null);
   // 승인·삭제가 실패하면(서버 거절, 연결 끊김) 이유를 보여 준다
@@ -239,6 +245,31 @@ function StoresTab() {
           })}
         </ul>
       </section>
+
+      {/* 매장 목록(catalog.json)이 바뀌어 지금은 없는 매장에 묶인 사장님: 그대로 두면 보이지도 지워지지도 않으므로 따로 보여 준다 */}
+      {orphans.length > 0 && (
+        <section className="dash-section">
+          <h2>매장을 찾을 수 없는 사장님 ({orphans.length})</h2>
+          <p className="hint">이 계정들이 가리키는 매장이 지금 매장 목록에 없어요. 매장 목록을 다시 확인하거나 계정을 지워 주세요.</p>
+          <ul className="record-list">
+            {orphans.map((o) => (
+              <li key={o.username} className="record">
+                <div className="record-head">
+                  <b>
+                    {o.username} ({o.name})
+                  </b>
+                  <span className="muted">매장 id {o.storeId ?? "-"}</span>
+                </div>
+                <div className="record-actions">
+                  <button type="button" className="btn small" onClick={() => run(removeOwner(o.username))}>
+                    {o.username} 삭제
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="dash-section">
         <h2>사장님 계정 만들기</h2>
@@ -345,10 +376,11 @@ function Bars({ data }: { data: { label: string; value: number }[] }) {
 }
 
 function UsersTab({ rows }: { rows: Row[] }) {
-  const byUser = new Map<string, { count: number; spent: number; last: number }>();
+  // 아이디로 묶는다 (이름이 같은 다른 손님이 한 줄로 합쳐지지 않게). 비회원·탈퇴한 회원은 아이디가 곧 이름이다
+  const byUser = new Map<string, { name: string; count: number; spent: number; last: number }>();
   for (const r of rows) {
-    const cur = byUser.get(r.who) ?? { count: 0, spent: 0, last: 0 };
-    byUser.set(r.who, { count: cur.count + 1, spent: cur.spent + (r.status !== "취소" ? (r.amount ?? 0) : 0), last: Math.max(cur.last, r.createdAt) });
+    const cur = byUser.get(r.customer) ?? { name: r.who, count: 0, spent: 0, last: 0 };
+    byUser.set(r.customer, { name: r.who, count: cur.count + 1, spent: cur.spent + (r.status !== "취소" ? (r.amount ?? 0) : 0), last: Math.max(cur.last, r.createdAt) });
   }
   const users = [...byUser.entries()].sort((a, b) => b[1].last - a[1].last);
   const members = [...useDb(["accounts"]).users].sort((a, b) => b.createdAt - a.createdAt);
@@ -381,10 +413,11 @@ function UsersTab({ rows }: { rows: Row[] }) {
       <section className="dash-section">
         <h2>이용 내역 ({users.length})</h2>
         <ul className="record-list">
-          {users.map(([name, u]) => (
-            <li key={name} className="record">
+          {users.map(([customer, u]) => (
+            <li key={customer} className="record">
               <div className="record-head">
-                <b>{name}</b>
+                <b>{u.name}</b>
+                {customer !== u.name && <span className="muted">{customer}</span>}
                 <span className="price">{won(u.spent)}</span>
               </div>
               <dl>

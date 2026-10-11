@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { HOME_BY_ROLE, login, takeLoginNotice, useSession } from "../auth/auth";
+import { clearRecords } from "../data/db";
 import { PasswordField } from "./PasswordField";
 
 // 아이디·비밀번호로 로그인하고 역할에 맞는 페이지로 보낸다. 계정이 없으면 회원가입으로
@@ -25,6 +26,7 @@ export function LoginPage() {
       setError(result.error);
       return;
     }
+    clearRecords(); // 전 계정이 받아 둔 기록을 비우고 새로 받는다
     navigate(HOME_BY_ROLE[result.session.role], { replace: true });
   }
 

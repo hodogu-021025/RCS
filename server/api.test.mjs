@@ -171,7 +171,8 @@ describe("주문·예약과 권한", () => {
   });
 
   it("예약도 같은 규칙이다", async () => {
-    const r = await call("POST", "/api/reservations", { restaurantId: "h3", restaurantName: "청전 치킨공방", date: "2026-10-12", time: "19:00", people: 3 }, customer);
+    // 방문 완료는 방문일부터 할 수 있으므로 이미 지난 날짜로 만든다
+    const r = await call("POST", "/api/reservations", { restaurantId: "h3", restaurantName: "청전 치킨공방", date: "2026-10-01", time: "19:00", people: 3 }, customer);
     assert.equal(r.status, 200);
     assert.equal(r.body.status, "예약 확정");
     assert.equal((await call("POST", "/api/reservations", { restaurantId: "h3", restaurantName: "x", date: "내일", time: "19:00", people: 3 })).status, 400);
@@ -600,5 +601,62 @@ describe("할인과 오늘의 메뉴", () => {
     assert.equal(discountedPrice(19000, 0), 19000);
     assert.equal(discountedPrice(19000, 10), 17100);
     assert.equal(discountedPrice(18000, 33), 12060);
+  });
+});
+
+describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
+  let owner;
+  before(async () => {
+    owner = await signup({ role: "owner", username: "checkboss01", email: "checkboss@example.com", storeId: "m2", name: "한우 사장" });
+    db.approveOwner("checkboss01");
+  });
+
+  it("사장님이 추가한 메뉴(긴 id)의 품절·가격·할인 설정이 저장되고 주문 금액에 쓰인다", async () => {
+    const added = (await call("POST", "/api/stores/m2/menu", { name: "한우 불고기", price: 30000, unit: "인분" }, owner)).body;
+    assert.ok(added.id.length > 10);
+    const set = await call("PATCH", "/api/stores/m2/settings", { item: { id: added.id, patch: { price: 28000, discountPct: 10 } } }, owner);
+    assert.deepEqual(set.body.items[added.id], { price: 28000, discountPct: 10 });
+    const o = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "m2", item: "한우 불고기", qty: 1 }, payment: "카드" })).body;
+    assert.equal(o.order.price, 25200);
+    await call("PATCH", "/api/stores/m2/settings", { item: { id: added.id, patch: { soldOut: true } } }, owner);
+    assert.match((await call("POST", "/api/orders", { order: { ...chicken, storeId: "m2", item: "한우 불고기", qty: 1 }, payment: "카드" })).body.error, /품절/);
+    // 다른 매장의 메뉴 id 로는 설정할 수 없다
+    assert.match((await call("PATCH", "/api/stores/m2/settings", { item: { id: "d2", patch: { soldOut: true } } }, owner)).body.error, /메뉴를 알 수 없어요/);
+  });
+
+  it("주문·예약 상태는 정해진 순서로만 바뀌고, 방문 완료는 방문일부터 할 수 있다", async () => {
+    const o = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "m2", item: "한우 불고기", qty: 1 }, payment: "카드" })).body;
+    await call("PATCH", "/api/stores/m2/settings", { item: { id: (await call("GET", "/api/menu")).body.find((d) => d.name === "한우 불고기").id, patch: { soldOut: false } } }, owner);
+    const o2 = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "m2", item: "한우 불고기", qty: 1 }, payment: "카드" })).body;
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "완료" }, owner)).status, 409); // 접수 → 완료 건너뛰기
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "준비 중" }, owner)).status, 200);
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "접수" }, owner)).status, 409); // 되돌리기
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "완료" }, owner)).status, 200);
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "취소" }, owner)).status, 409); // 끝난 주문
+    void o;
+
+    const future = (await call("POST", "/api/reservations", { restaurantId: "m2", restaurantName: "하소 한우마을", date: "2099-01-01", time: "19:00", people: 2 })).body;
+    const r = await call("PATCH", `/api/reservations/${future.id}`, { status: "방문 완료" }, owner);
+    assert.equal(r.status, 409);
+    assert.match(r.body.error, /방문일이 되기 전/);
+    assert.equal((await call("PATCH", `/api/reservations/${future.id}`, { status: "취소" }, owner)).status, 200);
+    assert.equal((await call("PATCH", `/api/reservations/${future.id}`, { status: "예약 확정" }, owner)).status, 409);
+  });
+
+  it("영업시간은 00:00~24:00 안이어야 하고 여는 시간과 닫는 시간이 같을 수 없다", async () => {
+    for (const bad of ["25:00 - 99:99", "11:60 - 20:00", "24:30 - 01:00", "11:00 - 11:00", "11:00-20:00"]) {
+      assert.equal((await call("PATCH", "/api/stores/m2/settings", { hours: bad }, owner)).status, 400, bad);
+    }
+    for (const ok of ["11:00 - 24:00", "16:00 - 01:00", "00:00 - 23:59"]) {
+      assert.equal((await call("PATCH", "/api/stores/m2/settings", { hours: ok }, owner)).status, 200, ok);
+    }
+  });
+
+  it("오늘의 메뉴를 판매 중지하면 오늘의 메뉴도 풀린다", async () => {
+    const item = (await call("GET", "/api/menu")).body.find((d) => d.name === "한우 불고기");
+    await call("PATCH", "/api/stores/m2/settings", { special: { itemId: item.id } }, owner);
+    assert.equal((await call("GET", "/api/stores/settings")).body.m2.special.itemId, item.id);
+    await call("PATCH", `/api/stores/m2/menu/${item.id}`, { active: false }, owner);
+    assert.equal((await call("GET", "/api/stores/settings")).body.m2.special, undefined);
   });
 });

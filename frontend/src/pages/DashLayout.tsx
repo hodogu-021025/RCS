@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { HOME_BY_ROLE, logout, useSession } from "../auth/auth";
+import { clearRecords } from "../data/db";
 
 interface Props {
   title: string;
@@ -16,6 +17,7 @@ export function DashLayout({ title, children, accountLink = true }: Props) {
 
   function onLogout() {
     void logout(); // 화면의 로그인 상태는 바로 풀리고, 서버의 세션 삭제는 뒤에서 이어진다
+    clearRecords();
     navigate("/login");
   }
 

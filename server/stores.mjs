@@ -16,6 +16,19 @@ export const foodLabelOf = (storeId) => {
 
 export const ORDER_STATUSES = new Set(["접수", "준비 중", "완료", "취소"]);
 export const RESERVATION_STATUSES = new Set(["예약 확정", "방문 완료", "취소"]);
+// 사장님이 바꿀 수 있는 다음 상태 (끝난 주문·예약은 되돌리지 못한다)
+export const ORDER_NEXT = { 접수: ["준비 중", "취소"], "준비 중": ["완료", "취소"], 완료: [], 취소: [] };
+export const RESERVATION_NEXT = { "예약 확정": ["방문 완료", "취소"], "방문 완료": [], 취소: [] };
+
+// 영업시간 "HH:MM - HH:MM": 시는 00~23 (닫는 시간은 24:00 가능), 분은 00~59, 여는 시간과 닫는 시간이 같으면 안 된다
+export function hoursError(hours) {
+  const m = /^(\d{2}):(\d{2}) - (\d{2}):(\d{2})$/.exec(String(hours ?? ""));
+  if (!m) return "영업시간 형식이 맞지 않아요.";
+  const [oh, om, ch, cm] = m.slice(1).map(Number);
+  if (oh > 23 || om > 59 || cm > 59 || ch > 24 || (ch === 24 && cm > 0)) return "영업시간은 00:00부터 24:00 사이로 적어 주세요.";
+  if (oh * 60 + om === (ch % 24) * 60 + cm) return "여는 시간과 닫는 시간이 같을 수 없어요.";
+  return null;
+}
 export const MAX_PEOPLE = 20;
 export const MAX_QTY = 10;
 

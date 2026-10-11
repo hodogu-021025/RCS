@@ -1,5 +1,5 @@
 import { useSession } from "../auth/auth";
-import { formatDate, orderCardRows, won } from "../components/orderChatKnowledge";
+import { formatDate, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
 import { useDb } from "../data/db";
 import { DashLayout } from "./DashLayout";
 import { formatDateTime } from "./format";
@@ -37,7 +37,7 @@ export function MyOrdersPage() {
                 <div>
                   <dt>결제</dt>
                   <dd>
-                    {o.payment} · {won(o.order.price)}
+                    {o.payment} · {orderPriceLabel(o.order)}
                   </dd>
                 </div>
                 <div>

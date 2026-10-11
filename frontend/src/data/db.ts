@@ -246,6 +246,11 @@ export async function removeOwner(username: string) {
   await refresh(["accounts"]);
 }
 
+// 로그아웃·다른 계정 로그인 때: 받아 둔 주문·예약·계정 목록을 비운다 (전 계정의 기록이 새 계정의 "새 주문" 기준이 되지 않게)
+export function clearRecords() {
+  patch({ orders: [], reservations: [], owners: [], users: [], recordsLoaded: false });
+}
+
 // 테스트용: 들고 있던 값을 비운다
 export function resetDb() {
   patch({ popular: { items: {}, restaurants: {} }, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false });
