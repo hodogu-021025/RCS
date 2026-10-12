@@ -504,6 +504,8 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .place-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .place-main b { font-size: 14px; font-weight: 700; }
 .place-main small { font-size: 12px; color: var(--muted); }
+/* 메뉴 카드의 오늘의 메뉴·할인 표시 */
+.place-deal { font-style: normal; font-weight: 700; color: var(--accent); }
 .place-distance {
   margin-left: auto; flex-shrink: 0;
   padding: 3px 8px; border-radius: 999px;

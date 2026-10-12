@@ -3,15 +3,16 @@
 //   GET    /api/health
 //   POST   /api/email/send-code        { email }                      인증번호 메일
 //   POST   /api/email/verify           { email, code }                → { proof }  (회원가입에 같이 보낸다)
-//   POST   /api/auth/signup            { role, username, password, name, email, proof, storeId?, agreePrivacy: true } → { token, session }
+//   POST   /api/auth/signup            { role, username, password, name, email, proof, phone, storeId?, agreePrivacy: true } → { token, session }
 //   POST   /api/auth/login             { username, password }         → { token, session }
 //   POST   /api/auth/logout
 //   GET    /api/auth/me                                               → { session }  (토큰이 없거나 만료되면 null)
 //   POST   /api/auth/reset/send-code   { email }                      비밀번호 찾기: 가입된 이메일로 인증번호 (확인은 /api/email/verify)
 //   POST   /api/auth/reset             { email, proof, password, passwordConfirm } → { username }  새 비밀번호 (다른 기기 로그인은 끊긴다)
+//   PATCH  /api/auth/contact           { phone?, address? }           → { session }  내 연락처·배달지 (배달지는 고객님만)
 //   POST   /api/auth/withdraw          { password }                   회원 탈퇴 (고객님·사장님). 주문·예약 기록은 이름을 지우고 남긴다
 //   GET    /api/orders                 고객: 내 것 / 사장님: 내 매장 / 관리자: 전체
-//   POST   /api/orders                 { order, payment }             로그인 없이도 가능 (비회원). order.address·order.phone 필수
+//   POST   /api/orders                 { order, payment }             로그인한 고객님만. order.address·order.phone 필수
 //   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자
 //   POST   /api/orders/lookup          { receipts }                   비회원: 주문할 때 받은 영수증 번호로 내 주문 보기
 //   POST   /api/orders/:id/cancel      { receipt? }                   손님 취소 (접수 상태일 때만)
@@ -59,7 +60,7 @@ import { ADDRESS_MAX, ADDRESS_MIN, normalizePhone } from "./contact.mjs";
 
 const MAX_BODY = 16 * 1024;
 // 지금 개인정보 처리방침의 시행일 (frontend/src/pages/privacyPolicy.ts 의 PRIVACY_EFFECTIVE 와 같게). 가입할 때 이 버전에 동의한 것으로 남긴다
-export const PRIVACY_VERSION = "2026-10-10";
+export const PRIVACY_VERSION = "2026-10-12";
 const GUEST = { username: "guest", name: "비회원" };
 
 class HttpError extends Error {
@@ -82,8 +83,18 @@ export function isPrivateAddress(address) {
 const needLogin = () => new HttpError(401, "로그인이 필요해요.");
 const forbidden = () => new HttpError(403, "권한이 없어요.");
 
+// 연락처·배달지는 본인 세션에만 싣는다 (챗봇이 배달 주문에 쓴다)
 const publicSession = (u) =>
-  u && { username: u.username, role: u.role, name: u.name, ...(u.storeId ? { storeId: u.storeId } : {}), ...(u.role === "owner" ? { approved: u.approved } : {}) };
+  u && {
+    username: u.username,
+    role: u.role,
+    name: u.name,
+    ...(u.storeId ? { storeId: u.storeId } : {}),
+    ...(u.role === "owner" ? { approved: u.approved } : {}),
+    ...(u.phone ? { phone: u.phone } : {}),
+    ...(u.address ? { address: u.address } : {}),
+  };
+const PHONE_ERROR = "전화번호를 010-1234-5678 형식으로 적어 주세요.";
 const PENDING_OWNER = "관리자 승인을 기다리고 있어요. 승인되면 매장 주문·예약을 볼 수 있어요.";
 
 // 로그인 시도 제한: 비밀번호를 계속 대입해 보는 걸 막는다 (15분 안에 아이디별 5번, IP별 20번 실패하면 잠시 막는다)
@@ -196,10 +207,12 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (body.password !== body.passwordConfirm) throw bad("비밀번호가 서로 달라요.");
       // 다른 입력을 먼저 검사하고, 증표는 맨 마지막에 쓴다 (틀린 입력 때문에 증표가 날아가지 않게)
       const account = checkAccount({ role, username: body.username, password: body.password, name: body.name, email, storeId: str(body.storeId, 10) });
+      const phone = normalizePhone(body.phone);
+      if (!phone) throw bad(PHONE_ERROR);
       if (body.agreePrivacy !== true) throw bad("개인정보 수집·이용에 동의해 주세요.");
       if (!verifier.consumeProof(email, body.proof)) throw bad("이메일 인증을 마쳐 주세요.");
       // 스스로 가입한 사장님은 관리자가 승인해야 매장 정보를 볼 수 있다 (아무나 남의 가게 주문을 보지 못하게)
-      const user = db.createUser({ ...account, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION, approved: role !== "owner" });
+      const user = db.createUser({ ...account, phone, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION, approved: role !== "owner" });
       return startSession(user);
     }],
     ["POST", "/api/auth/login", ({ body, ip }) => {
@@ -245,6 +258,22 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       return { ok: true };
     }],
     ["GET", "/api/auth/me", ({ user }) => ({ session: publicSession(user) ?? null })],
+    // 계정 관리: 연락처는 고객님·사장님, 배달지는 고객님만 (챗봇 배달 주문은 계정의 배달지·연락처로 보낸다)
+    ["PATCH", "/api/auth/contact", ({ body, user }) => {
+      if (!user) throw needLogin();
+      if (user.role === "admin") throw forbidden();
+      const patch = {};
+      if (body.phone !== undefined) {
+        patch.phone = normalizePhone(body.phone);
+        if (!patch.phone) throw bad(PHONE_ERROR);
+      }
+      if (body.address !== undefined) {
+        if (user.role !== "user") throw forbidden();
+        patch.address = str(body.address, ADDRESS_MAX).replace(/\s+/g, " ");
+        if (patch.address.length < ADDRESS_MIN) throw bad("배달지를 동·호수까지 자세히 적어 주세요.");
+      }
+      return { session: publicSession(db.updateContact(user.username, patch)) };
+    }],
     ["POST", "/api/auth/withdraw", ({ body, user }) => {
       if (!user) throw needLogin();
       if (user.role === "admin") throw new HttpError(403, "관리자 계정은 탈퇴할 수 없어요.");
@@ -263,6 +292,9 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
     // ---- 주문 ----
     ["GET", "/api/orders", ({ user }) => db.listOrders(recordScope(user))],
     ["POST", "/api/orders", ({ body, user }) => {
+      // 배달 주문은 로그인한 고객님만 (배달지·연락처를 계정에 두고 쓴다). 식당 예약은 비회원도 된다
+      if (!user) throw new HttpError(401, "배달 주문은 로그인한 뒤에 할 수 있어요.");
+      if (user.role !== "user") throw new HttpError(403, "배달 주문은 고객님 계정으로 할 수 있어요.");
       const o = body.order ?? {};
       const qty = Number(o.qty);
       if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) throw bad("주문 내용이 맞지 않아요.");
@@ -293,9 +325,8 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
         address,
         phone,
       };
-      const who = user ?? GUEST;
       const receipt = newToken();
-      const rec = db.addOrder({ customer: who.username, customerName: who.name, payment: str(body.payment, 20) || "기타", storeId: o.storeId, order, receipt });
+      const rec = db.addOrder({ customer: user.username, customerName: user.name, payment: str(body.payment, 20) || "기타", storeId: o.storeId, order, receipt });
       return { ...rec, receipt };
     }],
     // 비회원도 영수증 번호로 자기 주문을 본다 (로그인 손님은 GET /api/orders)
@@ -467,7 +498,8 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
     }],
     ["GET", "/api/users", ({ user }) => {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();
-      return db.listByRole("user");
+      // 고객님의 배달지는 관리자 목록에 싣지 않는다 (주문을 받은 가게만 그 주문의 배달지를 본다)
+      return db.listByRole("user").map(({ address: _address, ...u }) => u);
     }],
   ].map(([method, pattern, handler]) => ({
     method,

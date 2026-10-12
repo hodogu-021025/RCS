@@ -5,6 +5,7 @@ import { normalizeEmail } from "../api/emailVerification";
 import { RESTAURANTS } from "../components/orderChatKnowledge";
 import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordField } from "./PasswordField";
+import { PhoneField } from "./PhoneField";
 import { PolicyItems } from "./PrivacyPage";
 import { SIGNUP_CONSENT } from "./privacyPolicy";
 
@@ -22,6 +23,7 @@ export function SignupPage() {
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [storeId, setStoreId] = useState("");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   // 인증을 마친 주소와 그때 받은 증표. 주소를 바꾸면 더 쓰지 않는다
   const [verified, setVerified] = useState<{ email: string; proof: string } | null>(null);
@@ -41,6 +43,7 @@ export function SignupPage() {
       username,
       name,
       email,
+      phone,
       proof: verified && verified.email === normalizeEmail(email) ? verified.proof : null,
       password,
       passwordConfirm,
@@ -99,6 +102,7 @@ export function SignupPage() {
             </select>
           </label>
         )}
+        <PhoneField value={phone} onChange={setPhone} />
         <EmailVerifyField email={email} onEmailChange={setEmail} verifiedEmail={verified?.email ?? null} onVerified={setVerified} />
         <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder={`${PASSWORD_MIN}자 이상`} />
         <PasswordField

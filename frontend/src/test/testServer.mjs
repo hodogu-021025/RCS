@@ -20,9 +20,10 @@ export async function startTestServer() {
     base,
     db,
     sent,
-    // 이메일 인증 없이 바로 계정을 만든다 (비밀번호 기본 password1)
-    createAccount({ username, password = "password1", name = username, role = "user", storeId, email }) {
-      return db.createUser({ username, passwordHash: hashPassword(password), name, email, role, storeId });
+    // 이메일 인증 없이 바로 계정을 만든다 (비밀번호 기본 password1). address 를 주면 배달지도 적어 둔다
+    createAccount({ username, password = "password1", name = username, role = "user", storeId, email, phone, address }) {
+      const user = db.createUser({ username, passwordHash: hashPassword(password), name, email, role, storeId, phone });
+      return address ? db.updateContact(username, { address }) : user;
     },
     close: () =>
       new Promise((resolve) => {

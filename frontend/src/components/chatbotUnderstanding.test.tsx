@@ -1,16 +1,17 @@
 // 챗봇이 여러 가지로 말해도 우리 기능(배달·식당 예약·주문 조회)으로 이어 가는지 실제 대화로 확인한다.
 // 시각은 2026-10-10(토) 18:30 저녁으로 고정한다
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { getMenu } from "../data/db";
+import { getDb, getMenu } from "../data/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderChatbot } from "./OrderChatbot";
-import { server } from "../test/setup";
+import { CUSTOMER, loginCustomer, server } from "../test/setup";
+import { logout } from "../auth/auth";
 
-beforeEach(() => {
+beforeEach(async () => {
+  // 계정에 배달지가 있는 고객님으로 시작한다 (로그인·배달지가 없을 때는 아래 "로그인과 배달지" 에서 따로 본다)
+  await loginCustomer();
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date(2026, 9, 10, 18, 30));
-  // 배달지를 이미 알려 준 손님으로 시작한다 (주소·연락처를 묻는 흐름은 아래 "배달지" 에서 따로 본다)
-  localStorage.setItem("saylo.delivery", JSON.stringify({ address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" }));
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -52,24 +53,28 @@ type Db = typeof server.db & {
 };
 const db = () => server.db as Db;
 
-// 비회원 주문 하나를 영수증 번호와 함께 넣고, 이 브라우저가 그 번호를 가진 것처럼 해 둔다
-function guestOrder() {
+// 로그인한 고객님의 지난 주문 하나를 넣어 둔다
+function myOrder() {
   const rec = db().addOrder({
-    customer: "guest",
-    customerName: "비회원",
+    customer: CUSTOMER.username,
+    customerName: CUSTOMER.name,
     payment: "카카오페이",
     storeId: "h3",
-    order: { store: { name: "청전 치킨공방" }, storeId: "h3", item: "간장치킨", qty: 2, unit: "마리", price: 40000 },
-    receipt: "receipt-1",
+    order: { store: { name: "청전 치킨공방" }, storeId: "h3", item: "간장치킨", qty: 2, unit: "마리", price: 40000, address: CUSTOMER.address, phone: CUSTOMER.phone },
   });
-  localStorage.setItem("saylo.receipts", JSON.stringify(["receipt-1"]));
   return rec.id;
 }
 
+// 말풍선 안 버튼들의 이름. 추천 카드(메뉴·식당)는 굵은 이름만, 나머지 버튼은 글자 그대로 (카드가 먼저, 작은 버튼이 그 아래)
 const buttonsIn = (re: RegExp) =>
   within(screen.getAllByText(re).at(-1)!.closest(".bubble")!)
     .getAllByRole("button")
-    .map((b) => b.textContent);
+    .map((b) => b.querySelector("b")?.textContent ?? b.textContent);
+// 추천 카드 설명에 붙은 오늘의 메뉴·할인 표시와 가격: "간장치킨" → { tags: ["20% 할인"], price: "16,000원" }
+const cardOf = (name: string) => {
+  const card = screen.getAllByRole("button", { name }).at(-1)!;
+  return { tags: [...card.querySelectorAll("em")].map((e) => e.textContent), price: card.querySelector(".place-distance")?.textContent };
+};
 
 // 처음 점검 때 쓴 20문장. 예전에는 7개만 기능으로 이어졌다
 const BENCHMARK: [string, RegExp][] = [
@@ -108,9 +113,10 @@ describe("1. 모르겠어요 대신 기능으로", () => {
   it("배고프다고 하면 지금 시간대 메뉴와 식당 찾기를 권한다", async () => {
     await renderChat();
     await say("배고파");
-    // 저녁에는 치킨이 먼저, 마지막에 식당 찾기
+    // 저녁에는 치킨 카드가 먼저, 그 아래 지난번 메뉴 다시(로그인한 고객님)·식당 찾기 버튼
     const buttons = buttonsIn(/저녁 메뉴로/);
     expect(buttons.slice(0, 2)).toEqual(["옛날통닭", "간장치킨"]);
+    expect(buttons).toContain("지난번 메뉴 다시");
     expect(buttons).toContain("식당 찾기");
     await click("간장치킨");
     expect(await find(/몇 마리 주문할까요/)).toBeTruthy();
@@ -188,6 +194,7 @@ describe("3. 안 되는 것 대신 할 수 있는 것", () => {
   it("품절 메뉴는 비슷한 메뉴를 권한다", async () => {
     server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: true } } });
     await renderChat();
+    await waitFor(() => expect(getDb().storeSettings.h3?.items?.d2?.soldOut).toBe(true));
     await say("간장치킨 시켜줘");
     expect(await find(/간장치킨은 지금 품절이에요/)).toBeTruthy();
     await click("옛날통닭");
@@ -212,7 +219,7 @@ describe("4. 똑똑한 추천", () => {
   });
 
   it("늘 먹던 거: 지난 주문을 같은 수량으로 주문서까지 만든다", async () => {
-    guestOrder();
+    myOrder();
     await renderChat();
     await say("늘 먹던 거");
     expect(await find(/지난번에 드신 간장치킨 2마리로 주문서를 만들었어요/)).toBeTruthy();
@@ -220,7 +227,7 @@ describe("4. 똑똑한 추천", () => {
   });
 
   it("지난 주문이 있으면 추천에 '지난번 메뉴 다시'가 붙는다", async () => {
-    guestOrder();
+    myOrder();
     await renderChat();
     await say("배고파");
     await click("지난번 메뉴 다시");
@@ -230,7 +237,7 @@ describe("4. 똑똑한 추천", () => {
 
 describe("5. 주문한 뒤의 질문", () => {
   it("내 주문 상태와 도착 예정 시각을 알려 준다", async () => {
-    guestOrder();
+    myOrder();
     await renderChat();
     await say("내 주문 어디쯤 왔어");
     // 상태는 표로: 주문 내용·상태·도착 예정
@@ -241,7 +248,7 @@ describe("5. 주문한 뒤의 질문", () => {
   });
 
   it("접수 상태 주문은 확인을 받고 취소한다", async () => {
-    const id = guestOrder();
+    const id = myOrder();
     await renderChat();
     await say("주문 취소할래");
     expect(await find(/간장치킨 2마리 주문을 취소할까요/)).toBeTruthy();
@@ -251,7 +258,7 @@ describe("5. 주문한 뒤의 질문", () => {
   });
 
   it("가게가 준비를 시작한 주문은 취소할 수 없다고 알려 준다", async () => {
-    const id = guestOrder();
+    const id = myOrder();
     db().setOrderStatus(id, "준비 중");
     await renderChat();
     await say("주문 취소할래");
@@ -285,49 +292,60 @@ describe("5. 주문한 뒤의 질문", () => {
   });
 });
 
-describe("배달지·연락처", () => {
-  it("처음 주문하면 주소와 전화번호를 묻고, 받은 뒤 주문서를 보여 주며 다음 주문을 위해 기억한다", async () => {
-    localStorage.removeItem("saylo.delivery");
+describe("로그인과 배달지", () => {
+  it("로그인하지 않았으면 배달을 고를 때 로그인하러 가자고 하고, 주소를 챗봇에서 묻지 않는다", async () => {
+    await logout();
     await renderChat();
+    await say("배달");
+    expect(await find(/배달 주문은 로그인한 뒤에 할 수 있어요/)).toBeTruthy();
+    expect(screen.queryByText(/오늘은 이런 메뉴 어떠세요/)).not.toBeInTheDocument();
     await say("간장치킨 2마리 시켜줘");
-    expect(await find(/배달 받을 주소를 알려 주세요/)).toBeTruthy();
+    expect((await find(/배달 주문은 로그인한 뒤에 할 수 있어요/)).length).toBe(2);
     expect(screen.queryByText(ORDER_TITLE)).not.toBeInTheDocument();
-
-    await say("장락");
-    expect(await find(/주소를 조금 더 자세히 알려 주세요/)).toBeTruthy();
-    await say("제천시 하소동 행복아파트 101동 202호");
-    expect(await find(/가게에서 연락드릴 전화번호를 알려 주세요/)).toBeTruthy();
-    await say("12");
-    expect(await find(/전화번호를 잘 모르겠어요/)).toBeTruthy();
-    await say("010 9876 5432");
-
-    expect(await find(/^간장치킨 2마리$/)).toBeTruthy();
-    // 사용자가 보낸 말풍선에도 같은 글자가 있으므로 주문서 칸(dd)에서 찾는다
-    expect(inCard("제천시 하소동 행복아파트 101동 202호")).toBe(true);
-    expect(inCard("010-9876-5432")).toBe(true);
-    expect(JSON.parse(localStorage.getItem("saylo.delivery")!)).toEqual({ address: "제천시 하소동 행복아파트 101동 202호", phone: "010-9876-5432" });
+    await click("로그인하러 가기");
+    expect(window.location.hash).toBe("#/login");
   });
 
-  it("주문서에서 배달지 변경을 누르면 주소만 다시 받고 같은 메뉴로 주문서를 다시 만든다", async () => {
+  it("로그인하지 않아도 식당 예약은 된다", async () => {
+    await logout();
+    await renderChat();
+    await say("치킨집 예약");
+    expect(await find(/장락 옛날통닭/)).toBeTruthy();
+    expect(screen.queryByText(/로그인한 뒤에/)).not.toBeInTheDocument();
+  });
+
+  it("로그인 전에 고른 메뉴·수량은 로그인하고 돌아오면 그대로 주문서로 이어진다", async () => {
+    await logout();
+    const first = render(<OrderChatbot />);
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+    await say("간장치킨 2마리");
+    await find(/로그인한 뒤에 할 수 있어요/);
+    first.unmount();
+
+    await loginCustomer2();
+    await renderChat();
+    await wait();
+    expect(await find(/고르시던 배달 주문을 이어서 도와드릴게요/)).toBeTruthy();
+    expect(await find(/^간장치킨 2마리$/)).toBeTruthy();
+    expect(inCard(CUSTOMER.address)).toBe(true);
+  });
+
+  it("주문서에서 '연락처 바꿀래'는 계정 관리로 가자고 한다", async () => {
     await renderChat();
     await say("옛날통닭 1마리");
-    await click("배달지 변경");
-    expect(await find(/새 배달지로 다시 만들어 드릴게요/)).toBeTruthy();
-    await say("제천시 청전동 새집 3층");
-    expect(await find(/^옛날통닭 1마리$/)).toBeTruthy();
-    expect(inCard("제천시 청전동 새집 3층")).toBe(true);
-    expect(inCard("010-1234-5678")).toBe(true); // 연락처는 그대로
-  });
-
-  it("주소를 묻는 중에 취소하면 주문을 접는다", async () => {
-    localStorage.removeItem("saylo.delivery");
-    await renderChat();
-    await say("떡볶이 2인분");
-    await say("취소할래");
-    expect(await find(/배달 주문을 그만할게요/)).toBeTruthy();
+    await say("연락처 바꿀래");
+    expect(await find(/연락처는 계정 관리에서 바꿀 수 있어요/)).toBeTruthy();
+    await click("계정 관리로 가기");
+    expect(window.location.hash).toBe("#/account");
   });
 });
 
+// 로그아웃한 뒤 같은 고객님으로 다시 로그인한다 (계정은 이미 있다)
+async function loginCustomer2() {
+  const { login } = await import("../auth/auth");
+  const r = await login(CUSTOMER.username, "password1");
+  if ("error" in r) throw new Error(r.error);
+}
 describe("할인과 오늘의 메뉴", () => {
   const setDeals = async () => {
     const { todayKST } = await import("./deals");
@@ -339,11 +357,12 @@ describe("할인과 오늘의 메뉴", () => {
     await setDeals();
     await renderChat();
     await say("배달");
-    // 오늘의 메뉴·할인은 말풍선 안 표로
+    // 오늘의 메뉴·할인은 식당 추천과 같은 메뉴 카드에 표시하고, 가격은 할인한 값
     await find(/오늘은 이런 메뉴 어떠세요/);
-    expect(inCard("국물떡볶이 6,000원")).toBe(true);
-    expect(inCard("간장치킨 20,000원 → 16,000원")).toBe(true);
-    expect(buttonsIn(/오늘은 이런 메뉴 어떠세요/).slice(0, 2)).toEqual(["오늘의 메뉴 · 국물떡볶이", "간장치킨 · 20% 할인"]);
+    expect(buttonsIn(/오늘은 이런 메뉴 어떠세요/).slice(0, 2)).toEqual(["국물떡볶이", "간장치킨"]);
+    expect(cardOf("국물떡볶이")).toEqual({ tags: ["오늘의 메뉴"], price: "6,000원" });
+    expect(cardOf("간장치킨")).toEqual({ tags: ["20% 할인"], price: "16,000원" });
+    expect(cardOf("옛날통닭").tags).toEqual([]);
   });
 
   it("할인 메뉴를 주문하면 할인 가격으로 주문서를 만든다", async () => {
@@ -359,8 +378,8 @@ describe("할인과 오늘의 메뉴", () => {
     await renderChat();
     await say("할인하는 거 있어?");
     expect(await find(/오늘의 메뉴와 할인 중인 메뉴예요/)).toBeTruthy();
-    expect(inCard("간장치킨 20,000원 → 16,000원")).toBe(true);
-    expect(inCard("국물떡볶이 6,000원")).toBe(true);
+    expect(buttonsIn(/오늘의 메뉴와 할인 중인 메뉴예요/)).toEqual(["국물떡볶이", "간장치킨", "직접 입력"]);
+    expect(cardOf("간장치킨")).toEqual({ tags: ["20% 할인"], price: "16,000원" });
   });
 
   it("할인이나 오늘의 메뉴가 없으면 그렇다고 하고 다른 메뉴를 권한다", async () => {
@@ -407,15 +426,47 @@ describe("점검에서 찾은 문제", () => {
     expect(inCard("010-1234-5678")).toBe(true);
   });
 
-  it("'101동 202호'의 101 은 수량이 아니다: 주소 바꾸기로 간다", async () => {
+  it("'101동 202호'의 101 은 수량이 아니다: 주소 바꾸기(계정 관리)로 간다", async () => {
     await renderChat();
     await say("옛날통닭 1마리");
     await say("주소를 하소동 101동 202호로 바꿔줘");
-    expect(await find(/새 배달지로 다시 만들어 드릴게요/)).toBeTruthy();
+    expect(await find(/배달지는 계정 관리에서 바꿀 수 있어요/)).toBeTruthy();
+    expect(screen.queryByText(/수량을 101마리로/)).not.toBeInTheDocument();
+  });
+
+  it("메뉴 추천을 받은 뒤 '치킨집 예약'이라고 하면 치킨 배달이 아니라 근처 치킨집 예약으로 간다", async () => {
+    await renderChat();
+    await say("배고파");
+    await find(/저녁 메뉴로/);
+    await type("치킨집 예약");
+    expect(await find(/근처 치킨 맛집을 추천해요/)).toBeTruthy();
+    expect(screen.queryByText(/몇 마리 주문할까요/)).not.toBeInTheDocument();
+    await click(/장락 옛날통닭/);
+    expect(await find(/장락 옛날통닭 예약을 도와드릴게요/)).toBeTruthy();
+  });
+
+  it("로그인하지 않은 손님도 메뉴 추천 뒤 '치킨집 예약'은 로그인 안내 없이 식당 예약으로 간다", async () => {
+    await logout();
+    await renderChat();
+    await say("배고파");
+    await find(/저녁 메뉴로/);
+    await type("치킨집 예약");
+    expect(await find(/근처 치킨 맛집을 추천해요/)).toBeTruthy();
+    expect(screen.queryByText(/로그인한 뒤에/)).not.toBeInTheDocument();
+  });
+
+  it("주문 확인 중에 '치킨집 예약할래'라고 하면 주문을 접고 식당 예약으로 간다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리");
+    await find(/^간장치킨 2마리$/);
+    await say("치킨집 예약할래");
+    expect(await find(/근처 치킨 맛집을 추천해요/)).toBeTruthy();
+    // 주문은 접혀서 '응'이라고 해도 결제로 가지 않는다
+    expect(screen.queryByText(/답해 주세요/)).not.toBeInTheDocument();
   });
 
   it("취소 확인에서 '취소 안 할래'는 그대로 둔다", async () => {
-    const id = guestOrder();
+    const id = myOrder();
     await renderChat();
     await say("주문 취소할래");
     await find(/주문을 취소할까요/);
@@ -425,28 +476,13 @@ describe("점검에서 찾은 문제", () => {
   });
 
   it("취소 확인에서 '그냥 취소해줘'는 취소한다", async () => {
-    const id = guestOrder();
+    const id = myOrder();
     await renderChat();
     await say("주문 취소할래");
     await find(/주문을 취소할까요/);
     await say("그냥 취소해줘");
     expect(await find(/주문을 취소했어요/)).toBeTruthy();
     expect(server.db.orderById(id)?.status).toBe("취소");
-  });
-
-  it("주소를 묻는 중에 다른 메뉴나 기능을 말하면 주소로 저장하지 않고 그 말로 넘어간다", async () => {
-    localStorage.removeItem("saylo.delivery");
-    await renderChat();
-    await say("간장치킨 1마리");
-    await find(/배달 받을 주소를 알려 주세요/);
-    await say("옛날통닭 두 마리 시켜줘");
-    // 새 메뉴로 다시 주문이 시작되고(주소는 아직 없으니 다시 묻는다), 주소로 저장되지 않았다
-    expect(await find(/배달 받을 주소를 알려 주세요/)).toBeTruthy();
-    expect(localStorage.getItem("saylo.delivery")).toBeNull();
-    await say("제천시 청전동 새집 3층으로 배달해 주세요"); // 주소 뒤의 "배달"은 주소의 일부로 본다
-    await say("010 2222 3333");
-    expect(await find(/^옛날통닭 2마리$/)).toBeTruthy();
-    expect(inCard("제천시 청전동 새집 3층으로 배달해 주세요")).toBe(true);
   });
 
   it("봇이 답하는 동안 보낸 글은 지워지지 않고 입력창에 남는다", async () => {
@@ -461,7 +497,7 @@ describe("점검에서 찾은 문제", () => {
   });
 
   it("서버에 물어보는 중에 새 대화를 시작하면 그 답은 새 대화에 끼어들지 않는다", async () => {
-    guestOrder();
+    myOrder();
     await renderChat();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "주문 취소할래" } });
     fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));

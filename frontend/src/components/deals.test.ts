@@ -37,20 +37,17 @@ describe("할인과 오늘의 메뉴 계산", () => {
 });
 
 describe("오늘의 메뉴·할인 안내 문장", () => {
-  it("소리·자막은 자연스러운 문장으로, 말풍선은 한눈에 보는 목록으로 말한다", async () => {
-    const { deliveryPrompt, dealsSay } = await import("./orderChatKnowledge");
+  it("소리·자막은 자연스러운 문장으로, 말풍선은 메뉴 카드에 오늘의 메뉴·할인을 붙여 보여 준다", async () => {
+    const { deliveryPrompt, dealsSay, dealTags } = await import("./orderChatKnowledge");
     server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { discountPct: 20 } } });
     server.db.updateStoreSettings("s1", { special: { itemId: "d4", date: todayKST() } });
     await refresh(["settings"]);
     const prompt = deliveryPrompt();
     expect(prompt.say).toMatch(/^오늘의 메뉴는 국물떡볶이예요! 간장치킨은 20% 할인 중이에요\. 오늘은 /);
-    // 말풍선 글에는 메뉴 이름을 늘어놓지 않고, 오늘의 메뉴·할인은 표로 보여 준다
+    // 말풍선 글에는 메뉴 이름을 늘어놓지 않고, 메뉴 카드마다 오늘의 메뉴·할인을 붙인다
     expect(prompt.text).toBe("오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
-    expect(prompt.dealRows).toEqual([
-      { label: "오늘의 메뉴", value: "국물떡볶이 6,000원", emphasis: true },
-      { label: "20% 할인", value: "간장치킨 20,000원 → 16,000원" },
-    ]);
     expect(prompt.menu?.map((d) => d.id)).toEqual(["d4", "d2", "d1", "d3"]);
+    expect(prompt.menu?.map(dealTags)).toEqual([["오늘의 메뉴"], ["20% 할인"], [], []]);
     expect(dealsSay([])).toBe("");
   });
 });

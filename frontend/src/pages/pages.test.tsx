@@ -145,20 +145,41 @@ describe("회원가입", () => {
     open("#/signup");
     expect(screen.getByRole("radio", { name: "고객님" })).toBeChecked();
     expect(screen.queryByLabelText("매장")).not.toBeInTheDocument();
-    fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fill({ 아이디: "hongildong", 이름: "홍길동", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     agree();
     await verifyEmail("Hong@Example.com");
     await click("고객님으로 가입하기");
 
     await waitFor(() => expect(window.location.hash).toBe("#/chat"));
-    expect(server.db.findUser("hongildong")).toMatchObject({ role: "user" });
+    // 숫자만 적어도 하이픈을 넣은 모양으로 저장된다
+    expect(server.db.findUser("hongildong")).toMatchObject({ role: "user", phone: "010-1234-5678" });
     expect(server.sent).toEqual([{ email: "hong@example.com", code: TEST_CODE }]);
+  });
+
+  it("휴대폰 번호는 적는 동안 하이픈이 들어가고, 번호 모양이 아니면 가입되지 않는다", async () => {
+    open("#/signup");
+    const phone = screen.getByLabelText("휴대폰 번호");
+    fill({ "휴대폰 번호": "010-12ab34" });
+    expect(phone).toHaveValue("010-1234");
+    fill({ "휴대폰 번호": "0101234567899" });
+    expect(phone).toHaveValue("010-1234-5678"); // 11자리 뒤는 버린다
+    fill({ "휴대폰 번호": "021234567" });
+    expect(phone).toHaveValue("02-123-4567");
+
+    fill({ 아이디: "hongildong", 이름: "홍길동", "휴대폰 번호": "0101234", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fireEvent.blur(phone);
+    expect(phone).toHaveAttribute("aria-invalid", "true");
+    agree();
+    await verifyEmail("hong@example.com");
+    await click("고객님으로 가입하기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("010-1234-5678 형식");
+    expect(server.db.findUser("hongildong")).toBeNull();
   });
 
   it("사장님으로 가입하면 매장을 골라야 하고, 가입 후 내 매장의 사장님 페이지로 간다", async () => {
     open("#/signup");
     fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
-    fill({ 아이디: "banjeom01", "대표자 이름": "김사장", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fill({ 아이디: "banjeom01", "대표자 이름": "김사장", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     agree();
     await verifyEmail("boss@example.com");
     await click("사장님으로 가입하기");
@@ -182,7 +203,7 @@ describe("회원가입", () => {
   it("이메일 인증: 번호를 받으면 5분 타이머가 돌고, 틀리면 안내, 맞으면 인증 완료, 변경하면 다시 인증", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     open("#/signup");
-    fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fill({ 아이디: "hongildong", 이름: "홍길동", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     await click("고객님으로 가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("이메일 인증을 마쳐 주세요");
 
@@ -219,7 +240,7 @@ describe("회원가입", () => {
     expect(await screen.findByText("이미 가입된 이메일이에요.")).toBeInTheDocument();
     expect(server.sent).toEqual([]);
 
-    fill({ 아이디: "short1", 이름: "누구", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fill({ 아이디: "short1", 이름: "누구", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     agree();
     await verifyEmail("new@example.com");
     await click("고객님으로 가입하기");
@@ -233,7 +254,7 @@ describe("회원가입", () => {
   it("개인정보 수집·이용에 동의해야 가입되고, 요약과 전체 방침(새 탭)을 볼 수 있다", async () => {
     open("#/signup");
     expect(consentBox()).not.toBeChecked();
-    fill({ 아이디: "hongildong", 이름: "홍길동", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fill({ 아이디: "hongildong", 이름: "홍길동", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     await verifyEmail("hong@example.com");
     await click("고객님으로 가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("개인정보 수집·이용에 동의해 주세요");
@@ -486,6 +507,8 @@ describe("내 주문 페이지", () => {
 describe("챗봇과 연결", () => {
   it("사장님이 품절시킨 메뉴는 챗봇 배달 버튼에서 빠지고, 챗봇의 주문은 서버에 남는다", async () => {
     server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: true } } });
+    server.createAccount({ ...KIM, ...TEST_DELIVERY });
+    await loginAs(KIM.username); // 배달 주문은 로그인한 고객님만
     open("#/chat");
     await waitFor(() => expect(getDb().storeSettings.h3?.items?.d2?.soldOut).toBe(true));
 
@@ -505,7 +528,7 @@ describe("개인정보 처리방침", () => {
     open("#/privacy");
     expect(await screen.findByRole("heading", { name: "1. 수집하는 개인정보" })).toBeInTheDocument();
     expect(screen.getByText("Resend, Inc. (미국)")).toBeInTheDocument();
-    expect(screen.getByText(/2026년 10월 10일부터 적용돼요/)).toBeInTheDocument();
+    expect(screen.getByText(/2026년 10월 12일부터 적용돼요/)).toBeInTheDocument();
   });
 });
 
@@ -693,5 +716,107 @@ describe("비밀번호 찾기", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(`아이디는 ${KIM.username}이에요`);
     expect("error" in (await login(KIM.username, "password1"))).toBe(true);
     expect("session" in (await login(KIM.username, "brandnew1"))).toBe(true);
+  });
+});
+
+describe("로그인한 고객님의 연락처·배달지", () => {
+  const findBot = (re: RegExp) => screen.findAllByText(re, {}, { timeout: 3000 });
+  const inCard = (text: string) => screen.queryAllByText(text).some((el) => el.tagName === "DD");
+  // 챗봇은 채팅창이 꺼진 채로 열리므로 켜고 말한다
+  function openChat() {
+    open("#/chat");
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+  }
+  function sayInChat(text: string) {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
+  }
+
+  it("로그인하지 않은 손님은 로그인 화면으로 보내고, 로그인하면 챗봇으로 돌아와 고르던 주문을 이어 간다", async () => {
+    server.createAccount({ ...KIM, ...TEST_DELIVERY });
+    openChat();
+    sayInChat("간장치킨 2마리");
+    expect(await findBot(/배달 주문은 로그인한 뒤에 할 수 있어요/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "로그인하러 가기" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/login"));
+
+    await screen.findByLabelText("아이디"); // 로그인 화면은 따로 받아 온다
+    typeLogin(KIM.username, "password1");
+    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
+    fireEvent.click(await screen.findByRole("button", { name: "채팅창 켜기" }));
+    expect(await findBot(/김소비님, 고르시던 배달 주문을 이어서 도와드릴게요/)).toBeTruthy();
+    await waitFor(() => expect(inCard(TEST_DELIVERY.address)).toBe(true), { timeout: 3000 });
+    expect(inCard("간장치킨 2마리")).toBe(true);
+  });
+
+  it("배달지가 없으면 계정 관리로 보내고, 등록하고 돌아오면 고르던 메뉴·수량으로 주문서를 만든다", async () => {
+    server.createAccount({ ...KIM, phone: "010-1234-5678" });
+    await loginAs(KIM.username);
+    openChat();
+    sayInChat("간장치킨 2마리");
+    expect(await findBot(/아직 계정에 배달지가 없어요/)).toBeTruthy();
+    // 주소를 챗봇에서 묻지 않고, 주문서로도 넘어가지 않는다
+    expect(screen.queryByText(/배달 받을 주소를 알려 주세요/)).not.toBeInTheDocument();
+    expect(screen.queryByText("주문 내역을 확인해 주세요.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "계정 관리로 가기" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/account"));
+    expect(await screen.findByText("배달지를 등록해야 배달 주문을 할 수 있어요.")).toBeInTheDocument();
+    expect(screen.getByLabelText("휴대폰 번호")).toHaveValue("010-1234-5678");
+    fill({ 배달지: "제천" });
+    await click("저장");
+    expect(await screen.findByRole("alert")).toHaveTextContent("동·호수까지");
+
+    fill({ 배달지: "제천시 하소동 행복아파트 101동 202호" });
+    await click("저장");
+    expect(await screen.findByRole("link", { name: "챗봇으로 돌아가 주문 이어 가기" })).toHaveAttribute("href", "#/chat");
+    expect(server.db.findUser(KIM.username)).toMatchObject({ address: "제천시 하소동 행복아파트 101동 202호" });
+
+    cleanup();
+    openChat();
+    expect(await findBot(/고르시던 배달 주문을 이어서 도와드릴게요/)).toBeTruthy();
+    await waitFor(() => expect(inCard("제천시 하소동 행복아파트 101동 202호")).toBe(true), { timeout: 3000 });
+    expect(inCard("010-1234-5678")).toBe(true);
+    expect(inCard("간장치킨 2마리")).toBe(true);
+  });
+
+  it("배달을 고르는 순간 막고, 배달지가 있으면 묻지 않고 계정의 배달지로 주문서를 만든다", async () => {
+    server.createAccount({ ...KIM, phone: "010-1234-5678" });
+    await loginAs(KIM.username);
+    openChat();
+    sayInChat("배달");
+    expect(await findBot(/아직 계정에 배달지가 없어요/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "간장치킨" })).not.toBeInTheDocument();
+    cleanup();
+
+    server.createAccount({ username: "customer02", phone: "010-2222-3333", address: "제천시 청전동 푸른빌 5호" });
+    await loginAs("customer02");
+    openChat();
+    sayInChat("간장치킨 1마리");
+    await waitFor(() => expect(inCard("제천시 청전동 푸른빌 5호")).toBe(true), { timeout: 3000 });
+    expect(inCard("010-2222-3333")).toBe(true);
+
+    // 주문서의 배달지 변경은 계정 관리로 보낸다
+    fireEvent.click(screen.getByRole("button", { name: "배달지 변경" }));
+    expect(await findBot(/배달지는 계정 관리에서 바꿀 수 있어요/)).toBeTruthy();
+  });
+
+  it("전화번호가 없는 예전 계정은 연락처부터 등록하게 하고, 사장님은 연락처만 바꾼다", async () => {
+    server.createAccount({ ...KIM, address: "제천시 장락동 제천빌라 331호" });
+    await loginAs(KIM.username);
+    openChat();
+    sayInChat("간장치킨 2마리");
+    expect(await findBot(/아직 계정에 연락처가 없어요/)).toBeTruthy();
+    cleanup();
+
+    server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
+    await loginAs("chickenboss");
+    open("#/account");
+    expect(await screen.findByRole("heading", { name: "연락처" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("배달지")).not.toBeInTheDocument();
+    fill({ "휴대폰 번호": "01055556666" });
+    await click("저장");
+    expect(await screen.findByRole("status")).toHaveTextContent("저장했어요");
+    expect(server.db.findUser("chickenboss")).toMatchObject({ phone: "010-5555-6666" });
   });
 });

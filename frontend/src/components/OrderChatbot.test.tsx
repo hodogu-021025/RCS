@@ -2,12 +2,13 @@ import { StrictMode } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderChatbot } from "./OrderChatbot";
+import { loginCustomer } from "../test/setup";
 
 // 봇 응답·결제 진행이 모두 setTimeout 기반이라 가짜 타이머로 시간을 넘기며 확인한다
-beforeEach(() => {
+beforeEach(async () => {
+  // 계정에 배달지가 있는 고객님으로 시작한다 (로그인·배달지가 없을 때의 흐름은 chatbotUnderstanding.test 에서 본다)
+  await loginCustomer();
   vi.useFakeTimers();
-  // 배달지를 이미 알려 준 손님으로 시작한다 (주소·연락처를 묻는 흐름은 chatbotUnderstanding.test 에서 본다)
-  localStorage.setItem("saylo.delivery", JSON.stringify({ address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" }));
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -533,10 +534,11 @@ describe("OrderChatbot", () => {
     wait(700);
     expect(document.querySelector(".caption-dots")).not.toBeInTheDocument();
     wait(10_000);
-    // 메뉴 추천은 이름을 자막에 늘어놓지 않고 짧은 안내만 적은 뒤, 아래 표로 메뉴·가격·가게를 보여 준다 (사용자가 한 말은 자막에 없다)
+    // 메뉴 추천은 이름을 자막에 늘어놓지 않고 짧은 안내만 적은 뒤, 식당 추천과 같은 모양의 표로 메뉴·가격·가게·영업 여부를 보여 준다
+    // (사용자가 한 말은 자막에 없다)
     expect(caption()).toBe("오늘은 이런 메뉴 어떠세요? 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
     const menuRows = [...document.querySelectorAll(".caption-card .caption-row")].map((r) => r.textContent);
-    expect(menuRows[0]).toBe("옛날통닭18,000원 · 장락 옛날통닭");
+    expect(menuRows[0]).toMatch(/^옛날통닭18,000원 · 장락 옛날통닭 · (영업 중|15:00 오픈)$/);
     expect(menuRows).toHaveLength(4);
 
     // 표가 있는 답(주문서)은 자막에 제목·질문만 적고, 다 적은 뒤에 그 아래 표를 띄운다

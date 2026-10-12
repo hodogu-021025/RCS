@@ -8,6 +8,8 @@ export interface TestAccount {
   role?: "user" | "owner" | "admin";
   storeId?: string;
   email?: string;
+  phone?: string;
+  address?: string;
 }
 
 export interface TestDb {
@@ -21,7 +23,7 @@ export interface TestDb {
     patch: { hours?: string; item?: { id: string; patch: { price?: number; soldOut?: boolean; discountPct?: number } }; special?: { itemId: string; date: string } | null },
   ): object;
   deleteUser(username: string): boolean;
-  findUser(username: string): { username: string; role: string; storeId?: string } | null;
+  findUser(username: string): { username: string; role: string; storeId?: string; phone?: string; address?: string } | null;
 }
 
 export interface TestServer {

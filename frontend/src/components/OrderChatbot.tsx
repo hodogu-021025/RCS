@@ -1,22 +1,10 @@
-import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import backgroundVideo from "../image/saylo_background.mp4";
 import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { useSession } from "../auth/auth";
 import { addOrder, addReservation, cancelMyOrder, fetchMyOrders, getReceipts, useDb, type OrderRecord } from "../data/db";
-import {
-  addressError,
-  addressPrompt,
-  cleanAddress,
-  deliveryChange,
-  hasDelivery,
-  isStopDelivery,
-  loadDelivery,
-  normalizePhone,
-  phonePrompt,
-  saveDelivery,
-  type DeliveryInfo,
-} from "./delivery";
+import { deliveryChange, hasDelivery, rememberResume, takeResume, type DeliveryInfo, type ResumeDelivery } from "./delivery";
 import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
@@ -27,7 +15,7 @@ import {
   deliveryPrompt,
   popularFirst,
   priceText,
-  dealRows,
+  dealTags,
   restaurantById,
   FOOD_PROMPT,
   FOODS,
@@ -110,12 +98,13 @@ import {
 // 배달: idle → menu(메뉴 대기) → qty(수량 대기) → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
 // 식당: idle → food(음식 종류 대기) → restaurant(식당 목록에서 선택 대기)
 //      → rsvDate(날짜) → rsvTime(시간) → rsvPeople(인원) → rsvConfirm(예약 확인) → idle
-// 배달지: 주소·연락처를 모르면 주문서 전에 address(주소) → phone(연락처)를 묻는다
+// 배달 주문은 로그인한 고객님만, 계정의 배달지·연락처로 한다. 로그인 전이면 needLogin(로그인하러 갈지 묻는 중),
+//        계정에 배달지·연락처가 없으면 needContact(계정 관리로 갈지 묻는 중)에서 멈춘다
 // 그 밖: info(어느 가게 정보인지 고르는 중), cancelConfirm(내 주문 취소 확인)
 type Stage =
   | "idle" | "menu" | "qty" | "confirm" | "pay" | "paying" | "done"
   | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm"
-  | "info" | "cancelConfirm" | "address" | "phone";
+  | "info" | "cancelConfirm" | "needLogin" | "needContact";
 
 // 예약 정보는 날짜 → 시간 → 인원 순으로 채워진다
 type ReservationDraft = Partial<Reservation> & { restaurant: Restaurant };
@@ -135,7 +124,6 @@ type Message =
       noDirect?: boolean;
       say?: string;
       menu?: DeliveryItem[]; // 추천 메뉴 (채팅창을 끈 동안 표로)
-      dealRows?: OrderRow[]; // 오늘의 메뉴·할인 표 (채팅 말풍선)
       picked?: string;
     }
   | { id: number; role: "bot"; kind: "order"; order: Order }
@@ -164,7 +152,7 @@ const GREETING = "안녕하세요! Saylo예요.\n무엇을 주문해 드릴까�
 
 let nextId = 1;
 const botText = (text: string): NewMessage => ({ role: "bot", kind: "text", text });
-const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect, say, menu, dealRows }: BotPrompt): NewMessage => ({
+const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect, say, menu }: BotPrompt): NewMessage => ({
   role: "bot",
   kind: "text",
   text,
@@ -175,9 +163,11 @@ const botPrompt = ({ text, choices, placeholder, picker, directLabel, noDirect, 
   noDirect,
   say,
   menu,
-  dealRows: dealRows?.length ? dealRows : undefined,
 });
 const DEFAULT_PLACEHOLDER = "메시지를 입력하세요";
+// 로그인 전인 손님을 로그인 화면으로, 계정에 배달지·연락처가 없는 고객님을 계정 관리로 보내는 버튼
+const LOGIN_CHOICE: Choice = { label: "로그인하러 가기", value: "로그인할게요" };
+const ACCOUNT_CHOICE: Choice = { label: "계정 관리로 가기", value: "계정 관리로 갈게요" };
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
 
 // 배달 수량 카운터 말풍선
@@ -248,6 +238,73 @@ function spokenText(m: Message): string {
   }
 }
 
+// ---- 추천 카드 ----
+// 식당 추천과 배달 메뉴 추천을 같은 모양으로 보여 준다: 굵은 이름, 아래 작은 글씨 설명, 오른쪽 알약(식당은 거리, 메뉴는 가격).
+// tags: 설명 맨 앞에 강조해 붙이는 오늘의 메뉴·할인. 채팅창을 끈 동안의 표(pickCardRow)도 같은 내용이다
+interface PickCard {
+  id: string;
+  name: string;
+  tags: string[];
+  info: string[];
+  pill: string;
+}
+
+const openText = (r: Restaurant, now: Date) => (isOpenNow(r, now) ? "영업 중" : `${r.hours.split("-")[0].trim()} 오픈`);
+
+const restaurantCard = (r: Restaurant, now: Date): PickCard => ({
+  id: r.id,
+  name: r.name,
+  tags: [],
+  info: [`대표 메뉴 ${r.signature}`, `평점 ${r.rating.toFixed(1)}`, openText(r, now)],
+  pill: km(r.distanceKm),
+});
+
+function menuCard(d: DeliveryItem, now: Date): PickCard {
+  const store = restaurantById(d.restaurantId);
+  return { id: d.id, name: d.name, tags: dealTags(d), info: [store.name, openText(store, now)], pill: won(d.price) };
+}
+
+const pickCardRow = (c: PickCard): OrderRow => ({ label: c.name, value: [c.pill, ...c.tags, ...c.info].join(" · ") });
+
+// 카드 목록. 버튼의 이름은 식당·메뉴 이름이고, 설명·알약은 읽기 프로그램에 덧붙는 설명으로 준다
+function PickCards({ cards, selected, disabled, onPick }: { cards: PickCard[]; selected?: string; disabled: boolean; onPick: (c: PickCard) => void }) {
+  const uid = useId();
+  return (
+    <div className="places">
+      {cards.map((c) => {
+        const id = `${uid}-${c.id}`;
+        return (
+          <button
+            key={c.id}
+            type="button"
+            className={selected === c.id ? "selected" : undefined}
+            disabled={disabled}
+            onClick={() => onPick(c)}
+            aria-labelledby={id}
+            aria-describedby={`${id}-info ${id}-pill`}
+          >
+            <span className="place-main">
+              <b id={id}>{c.name}</b>
+              <small id={`${id}-info`}>
+                {c.tags.map((t) => (
+                  <Fragment key={t}>
+                    <em className="place-deal">{t}</em>
+                    {" · "}
+                  </Fragment>
+                ))}
+                {c.info.join(" · ")}
+              </small>
+            </span>
+            <span className="place-distance" id={`${id}-pill`}>
+              {c.pill}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---- 채팅창을 끈 동안의 가운데 자막 ----
 // 표가 있는 답(주문서·예약 확인·식당·안내)은 자막에 제목·질문 한 줄만 적고, 다 적히면 그 아래에 표를 띄운다.
 // 소리로는 지금처럼 표 내용까지 읽는다 (spokenText)
@@ -293,29 +350,9 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
       return { key, rows: m.card.rows };
     case "text":
       if (!m.menu?.length) return null;
-      return {
-        key,
-        list: true,
-        rows: m.menu.map((d) => ({
-          label: d.special ? `오늘의 메뉴 · ${d.name}` : d.name,
-          value: [
-            won(d.price),
-            d.discountPct ? `${d.discountPct}% 할인 (원래 ${won(d.listPrice ?? d.price)})` : "",
-            restaurantById(d.restaurantId).name,
-          ]
-            .filter(Boolean)
-            .join(" · "),
-        })),
-      };
+      return { key, list: true, rows: m.menu.map((d) => pickCardRow(menuCard(d, now))) };
     case "restaurants":
-      return {
-        key,
-        list: true,
-        rows: m.list.map((r) => ({
-          label: r.name,
-          value: `${km(r.distanceKm)} · ${r.signature} · ${isOpenNow(r, now) ? "영업 중" : `${r.hours.split("-")[0].trim()} 오픈`}`,
-        })),
-      };
+      return { key, list: true, rows: m.list.map((r) => pickCardRow(restaurantCard(r, now))) };
     default:
       return null;
   }
@@ -390,9 +427,6 @@ export function OrderChatbot() {
   const [lastItem, setLastItem] = useState<DeliveryItem | null>(null);
   // 취소할지 묻고 있는 내 주문
   const [cancelTarget, setCancelTarget] = useState<OrderRecord | null>(null);
-  // 배달지·연락처 (이 브라우저에 기억해 둔 것). 모르는 동안 고른 메뉴·수량은 pendingOrder 에 두고 주소부터 묻는다
-  const [delivery, setDelivery] = useState<Partial<DeliveryInfo>>(loadDelivery);
-  const [pendingOrder, setPendingOrder] = useState<{ item: DeliveryItem; qty: number } | null>(null);
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -421,21 +455,10 @@ export function OrderChatbot() {
   // 사장님이 바꾼 영업시간·품절·메뉴와 인기 통계를 서버에서 받아 온다 (메뉴 버튼·추천 순서와 예약 시간에 반영)
   useDb(["settings", "popular", "menu"]);
 
-  // 로그인한 고객님이 이 브라우저에서 처음 주문하면, 다른 기기에서 했던 지난 주문의 배달지·연락처를 이어서 쓴다
-  const knownDelivery = hasDelivery(delivery);
-  useEffect(() => {
-    if (session?.role !== "user" || knownDelivery) return;
-    let alive = true;
-    fetchMyOrders()
-      .then((list) => {
-        const last = list.find((o) => o.order.address && o.order.phone);
-        if (alive && last) setDelivery((d) => ({ address: d.address ?? last.order.address, phone: d.phone ?? last.order.phone }));
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [session?.role, session?.username, knownDelivery]);
+  // 배달 주문은 로그인한 고객님이 계정 관리에 적은 배달지·연락처로 한다 (어느 기기에서든 같다)
+  const member = session?.role === "user";
+  const myDelivery: Partial<DeliveryInfo> = session?.role === "user" ? { address: session.address, phone: session.phone } : {};
+  const memberReady = member && hasDelivery(myDelivery);
 
   useEffect(() => {
     if (!notice) return;
@@ -583,52 +606,51 @@ export function OrderChatbot() {
     botReply(() => push(...(opts.lead ?? []), { role: "bot", kind: "restaurants", foodLabel, list, heading: opts.heading }), 900);
   }
 
-  // 메뉴·수량이 정해지면 주문서로. 배달지·연락처를 아직 모르면 먼저 묻고, 다 받으면 이어서 주문서를 보여 준다
-  function startOrder(item: DeliveryItem, qty: number, info: Partial<DeliveryInfo> = delivery) {
+  // 메뉴·수량이 정해지면 계정의 배달지·연락처로 주문서를 만든다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
+  function startOrder(item: DeliveryItem, qty: number) {
+    if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
     setPendingItem(null);
     setLastItem(item);
-    if (!hasDelivery(info)) {
-      setPendingOrder({ item, qty });
-      askDelivery(info.address ? "phone" : "address");
-      return;
-    }
-    const next = makeOrder(item, qty, info);
-    setPendingOrder(null);
+    const next = makeOrder(item, qty, myDelivery);
     setOrder(next);
     setStage("confirm");
     botReply(() => push(botText("근처 매장을 찾았어요."), { role: "bot", kind: "order", order: next }), 1000);
   }
 
-  function askDelivery(what: "address" | "phone", lead?: string) {
-    setStage(what);
-    botReply(() => push(botPrompt(what === "address" ? addressPrompt(lead) : phonePrompt(lead))));
+  // 배달 주문은 로그인한 고객님이 계정에 배달지·연락처를 적어 둬야 할 수 있다. 아니면 안내하고 멈춘다(true).
+  // 고르던 메뉴·수량은 기억해 두었다가 로그인하거나 배달지를 등록하고 돌아오면 이어 간다
+  function deliveryBlocked(resume: ResumeDelivery): boolean {
+    if (!session) {
+      sendAway("login", "배달 주문은 로그인한 뒤에 할 수 있어요.\n로그인하시면 고르신 메뉴로 이어서 주문해 드릴게요.", resume);
+      return true;
+    }
+    if (session.role !== "user") {
+      startFresh();
+      setStage("idle");
+      botReply(() => push(botText("배달 주문은 고객님 계정으로 할 수 있어요.")));
+      return true;
+    }
+    if (hasDelivery(myDelivery)) return false;
+    const what = !myDelivery.address && !myDelivery.phone ? "배달지와 연락처" : !myDelivery.address ? "배달지" : "연락처";
+    sendAway("account", `아직 계정에 ${what}가 없어요.\n계정 관리에서 ${what}를 등록하시면 이어서 주문해 드릴게요.`, resume);
+    return true;
   }
 
-  // 주소·연락처 답. 받은 것은 이 브라우저에 기억해 두고, 둘 다 있으면 기다리던 주문서로 넘어간다
-  function answerDelivery(text: string) {
-    if (isStopDelivery(text)) {
-      setPendingOrder(null);
-      cancelDelivery();
-      return;
-    }
-    let info: Partial<DeliveryInfo>;
-    if (stage === "address") {
-      const error = addressError(text);
-      if (error) return askDelivery("address", error);
-      info = { ...delivery, address: cleanAddress(text) };
-    } else {
-      const phone = normalizePhone(text);
-      if (!phone) return askDelivery("phone", "전화번호를 잘 모르겠어요. 숫자로 알려 주세요.");
-      info = { ...delivery, phone };
-    }
-    setDelivery(info);
-    saveDelivery(info);
-    if (!info.phone) return askDelivery("phone");
-    if (pendingOrder) startOrder(pendingOrder.item, pendingOrder.qty, info);
-    else {
-      setStage("idle");
-      botReply(() => push(botText("배달지를 저장했어요. 다음 주문부터 이 주소로 보내 드릴게요.")));
-    }
+  // 로그인 화면이나 계정 관리로 가자고 안내한다 (버튼을 누르거나 "응"이라고 하면 간다)
+  function sendAway(to: "login" | "account", text: string, resume: ResumeDelivery) {
+    startFresh();
+    rememberResume(session?.username ?? null, resume);
+    setStage(to === "login" ? "needLogin" : "needContact");
+    botReply(() => push(botPrompt({ text, choices: [to === "login" ? LOGIN_CHOICE : ACCOUNT_CHOICE], noDirect: true })));
+  }
+
+  // 로그인하거나 배달지를 등록하고 돌아왔을 때: 메뉴·수량을 다 골랐으면 주문서로, 메뉴만 골랐으면 수량부터, 아니면 메뉴부터
+  function continueOrder(resume: ResumeDelivery) {
+    const item = resume.itemId ? availableDeliveryMenu().find((d) => d.id === resume.itemId) : undefined;
+    push(botText(`${session ? `${session.name}님, ` : ""}고르시던 배달 주문을 이어서 도와드릴게요.`));
+    if (item && qtyInRange(resume.qty)) startOrder(item, resume.qty);
+    else if (item) deliverItems([item], "");
+    else startMenu("배달");
   }
 
   const rangeLead = (item: DeliveryItem) => `1${item.unit}부터 ${MAX_QTY}${item.unit}까지 주문할 수 있어요.`;
@@ -637,9 +659,10 @@ export function OrderChatbot() {
   // 고른 메뉴(들)로 주문을 이어 간다. 수량까지 있으면 바로 주문서로, 없으면 수량을 묻고,
   // 여러 메뉴면 그중에서 고르게 한다. 같이 말한 수량("두 마리")·결제수단("카카오페이로")은 기억해 뒀다가 쓴다
   function deliverItems(items: DeliveryItem[], text: string) {
+    const said = parseQuantity(text);
+    if (deliveryBlocked(items.length === 1 ? { itemId: items[0].id, qty: said ?? pendingQty ?? undefined } : {})) return;
     const pay = findPayment(text);
     if (pay) setPendingPay(pay);
-    const said = parseQuantity(text);
     if (items.length > 1) {
       setPendingItem(null);
       setPendingQty(qtyInRange(said) ? said : null);
@@ -898,11 +921,10 @@ export function OrderChatbot() {
       }
       const said = parseQuantity(text);
       const qty = qtyInRange(said) ? said : last.order.qty;
-      // 지난 주문의 배달지로 보낸다 (없으면 기억해 둔 배달지, 그것도 없으면 주소부터 묻는다)
-      const info: Partial<DeliveryInfo> = last.order.address && last.order.phone ? { address: last.order.address, phone: last.order.phone } : delivery;
+      // 지금 계정의 배달지로 보낸다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
       return () => {
-        if (!hasDelivery(info)) return startOrder(item, qty, info);
-        const next = makeOrder(item, qty, info);
+        if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
+        const next = makeOrder(item, qty, myDelivery);
         setLastItem(item);
         setOrder(next);
         setStage("confirm");
@@ -965,7 +987,6 @@ export function OrderChatbot() {
           ],
           placeholder: "예) 간장치킨",
           menu: items,
-          dealRows: dealRows(items),
         }),
       ),
     );
@@ -1001,30 +1022,33 @@ export function OrderChatbot() {
 
   function handleAccepted(text: string) {
 
-    // 주문 확인·결제수단 단계에서 빠른 메뉴(배달·식당 등)를 고르면 주문을 접고 아래 일반 처리로 넘어간다
-    const switchingMenu = (stage === "confirm" || stage === "pay") && !!quickMenuReply(text);
+    // "치킨집 예약", "근처 맛집": 메뉴 이름(치킨)이 들어 있어도 식당·예약 말이면 배달이 아니라 식당 찾기로 본다
+    const wantsRestaurant = menuIntent(text) === "식당";
+    // 주문 확인·결제수단 단계에서 빠른 메뉴(배달·식당 등)를 고르거나 식당·예약 얘기를 하면 주문을 접고 아래 일반 처리로 넘어간다
+    const switchingMenu = (stage === "confirm" || stage === "pay") && (!!quickMenuReply(text) || wantsRestaurant);
 
-    // 배달지·연락처를 묻는 중
-    if (stage === "address" || stage === "phone") {
-      // "양념치킨 시켜줘", "식당", "내 주문 어디쯤"처럼 다른 말이면 주소로 저장하지 않고 그 말로 넘어간다.
-      // ("…로 배달해 주세요"처럼 주소 뒤에 붙는 말은 주소로 본다: 배달·주문 낱말만으로는 넘어가지 않는다)
-      const looksLikeCommand = findDeliveryItems(text).length > 0 || !!quickMenuReply(text) || !!detectIntent(text);
-      if (!looksLikeCommand) {
-        answerDelivery(text);
+    // 로그인하러 갈지, 계정 관리로 갈지 묻는 중. 가겠다는 말이면 가고, 다른 말이면 아래 일반 처리로
+    if (stage === "needLogin" || stage === "needContact") {
+      const login = stage === "needLogin";
+      const go = text === (login ? LOGIN_CHOICE : ACCOUNT_CHOICE).value || isYes(text) || (login ? /로그인|가입/ : /계정|등록|배달지|주소|연락처|전화/).test(text);
+      if (go) {
+        // 해시 주소라 주소만 바꾸면 그 화면으로 간다 (헤더의 계정 링크와 같다)
+        window.location.assign(login ? "#/login" : "#/account");
         return;
       }
-      setPendingOrder(null);
       setStage("idle");
     }
 
     if (stage === "confirm" && order && !switchingMenu) {
-      // "주소 바꿔줘", "연락처 바꿀래": 그 항목만 다시 묻고 같은 메뉴·수량으로 주문서를 다시 만든다
+      // "주소 바꿔줘", "연락처 바꿀래": 배달지·연락처는 계정 관리에서 바꾼다. 바꾸고 돌아오면 같은 메뉴·수량으로 주문서를 다시 만든다
       const change = deliveryChange(text);
       const ordered = availableDeliveryMenu().find((d) => d.restaurantId === order.storeId && d.name === order.item);
       if (change && ordered) {
-        setPendingOrder({ item: ordered, qty: order.qty });
-        setOrder(null);
-        askDelivery(change, change === "address" ? "새 배달지로 다시 만들어 드릴게요." : "새 연락처로 다시 만들어 드릴게요.");
+        sendAway(
+          "account",
+          `${change === "address" ? "배달지" : "연락처"}는 계정 관리에서 바꿀 수 있어요.\n바꾸고 돌아오시면 같은 메뉴로 주문서를 다시 만들어 드릴게요.`,
+          { itemId: ordered.id, qty: order.qty },
+        );
         return;
       }
       // "3마리로 해줘": 수량만 바꿔 주문서를 다시 보여 준다 ("해줘"가 들어 있어도 '응'보다 먼저 본다)
@@ -1036,7 +1060,7 @@ export function OrderChatbot() {
           return;
         }
         // 배달지·연락처는 지금 주문서의 것을 그대로 둔다
-        const info = order.address && order.phone ? { address: order.address, phone: order.phone } : delivery;
+        const info = order.address && order.phone ? { address: order.address, phone: order.phone } : myDelivery;
         const next = makeOrder(item, newQty, hasDelivery(info) ? info : undefined);
         setOrder(next);
         botReply(() => push(botText(`수량을 ${newQty}${item.unit}로 바꿨어요.`), { role: "bot", kind: "order", order: next }));
@@ -1125,7 +1149,7 @@ export function OrderChatbot() {
 
     // 배달 메뉴 고르는 중
     if (stage === "menu") {
-      if (tryDelivery(text)) return;
+      if (!wantsRestaurant && tryDelivery(text)) return;
       if (isNo(text)) {
         cancelDelivery();
         return;
@@ -1377,11 +1401,11 @@ export function OrderChatbot() {
     setRsv(null);
     setRsvSlots({});
     setCancelTarget(null);
-    setPendingOrder(null);
   }
 
   // 배달·식당의 첫 질문으로
   function startMenu(menu: "배달" | "식당") {
+    if (menu === "배달" && deliveryBlocked({})) return;
     const reply = menuReply(menu)!;
     startFresh();
     setStage(reply.next);
@@ -1425,7 +1449,6 @@ export function OrderChatbot() {
     setLastPlace(null);
     setLastItem(null);
     setCancelTarget(null);
-    setPendingOrder(null);
     inputRef.current?.focus();
   }
 
@@ -1519,34 +1542,27 @@ export function OrderChatbot() {
   function renderBot(m: Exclude<Message, { role: "user" }>) {
     switch (m.kind) {
       case "text": {
-        const deals = m.dealRows && (
-          <div className="card deal-card">
-            <dl>
-              {m.dealRows.map((row) => (
-                <Fragment key={row.label + row.value}>
-                  <dt>{row.label}</dt>
-                  <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
-                </Fragment>
-              ))}
-            </dl>
-          </div>
-        );
-        if (!m.choices)
-          return (
-            <>
-              {m.text}
-              {deals}
-            </>
-          );
+        if (!m.choices) return m.text;
         const active = m.id === activeChoicesId;
         // 날짜·시간 질문은 "직접 입력"이 글자 입력창 대신 달력·시간 고르기를 펼친다
         const manual = m.picker ? pickerOpenFor === m.id : manualInputFor === m.id;
+        // 추천 메뉴는 식당 추천과 같은 카드로 보여 주고, 나머지 선택지(식당 찾기·지난번 메뉴 다시 등)는 그 아래 작은 버튼으로
+        const menu = m.menu ?? [];
+        const others = m.choices.filter((c) => !menu.some((d) => d.name === c.value));
+        const now = new Date();
         return (
           <>
             {m.text}
-            {deals}
+            {menu.length > 0 && (
+              <PickCards
+                cards={menu.map((d) => menuCard(d, now))}
+                selected={menu.find((d) => d.name === m.picked)?.id}
+                disabled={!active}
+                onPick={(c) => pickChoice(m.id, { label: c.name, value: c.name })}
+              />
+            )}
             <div className="choices">
-              {m.choices.map((c) => (
+              {others.map((c) => (
                 <button
                   key={c.value}
                   type="button"
@@ -1621,25 +1637,12 @@ export function OrderChatbot() {
         return (
           <>
             {m.heading ?? `근처 ${m.foodLabel} 맛집을 추천해요!\n가까운 순서예요. 마음에 드는 곳을 골라 주세요.`}
-            <div className="places">
-              {m.list.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  className={m.selected === r.id ? "selected" : undefined}
-                  disabled={m.id !== activeRestaurantsId}
-                  onClick={() => handle(r.name)}
-                >
-                  <span className="place-main">
-                    <b>{r.name}</b>
-                    <small>
-                      대표 메뉴 {r.signature} · 평점 {r.rating.toFixed(1)} · {isOpenNow(r, new Date()) ? "영업 중" : `${r.hours.split("-")[0].trim()} 오픈`}
-                    </small>
-                  </span>
-                  <span className="place-distance">{km(r.distanceKm)}</span>
-                </button>
-              ))}
-            </div>
+            <PickCards
+              cards={m.list.map((r) => restaurantCard(r, new Date()))}
+              selected={m.selected}
+              disabled={m.id !== activeRestaurantsId}
+              onPick={(c) => handle(c.name)}
+            />
           </>
         );
       case "restaurantPicked":
@@ -1734,6 +1737,26 @@ export function OrderChatbot() {
         );
     }
   }
+
+  // 로그인하러 갔거나 계정 관리로 갔던 고객님이 돌아오면, 고르던 메뉴·수량으로 주문을 이어 간다.
+  // 배달지가 아직 없으면 계정 관리 안내부터 다시 한다. 로그인하거나 배달지를 등록한(memberReady 가 바뀐) 그 순간에만 보고,
+  // 기억해 둔 주문은 그 순간에 바로 꺼내고(그 뒤에 새로 기억한 주문을 잘못 이어 가지 않게), 이어 가는 것은 한 박자 뒤에 한다
+  // (StrictMode 처럼 효과가 바로 정리됐다 다시 돌아도 한 번만 이어 가도록 꺼낸 주문은 ref 에 두고 함께 쓴다)
+  const resumeOrder = useEffectEvent((resume: ResumeDelivery) => {
+    if (!deliveryBlocked(resume)) continueOrder(resume);
+  });
+  const pendingResume = useRef<ResumeDelivery | null>(null);
+  const username = member ? session?.username : undefined;
+  useEffect(() => {
+    if (!username) return;
+    pendingResume.current ??= takeResume(username);
+    const t = window.setTimeout(() => {
+      const resume = pendingResume.current;
+      pendingResume.current = null;
+      if (resume) resumeOrder(resume);
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [memberReady, username]);
 
   return (
     <div className="app">

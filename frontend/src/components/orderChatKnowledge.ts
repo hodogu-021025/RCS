@@ -457,10 +457,9 @@ export interface BotPrompt {
   // 소리로 읽고 채팅창을 끈 동안 자막으로 보여 줄 문장. 선택지를 "중에서 고르세요"가 아니라 추천하듯 말한다.
   // 없으면 text 와 선택지로 만든다
   say?: string;
-  // 추천하는 배달 메뉴. 채팅창을 끈 동안에는 메뉴 이름을 자막에 늘어놓지 않고 이 목록을 표로 보여 준다
+  // 추천하는 배달 메뉴. 말풍선에서는 식당 추천과 같은 카드 목록(이름·오늘의 메뉴/할인·가게·영업 여부·가격)으로,
+  // 채팅창을 끈 동안에는 자막에 이름을 늘어놓지 않고 같은 내용의 표로 보여 준다
   menu?: DeliveryItem[];
-  // 오늘의 메뉴·할인 표 (채팅 말풍선에 글줄 대신 작은 표로)
-  dealRows?: OrderRow[];
 }
 
 export const FOOD_PROMPT: BotPrompt = {
@@ -492,17 +491,8 @@ export function dealsSay(menu: DeliveryItem[]): string {
   return parts.length ? `${parts.join(" ")} ` : "";
 }
 
-// 채팅 말풍선의 오늘의 메뉴·할인 표: "오늘의 메뉴 | 간장치킨 20,000원 → 16,000원 (20% 할인)", "15% 할인 | 국물떡볶이 6,000원 → 5,100원"
-export function dealRows(menu: DeliveryItem[]): OrderRow[] {
-  return menu
-    .filter((d) => d.special || d.discountPct)
-    .map((d) => {
-      const price = d.discountPct ? `${won(d.listPrice ?? d.price)} → ${won(d.price)}` : won(d.price);
-      return d.special
-        ? { label: "오늘의 메뉴", value: `${d.name} ${price}${d.discountPct ? ` (${d.discountPct}% 할인)` : ""}`, emphasis: true }
-        : { label: `${d.discountPct}% 할인`, value: `${d.name} ${price}` };
-    });
-}
+// 메뉴 카드·표에 붙이는 오늘의 메뉴·할인 표시: ["오늘의 메뉴", "20% 할인"] (없으면 빈 목록)
+export const dealTags = (d: DeliveryItem): string[] => [d.special ? "오늘의 메뉴" : "", d.discountPct ? `${d.discountPct}% 할인` : ""].filter(Boolean);
 
 // 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 하고, 인기 순서도 바뀐다
 export const deliveryPrompt = (): BotPrompt => {
@@ -510,7 +500,6 @@ export const deliveryPrompt = (): BotPrompt => {
   return {
     text: "오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.",
     menu,
-    dealRows: dealRows(menu),
     say: menu.length
       ? `${dealsSay(menu)}오늘은 ${recommend(menu.map((d) => d.name))} 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
       : "어떤 음식을 배달해 드릴까요?",
@@ -526,7 +515,6 @@ export const pickDeliveryPrompt = (items: DeliveryItem[]): BotPrompt => ({
   say: `${dealsSay(items)}${recommend(items.map((d) => d.name))} 마음에 드는 걸로 말씀해 주세요.`,
   choices: deliveryChoices(items),
   menu: items,
-  dealRows: dealRows(items),
 });
 
 // (빠른 메뉴 — 배달·식당 — 는 quickMenu.ts 에 있다)

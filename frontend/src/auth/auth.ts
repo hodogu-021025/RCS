@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { ApiError, api, getToken, onUnauthorized, setToken } from "../api/client";
 import { normalizeEmail } from "../api/emailVerification";
+import { PHONE_ERROR, addressError, normalizePhone } from "../components/delivery";
 
 export type Role = "user" | "owner" | "admin";
 
@@ -12,6 +13,8 @@ export interface Session {
   name: string;
   storeId?: string; // 사장님만
   approved?: boolean; // 사장님만: 관리자가 승인했는지 (스스로 가입하면 승인 전에는 매장 정보를 볼 수 없다)
+  phone?: string; // 가입할 때 받은 연락처 (이 기능 전에 만든 계정은 없을 수 있다)
+  address?: string; // 고객님만: 계정 관리에서 적은 배달지. 챗봇 배달 주문은 이 주소로 보낸다
 }
 
 export const ROLE_LABEL: Record<Role, string> = { user: "소비자", owner: "사장님", admin: "관리자" };
@@ -133,6 +136,19 @@ export async function withdraw(password: string): Promise<{ ok: true } | { error
   return { ok: true };
 }
 
+// 계정 관리: 내 연락처·배달지를 바꾼다. 서버가 돌려준 세션으로 바로 바꿔 끼워 챗봇도 새 배달지를 쓴다
+export async function updateContact(patch: { phone?: string; address?: string }): Promise<{ session: Session } | { error: string }> {
+  if (patch.phone !== undefined && !normalizePhone(patch.phone)) return { error: PHONE_ERROR };
+  if (patch.address !== undefined && addressError(patch.address)) return { error: "배달지를 동·호수까지 자세히 적어 주세요." };
+  try {
+    const { session } = await api<{ session: Session }>("PATCH", "/api/auth/contact", patch);
+    setState({ session, loaded: true });
+    return { session };
+  } catch (e) {
+    return { error: (e as ApiError).message };
+  }
+}
+
 export interface SignupInput {
   role: "user" | "owner"; // 고객님 · 사장님
   username: string;
@@ -140,6 +156,7 @@ export interface SignupInput {
   passwordConfirm: string;
   name: string;
   email: string;
+  phone: string; // 연락처 (010-1234-5678 모양으로 바꿔 보낸다)
   proof: string | null; // 이메일 인증을 마치면 받은 증표
   storeId?: string; // 사장님만: 내 매장
   agreePrivacy: boolean; // 개인정보 수집·이용 동의 (필수)
@@ -150,17 +167,19 @@ export async function signup(input: SignupInput): Promise<{ error: string } | { 
   const username = input.username.trim();
   const name = input.name.trim();
   const { password, role, storeId } = input;
+  const phone = normalizePhone(input.phone);
   const error =
     usernameError(username) ??
     (!name ? "이름을 적어 주세요." : null) ??
     (role === "owner" && !storeId ? "매장을 골라 주세요." : null) ??
+    (!phone ? PHONE_ERROR : null) ??
     (!input.proof ? "이메일 인증을 마쳐 주세요." : null) ??
     passwordError(password) ??
     (password !== input.passwordConfirm ? "비밀번호가 서로 달라요." : null) ??
     (!input.agreePrivacy ? "개인정보 수집·이용에 동의해 주세요." : null);
   if (error) return { error };
   try {
-    const body = { role, username, password, passwordConfirm: input.passwordConfirm, name, email: normalizeEmail(input.email), proof: input.proof, storeId, agreePrivacy: true };
+    const body = { role, username, password, passwordConfirm: input.passwordConfirm, name, email: normalizeEmail(input.email), proof: input.proof, phone, storeId, agreePrivacy: true };
     return { session: start(await api("POST", "/api/auth/signup", body)) };
   } catch (e) {
     return { error: (e as ApiError).message };

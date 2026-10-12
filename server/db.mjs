@@ -92,6 +92,8 @@ const toUser = (r) =>
     email: r.email ?? undefined,
     role: r.role,
     storeId: r.store_id ?? undefined,
+    phone: r.phone ?? undefined,
+    address: r.address ?? undefined,
     createdAt: r.created_at,
     ...(r.role === "owner" ? { approved: r.approved !== 0 } : {}),
   };
@@ -137,6 +139,9 @@ export function openDb(path) {
   if (!userCols.includes("privacy_agreed_at")) db.exec("ALTER TABLE users ADD COLUMN privacy_agreed_at INTEGER");
   // 사장님 승인: 스스로 가입한 사장님은 관리자가 승인하기 전까지 매장 정보를 볼 수 없다. 이 칸이 생기기 전 계정은 승인된 것으로 본다
   if (!userCols.includes("approved")) db.exec("ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1");
+  // 연락처(가입할 때 받는다)와 배달지(고객님이 계정 관리에서 적는다). 이 칸이 생기기 전 계정은 비어 있다
+  if (!userCols.includes("phone")) db.exec("ALTER TABLE users ADD COLUMN phone TEXT");
+  if (!userCols.includes("address")) db.exec("ALTER TABLE users ADD COLUMN address TEXT");
   // 오늘의 메뉴 { itemId, date }: 그 날짜(한국 시간)에만 오늘의 메뉴로 보인다
   if (!db.prepare("PRAGMA table_info(store_settings)").all().some((c) => c.name === "special_json")) db.exec("ALTER TABLE store_settings ADD COLUMN special_json TEXT");
   const q = (sql) => db.prepare(sql);
@@ -145,7 +150,8 @@ export function openDb(path) {
     userByName: q("SELECT * FROM users WHERE username = ?"),
     userByEmail: q("SELECT * FROM users WHERE email = ?"),
     usersByRole: q("SELECT * FROM users WHERE role = ? ORDER BY created_at"),
-    insertUser: q("INSERT INTO users (username, password_hash, name, email, role, store_id, created_at, privacy_version, privacy_agreed_at, approved) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+    insertUser: q("INSERT INTO users (username, password_hash, name, email, role, store_id, created_at, privacy_version, privacy_agreed_at, approved, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+    setContact: q("UPDATE users SET phone = ?, address = ? WHERE username = ?"),
     approveOwner: q("UPDATE users SET approved = 1 WHERE username = ? AND role = 'owner'"),
     userByEmail: q("SELECT * FROM users WHERE email = ?"),
     setPassword: q("UPDATE users SET password_hash = ? WHERE username = ?"),
@@ -214,9 +220,16 @@ export function openDb(path) {
     listByRole: (role) => stmts.usersByRole.all(role).map(toUser),
     countByRole: (role) => stmts.countRole.get(role).n,
     // approved: 사장님만 의미가 있다 (스스로 가입하면 false, 관리자가 만들면 true)
-    createUser({ username, passwordHash, name, email, role, storeId, privacyVersion = null, approved = true }) {
+    createUser({ username, passwordHash, name, email, role, storeId, privacyVersion = null, approved = true, phone }) {
       const now = Date.now();
-      stmts.insertUser.run(username, passwordHash, name, email ?? null, role, storeId ?? null, now, privacyVersion, privacyVersion ? now : null, approved ? 1 : 0);
+      stmts.insertUser.run(username, passwordHash, name, email ?? null, role, storeId ?? null, now, privacyVersion, privacyVersion ? now : null, approved ? 1 : 0, phone ?? null);
+      return toUser(stmts.userByName.get(username));
+    },
+    // 연락처·배달지 바꾸기. 넘기지 않은 칸은 그대로 둔다
+    updateContact(username, { phone, address }) {
+      const cur = stmts.userByName.get(username);
+      if (!cur) return null;
+      stmts.setContact.run(phone === undefined ? cur.phone : phone, address === undefined ? cur.address : address, username);
       return toUser(stmts.userByName.get(username));
     },
     deleteUser: (username) => stmts.deleteUser.run(username).changes > 0,
