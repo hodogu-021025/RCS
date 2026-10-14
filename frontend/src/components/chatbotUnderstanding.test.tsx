@@ -1,7 +1,7 @@
 // 챗봇이 여러 가지로 말해도 우리 기능(배달·식당 예약·주문 조회)으로 이어 가는지 실제 대화로 확인한다.
 // 시각은 2026-10-10(토) 18:30 저녁으로 고정한다
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { getDb, getMenu } from "../data/db";
+import { getDb, getMenu, refresh } from "../data/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderChatbot } from "./OrderChatbot";
 import { CUSTOMER, loginCustomer, server } from "../test/setup";
@@ -25,7 +25,8 @@ const find = (re: RegExp) => screen.findAllByText(re, {}, { timeout: 3000 });
 async function renderChat() {
   render(<OrderChatbot />);
   fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
-  await wait(50); // 매장 설정·인기 통계를 받아 온다
+  // 매장 설정·인기 통계·메뉴를 다 받아 온 뒤에 말한다 (시간만 기다리면 컴퓨터가 느릴 때 받기 전에 말해 버린다)
+  await act(() => refresh(["settings", "popular", "menu"]));
 }
 
 async function say(text: string) {

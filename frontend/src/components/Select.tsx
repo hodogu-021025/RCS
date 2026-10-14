@@ -11,19 +11,22 @@ interface Props {
   options: SelectOption[];
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string; // 아직 아무것도 고르지 않았을 때(value 가 목록에 없을 때) 흐리게 보이는 글자
 }
 
-// 직접 그리는 드롭다운. 기본 <select> 는 펼친 목록을 꾸밀 수 없어서 버튼 + listbox 로 만든다.
+// 직접 그리는 드롭다운. 기본 <select> 는 펼친 목록을 꾸밀 수 없어서 버튼 + listbox 로 만든다 (결제 팝업·사장님·관리자·회원가입 화면이 같이 쓴다).
 // 키보드: ↑↓ Home End 로 이동, Enter·Space 로 고르기, Esc·Tab 으로 닫기. 바깥을 누르면 닫힌다.
-export function Select({ label, options, value, onChange }: Props) {
+export function Select({ label, options, value, onChange, placeholder }: Props) {
   const [open, setOpen] = useState(false);
-  const selectedIndex = Math.max(0, options.findIndex((o) => o.value === value));
-  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const found = options.findIndex((o) => o.value === value);
+  // 고른 것이 없으면 자리표시 글자를 보여 주고(있을 때), 없으면 첫 항목을 고른 것으로 본다
+  const selectedIndex = found < 0 && placeholder === undefined ? 0 : found;
+  const [activeIndex, setActiveIndex] = useState(Math.max(0, selectedIndex));
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const selected = options[selectedIndex];
+  const selected = options[selectedIndex] as SelectOption | undefined;
 
   useEffect(() => {
     if (!open) return;
@@ -36,7 +39,7 @@ export function Select({ label, options, value, onChange }: Props) {
   }, [open]);
 
   function openList() {
-    setActiveIndex(selectedIndex);
+    setActiveIndex(Math.max(0, selectedIndex));
     setOpen(true);
   }
 
@@ -96,9 +99,9 @@ export function Select({ label, options, value, onChange }: Props) {
         onClick={() => (open ? close() : openList())}
         onKeyDown={onButtonKeyDown}
       >
-        <span id={`${id}-value`} className="select-value">
-          {selected.label}
-          {selected.sub && <small>{selected.sub}</small>}
+        <span id={`${id}-value`} className={"select-value" + (selected ? "" : " placeholder")}>
+          {selected?.label ?? placeholder}
+          {selected?.sub && <small>{selected.sub}</small>}
         </span>
         <svg className="select-chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
           <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />

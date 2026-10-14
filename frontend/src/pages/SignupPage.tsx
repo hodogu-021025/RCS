@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { HOME_BY_ROLE, PASSWORD_MIN, USERNAME_RULE, signup, useSession, type SignupInput } from "../auth/auth";
 import { normalizeEmail } from "../api/emailVerification";
 import { RESTAURANTS } from "../components/orderChatKnowledge";
+import { Select } from "../components/Select";
 import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordField } from "./PasswordField";
 import { PhoneField } from "./PhoneField";
@@ -90,17 +91,13 @@ export function SignupPage() {
           <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
         </label>
         {role === "owner" && (
-          <label>
-            <span>매장</span>
-            <select value={storeId} onChange={(e) => setStoreId(e.target.value)}>
-              <option value="">매장을 골라 주세요</option>
-              {RESTAURANTS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="매장"
+            placeholder="매장을 골라 주세요"
+            options={RESTAURANTS.map((r) => ({ value: r.id, label: r.name }))}
+            value={storeId}
+            onChange={setStoreId}
+          />
         )}
         <PhoneField value={phone} onChange={setPhone} />
         <EmailVerifyField email={email} onEmailChange={setEmail} verifiedEmail={verified?.email ?? null} onVerified={setVerified} />

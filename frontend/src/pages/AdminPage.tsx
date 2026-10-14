@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
 import { RESTAURANTS, formatDate, orderPriceLabel, withStoreSettings, won } from "../components/orderChatKnowledge";
 import { addOwner, approveOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
+import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
 import { PasswordField } from "./PasswordField";
@@ -283,16 +284,7 @@ function StoresTab() {
             <span>이름 (비우면 "매장 사장님")</span>
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
-          <label>
-            <span>매장</span>
-            <select value={storeId} onChange={(e) => setStoreId(e.target.value)}>
-              {RESTAURANTS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select label="매장" options={RESTAURANTS.map((r) => ({ value: r.id, label: r.name }))} value={storeId} onChange={setStoreId} />
           {error && (
             <p className="form-error" role="alert">
               {error}

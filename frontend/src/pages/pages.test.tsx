@@ -60,6 +60,12 @@ const fill = (fields: Record<string, string>) => {
   for (const [label, value] of Object.entries(fields)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
 };
 const click = (name: string | RegExp) => act(async () => void fireEvent.click(screen.getByRole("button", { name })));
+// 드롭다운(Select.tsx): 라벨로 찾아 펼치고 항목을 누른다
+const choose = (label: string, option: string) => {
+  const root = screen.getByText(label, { selector: ".select-label" }).closest<HTMLElement>(".select")!;
+  fireEvent.click(within(root).getByRole("button"));
+  fireEvent.click(within(root).getByRole("option", { name: option }));
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -185,7 +191,7 @@ describe("회원가입", () => {
     await click("사장님으로 가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("매장을 골라 주세요");
 
-    fill({ 매장: "c1" });
+    choose("매장", "장락반점");
     await click("사장님으로 가입하기");
     await waitFor(() => expect(window.location.hash).toBe("#/owner"));
     expect(await screen.findByText("장락반점 · 사장님")).toBeInTheDocument();
@@ -404,7 +410,7 @@ describe("사장님 페이지", () => {
     open("#/owner");
     fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
 
-    fill({ "오늘의 메뉴": "d2" });
+    choose("오늘의 메뉴", "간장치킨");
     await waitFor(() => expect(server.db.allStoreSettings().h3 as unknown as { special?: { itemId: string } }).toMatchObject({ special: { itemId: "d2" } }));
     expect(await screen.findByText("오늘의 메뉴", { selector: ".badge-special" })).toBeInTheDocument();
 
@@ -417,7 +423,7 @@ describe("사장님 페이지", () => {
     await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2 as { discountPct?: number }).toMatchObject({ discountPct: 25 }));
     expect(await screen.findByText("→ 15,000원")).toBeInTheDocument();
 
-    fill({ "오늘의 메뉴": "" });
+    choose("오늘의 메뉴", "없음");
     await waitFor(() => expect((server.db.allStoreSettings().h3 as unknown as { special?: unknown }).special).toBeUndefined());
   });
 
@@ -463,7 +469,8 @@ describe("관리자 페이지", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "매장·사장님" }));
     expect(await screen.findByText("11:00 - 18:00")).toBeInTheDocument(); // 사장님이 바꾼 영업시간이 보인다
 
-    fill({ 아이디: "jangrakboss", 비밀번호: "password1", 매장: "c1" });
+    fill({ 아이디: "jangrakboss", 비밀번호: "password1" });
+    choose("매장", "장락반점");
     await click("계정 만들기");
     expect(await screen.findByText("jangrakboss (장락반점 사장님)")).toBeInTheDocument();
     expect(server.db.findUser("jangrakboss")).toMatchObject({ role: "owner", storeId: "c1" });

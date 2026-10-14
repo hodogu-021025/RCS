@@ -15,6 +15,7 @@ import {
   type OrderRecord,
   type ReservationRecord,
 } from "../data/db";
+import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
 
@@ -329,16 +330,7 @@ function AddMenuForm({ storeId }: { storeId: string }) {
             <span>가격 (원)</span>
             <input type="number" inputMode="numeric" min={PRICE_MIN} step={500} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="예) 19000" />
           </label>
-          <label>
-            <span>단위</span>
-            <select value={unit} onChange={(e) => setUnit(e.target.value)}>
-              {UNITS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select label="단위" options={UNITS.map((u) => ({ value: u, label: u }))} value={unit} onChange={setUnit} />
         </div>
         <label>
           <span>손님이 부를 다른 이름 (선택, 쉼표로 구분)</span>
@@ -413,18 +405,15 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
         {items.length === 0 && <p className="empty">이 매장에 등록된 배달 메뉴가 없어요.</p>}
         {items.length > 0 && (
           // 오늘의 메뉴: 오늘(한국 시간) 자정까지 챗봇이 가장 먼저 추천한다
-          <label className="special-field">
-            <span>오늘의 메뉴</span>
-            <select aria-label="오늘의 메뉴" value={special ?? ""} onChange={(e) => run(setSpecialMenu(storeId, e.target.value || null))}>
-              <option value="">없음</option>
-              {items.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+          <div className="special-field">
+            <Select
+              label="오늘의 메뉴"
+              options={[{ value: "", label: "없음" }, ...items.map((d) => ({ value: d.id, label: d.name }))]}
+              value={special ?? ""}
+              onChange={(v) => run(setSpecialMenu(storeId, v || null))}
+            />
             <small>오늘 자정까지 챗봇이 가장 먼저 추천해요. 내일이 되면 자동으로 풀려요.</small>
-          </label>
+          </div>
         )}
         <ul className="menu-list">
           {items.map((d) => {

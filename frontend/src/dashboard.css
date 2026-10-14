@@ -39,6 +39,20 @@
 .dash input:not([type="checkbox"]):focus, .dash select:focus { background: #fff; border-color: var(--accent); }
 .dash input[type="time"], .dash input[type="number"] { width: auto; }
 .dash input[aria-invalid="true"], .dash input[aria-invalid="true"]:focus { border-color: #e5484d; }
+/* 드롭다운(Select.tsx): 닫혀 있을 때는 옆 입력칸과 같은 회색 칸, 펼치면 결제 팝업과 같은 흰 목록(고른 항목에 체크) */
+.dash .select { --theme: var(--accent); margin-bottom: 12px; }
+.dash .select-trigger {
+  height: 46px; border: 1.5px solid transparent; border-radius: 12px;
+  background: var(--surface); font: inherit; letter-spacing: inherit; font-weight: 400;
+  transition: background .15s, border-color .15s;
+}
+.dash .select-trigger:hover { border-color: transparent; }
+.dash .select-trigger:focus-visible,
+.dash .select.open .select-trigger { background: #fff; border-color: var(--accent); box-shadow: none; }
+.dash .select-value.placeholder { color: var(--muted); }
+.dash .select-list { border-radius: 12px; }
+.dash .select-option { height: 40px; font-size: 14px; font-weight: 500; }
+.dash .select-option[aria-selected="true"] { font-weight: 700; }
 .form-error { margin: 0 0 12px; color: #e5484d; font-size: 13px; font-weight: 600; }
 
 .btn {
@@ -213,8 +227,8 @@
 .menu-list li.stopped { background: var(--surface); }
 /* 오늘의 메뉴 고르기와 메뉴별 할인율 */
 .special-field { display: block; margin: 0 0 12px; }
-.special-field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .special-field small { display: block; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.special-field .select { margin-bottom: 0; }
 .badge-special { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-weak); color: var(--accent); font-size: 11.5px; font-weight: 700; vertical-align: 2px; }
 .discount-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .discount-field input { width: 64px !important; height: 38px !important; }
