@@ -366,8 +366,14 @@ describe("사장님 페이지", () => {
     open("#/owner");
     fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
 
-    await act(async () => void fireEvent.click(screen.getByRole("checkbox", { name: "품절" })));
+    const soldOut = screen.getByRole("button", { name: "간장치킨 품절" });
+    expect(soldOut).toHaveAttribute("aria-pressed", "false");
+    await act(async () => void fireEvent.click(soldOut));
     await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2?.soldOut).toBe(true));
+    // 켜진 품절 버튼은 눌린 상태로 보이고, 다시 누르면 풀린다
+    await waitFor(() => expect(screen.getByRole("button", { name: "간장치킨 품절" })).toHaveAttribute("aria-pressed", "true"));
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "간장치킨 품절" })));
+    await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2?.soldOut).toBe(false));
     const price = screen.getByRole("spinbutton", { name: "간장치킨 가격" });
     fireEvent.change(price, { target: { value: "23000" } });
     fireEvent.blur(price);
@@ -421,7 +427,7 @@ describe("사장님 페이지", () => {
     fireEvent.change(pct, { target: { value: "25" } });
     fireEvent.blur(pct);
     await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2 as { discountPct?: number }).toMatchObject({ discountPct: 25 }));
-    expect(await screen.findByText("→ 15,000원")).toBeInTheDocument();
+    expect(await screen.findByText("할인가 15,000원")).toBeInTheDocument();
 
     choose("오늘의 메뉴", "없음");
     await waitFor(() => expect((server.db.allStoreSettings().h3 as unknown as { special?: unknown }).special).toBeUndefined());
@@ -608,7 +614,8 @@ describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
     expect(await screen.findByText("16,000원 (20% 할인)")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "매장·메뉴" }));
-    await act(async () => void fireEvent.click(await screen.findByRole("checkbox", { name: "품절", hidden: false }, { timeout: 3000 }).then((el) => el).catch(() => screen.getAllByRole("checkbox", { name: "품절" }).at(-1)!)));
+    await act(async () => void fireEvent.click(await screen.findByRole("button", { name: "마늘치킨 품절" })));
+    await waitFor(() => expect((server.db as unknown as MenuDb).allStoreSettings().h3?.items[added.id]?.soldOut).toBe(true));
     const price = await screen.findByRole("spinbutton", { name: "마늘치킨 가격" });
     fireEvent.change(price, { target: { value: "24000" } });
     fireEvent.blur(price);

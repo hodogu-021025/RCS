@@ -426,52 +426,63 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
                   {d.name}
                   {special === d.id && <span className="badge-special">오늘의 메뉴</span>}
                 </b>
-                <label className="price-field">
-                  <input
-                    key={`${d.id}:${s.price ?? d.price}`} // 서버 값이 바뀌면(저장 실패로 되돌아오거나 다른 기기에서 바꾸면) 칸도 그 값으로
-                    type="number"
-                    min={0}
-                    step={500}
-                    defaultValue={s.price ?? d.price}
-                    aria-label={`${d.name} 가격`}
-                    onBlur={(e) => {
-                      const v = Number(e.target.value);
-                      if (v > 0 && v !== (s.price ?? d.price)) run(setMenuItem(storeId, d.id, { price: v }));
-                    }}
-                  />
-                  <span>원 / 1{d.unit}</span>
-                </label>
-                <label className="discount-field">
-                  <input
-                    key={`${d.id}:${pct}`}
-                    type="number"
-                    min={0}
-                    max={DISCOUNT_MAX}
-                    step={5}
-                    defaultValue={pct || ""}
-                    placeholder="0"
-                    aria-label={`${d.name} 할인율`}
-                    onBlur={(e) => {
-                      const v = e.target.value === "" ? 0 : Number(e.target.value);
-                      if (v === pct) return;
-                      if (!Number.isInteger(v) || v < 0 || v > DISCOUNT_MAX) {
-                        setMenuError(`할인율은 0~${DISCOUNT_MAX}% 사이 정수로 적어 주세요.`);
-                        e.target.value = pct ? String(pct) : "";
-                        return;
-                      }
-                      run(setMenuItem(storeId, d.id, { discountPct: v }));
-                    }}
-                  />
-                  <span>% 할인</span>
-                  {pct > 0 && <span className="sale-price">→ {won(discountedPrice(list, pct))}</span>}
-                </label>
-                <label className="toggle">
-                  <input type="checkbox" checked={!!s.soldOut} onChange={(e) => run(setMenuItem(storeId, d.id, { soldOut: e.target.checked }))} />
-                  품절
-                </label>
-                <button type="button" className="btn small" onClick={() => toggle(d.id, false)} aria-label={`${d.name} 판매 중지`}>
-                  판매 중지
-                </button>
+                {/* 가격과 할인율은 한 줄에 나란히. 할인한 가격은 그 아래 한 줄로 (휴대폰 폭에서도 두 칸이 한 줄에 들어가게) */}
+                <div className="price-row">
+                  <label className="price-field">
+                    <input
+                      key={`${d.id}:${s.price ?? d.price}`} // 서버 값이 바뀌면(저장 실패로 되돌아오거나 다른 기기에서 바꾸면) 칸도 그 값으로
+                      type="number"
+                      min={0}
+                      step={500}
+                      defaultValue={s.price ?? d.price}
+                      aria-label={`${d.name} 가격`}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v > 0 && v !== (s.price ?? d.price)) run(setMenuItem(storeId, d.id, { price: v }));
+                      }}
+                    />
+                    <span>원 / 1{d.unit}</span>
+                  </label>
+                  <label className="discount-field">
+                    <input
+                      key={`${d.id}:${pct}`}
+                      type="number"
+                      min={0}
+                      max={DISCOUNT_MAX}
+                      step={5}
+                      defaultValue={pct || ""}
+                      placeholder="0"
+                      aria-label={`${d.name} 할인율`}
+                      onBlur={(e) => {
+                        const v = e.target.value === "" ? 0 : Number(e.target.value);
+                        if (v === pct) return;
+                        if (!Number.isInteger(v) || v < 0 || v > DISCOUNT_MAX) {
+                          setMenuError(`할인율은 0~${DISCOUNT_MAX}% 사이 정수로 적어 주세요.`);
+                          e.target.value = pct ? String(pct) : "";
+                          return;
+                        }
+                        run(setMenuItem(storeId, d.id, { discountPct: v }));
+                      }}
+                    />
+                    <span>% 할인</span>
+                  </label>
+                </div>
+                {pct > 0 && <p className="sale-price">할인가 {won(discountedPrice(list, pct))}</p>}
+                {/* 품절은 눌러서 켜고 끄는 버튼(켜지면 파란 칸), 판매 중지는 같은 모양의 버튼 */}
+                <div className="menu-actions">
+                  <button
+                    type="button"
+                    className={"btn small" + (s.soldOut ? " on" : "")}
+                    aria-pressed={!!s.soldOut}
+                    aria-label={`${d.name} 품절`}
+                    onClick={() => run(setMenuItem(storeId, d.id, { soldOut: !s.soldOut }))}
+                  >
+                    품절
+                  </button>
+                  <button type="button" className="btn small" onClick={() => toggle(d.id, false)} aria-label={`${d.name} 판매 중지`}>
+                    판매 중지
+                  </button>
+                </div>
               </li>
             );
           })}

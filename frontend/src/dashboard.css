@@ -232,11 +232,14 @@
 .badge-special { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-weak); color: var(--accent); font-size: 11.5px; font-weight: 700; vertical-align: 2px; }
 .discount-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .discount-field input { width: 64px !important; height: 38px !important; }
-.discount-field .sale-price { color: var(--accent); font-weight: 700; }
-/* 사장님 화면에서 판매 중인 메뉴 카드는 칸 순서가 늘 같게: 이름 / 가격 / 할인율 / 품절·판매 중지 */
-.dash-section .menu-list li:not(.stopped) { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px 14px; }
-.menu-list li:not(.stopped) > b, .menu-list li:not(.stopped) > .price-field, .menu-list li:not(.stopped) > .discount-field { grid-column: 1 / -1; }
-.menu-list li:not(.stopped) > .btn { justify-self: start; }
+.sale-price { margin: -4px 0 0; color: var(--accent); font-size: 13px; font-weight: 700; }
+/* 사장님 화면에서 판매 중인 메뉴 카드는 칸 순서가 늘 같게: 이름 / 가격·할인율(한 줄) / 품절·판매 중지 버튼 */
+.dash-section .menu-list li:not(.stopped) { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.menu-list li:not(.stopped) > b { flex: none; }
+.price-row { display: flex; align-items: center; gap: 14px; }
+.menu-actions { display: flex; gap: 8px; }
+/* 품절처럼 눌러서 켜고 끄는 버튼이 켜진 상태 */
+.btn.on, .btn.on:hover { border-color: var(--accent); background: var(--accent-weak); color: var(--accent); }
 .menu-list li.stopped b { color: var(--muted); }
 /* 메뉴 추가 칸: 휴대폰 폭이라 한 줄에 하나, 가격·단위만 나란히 */
 .menu-form label { display: block; margin-bottom: 12px; }
@@ -246,9 +249,7 @@
 .menu-form-row input { min-width: 0; }
 .menu-form .hint { margin: -4px 2px 12px; }
 .price-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-.price-field input { width: 110px !important; height: 38px !important; }
-.toggle { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
-.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+.price-field input { width: 92px !important; height: 38px !important; }
 
 /* 숫자 타일 */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
