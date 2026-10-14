@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { findRestaurantById, formatDate, orderPriceLabel, won } from "../components/orderChatKnowledge";
+import { clockText, findRestaurantById, untilText, formatDate, orderPriceLabel, won, type DeliveryItem, type Restaurant } from "../components/orderChatKnowledge";
 import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
@@ -11,15 +11,18 @@ import {
   setOrderStatus,
   setReservationStatus,
   setStoreHours,
+  setStorePause,
+  storePause,
   useDb,
   type OrderRecord,
   type ReservationRecord,
+  type StoreSettings,
 } from "../data/db";
 import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
 
-type Tab = "orders" | "store" | "sales";
+type Tab = "orders" | "store" | "menu" | "sales";
 type Filter = "all" | "접수" | "준비 중" | "완료";
 
 const DAY = 86_400_000;
@@ -112,6 +115,13 @@ export function OwnerPage() {
   const isNew = seenAtOpen !== undefined && latest && latest.id !== seenAtOpen && latest.status === "접수";
 
   const shownOrders = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+  // 일시 중지 중이거나 미리 정해 두었으면 매장 탭이 아닌 화면에서도 위에 띠로 알린다 (잊지 않게)
+  const pauseInfo = storePause(store.id);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+  function resumeFromBanner() {
+    setBannerError(null);
+    setStorePause(store.id, null).catch((err: unknown) => setBannerError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
+  }
 
   if (storeMissing) {
     return (
@@ -131,12 +141,26 @@ export function OwnerPage() {
       <Tabs
         tabs={[
           { key: "orders", label: "주문·예약", badge: pending },
-          { key: "store", label: "매장·메뉴" },
+          { key: "store", label: "매장" },
+          { key: "menu", label: "메뉴" },
           { key: "sales", label: "매출" },
         ]}
         value={tab}
         onChange={setTab}
       />
+      {pauseInfo && tab !== "store" && (
+        <div className="pause-banner" role="status">
+          <span role={bannerError ? "alert" : undefined}>
+            {bannerError ??
+              (pauseInfo.active
+                ? `새 주문을 잠시 받지 않고 있어요 · ${untilText(pauseInfo.until)}까지`
+                : `${untilText(pauseInfo.from)}부터 ${untilText(pauseInfo.until)}까지 일시 중지 예정이에요`)}
+          </span>
+          <button type="button" className="btn small" onClick={resumeFromBanner}>
+            {pauseInfo.active ? "다시 받기" : "취소"}
+          </button>
+        </div>
+      )}
 
       {tab === "orders" && (
         <>
@@ -171,7 +195,8 @@ export function OwnerPage() {
         </>
       )}
 
-      {tab === "store" && <StoreTab storeId={store.id} hours={store.hours} />}
+      {tab === "store" && <StoreTab store={store} />}
+      {tab === "menu" && <MenuTab storeId={store.id} />}
       {tab === "sales" && <SalesTab orders={orders} />}
     </DashLayout>
   );
@@ -355,28 +380,260 @@ function AddMenuForm({ storeId }: { storeId: string }) {
   );
 }
 
-// 영업시간과 배달 메뉴(가격·품절·판매 중지, 메뉴 추가). 바꾸면 소비자 챗봇에 바로 반영된다
-function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
-  const db = useDb(["settings", "menu"]);
-  const [menuError, setMenuError] = useState<string | null>(null);
+type ItemSetting = NonNullable<StoreSettings["items"]>[string];
+
+// 판매 중인 메뉴 카드: 이름·품절·판매 중지 한 줄 / 가격·할인율 한 줄 / 판매가(할인 반영).
+// 가격·할인율은 칸을 벗어날 때 저장하고, 판매가는 적는 동안 바로 바뀐다
+function MenuCard({
+  item,
+  setting,
+  special,
+  onSave,
+  onStop,
+  onError,
+}: {
+  item: DeliveryItem;
+  setting: ItemSetting;
+  special: boolean;
+  onSave: (patch: ItemSetting) => void;
+  onStop: () => void;
+  onError: (message: string) => void;
+}) {
+  const listPrice = setting.price ?? item.price;
+  const pct = setting.discountPct ?? 0;
+  const [price, setPrice] = useState(String(listPrice));
+  const [discount, setDiscount] = useState(pct ? String(pct) : "");
+  // 서버 값이 바뀌면(저장 실패로 되돌아오거나 다른 기기에서 바꾸면) 칸도 그 값으로 (렌더 중에 맞추는 파생 상태 방식)
+  const [seenPrice, setSeenPrice] = useState(listPrice);
+  if (seenPrice !== listPrice) {
+    setSeenPrice(listPrice);
+    setPrice(String(listPrice));
+  }
+  const [seenPct, setSeenPct] = useState(pct);
+  if (seenPct !== pct) {
+    setSeenPct(pct);
+    setDiscount(pct ? String(pct) : "");
+  }
+
+  // 적고 있는 값으로 판매가를 계산한다. 아직 맞지 않는 값이면 저장된 값으로
+  const typedPrice = Number(price);
+  const typedPct = discount === "" ? 0 : Number(discount);
+  const shownPrice = typedPrice > 0 ? typedPrice : listPrice;
+  const shownPct = Number.isInteger(typedPct) && typedPct >= 0 && typedPct <= DISCOUNT_MAX ? typedPct : pct;
+
+  function savePrice() {
+    if (typedPrice > 0 && typedPrice !== listPrice) onSave({ price: typedPrice });
+    else if (!(typedPrice > 0)) setPrice(String(listPrice));
+  }
+
+  function saveDiscount() {
+    if (typedPct === pct) return;
+    if (!Number.isInteger(typedPct) || typedPct < 0 || typedPct > DISCOUNT_MAX) {
+      onError(`할인율은 0~${DISCOUNT_MAX}% 사이 정수로 적어 주세요.`);
+      setDiscount(pct ? String(pct) : "");
+      return;
+    }
+    onSave({ discountPct: typedPct });
+  }
+
+  return (
+    <li className={setting.soldOut ? "sold-out" : undefined}>
+      <div className="menu-head">
+        <b>
+          {item.name}
+          {special && <span className="badge-special">오늘의 메뉴</span>}
+        </b>
+        {/* 품절은 눌러서 켜고 끄는 버튼(켜지면 파란 칸), 판매 중지는 같은 모양의 버튼 */}
+        <div className="menu-actions">
+          <button
+            type="button"
+            className={"btn small" + (setting.soldOut ? " on" : "")}
+            aria-pressed={!!setting.soldOut}
+            aria-label={`${item.name} 품절`}
+            onClick={() => onSave({ soldOut: !setting.soldOut })}
+          >
+            품절
+          </button>
+          <button type="button" className="btn small" onClick={onStop} aria-label={`${item.name} 판매 중지`}>
+            판매 중지
+          </button>
+        </div>
+      </div>
+      {/* 가격 · 할인율 · 판매가 세 칸을 한 줄에. 칸 위에 이름, 판매가는 적는 대로 바로 바뀌는 읽기 전용 칸 */}
+      <div className="price-grid">
+        <label>
+          <span>원 / 1{item.unit}</span>
+          <input
+            type="number"
+            min={0}
+            step={500}
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            onBlur={savePrice}
+            aria-label={`${item.name} 가격`}
+          />
+        </label>
+        <label>
+          <span>할인율 (%)</span>
+          <input
+            type="number"
+            min={0}
+            max={DISCOUNT_MAX}
+            step={5}
+            value={discount}
+            placeholder="0"
+            onChange={(e) => setDiscount(e.target.value)}
+            onBlur={saveDiscount}
+            aria-label={`${item.name} 할인율`}
+          />
+        </label>
+        <label>
+          <span>판매가</span>
+          <input
+            readOnly
+            tabIndex={-1}
+            value={won(discountedPrice(shownPrice, shownPct))}
+            aria-label={`${item.name} 판매가`}
+            className={"sale-input" + (shownPct > 0 ? " discounted" : "")}
+          />
+        </label>
+      </div>
+    </li>
+  );
+}
+const HOUR_MS = 60 * 60_000;
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// 오늘 "HH:MM" 의 시각(밀리초)
+function todayAt(hhmm: string, now = Date.now()): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  const d = new Date(now);
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+
+// 시작·종료 칸의 "HH:MM" 을 실제 시각으로. 시작이 한 시간 안쪽으로 지났으면 지금(칸을 열어 둔 사이 기본값이 지난 것),
+// 그보다 이르면 내일 그 시각. 종료는 시작 뒤에 오는 그 시각 (시작보다 이르거나 같으면 다음 날)
+function pausePlan(start: string, end: string, now = Date.now()): { from: number; until: number } {
+  let from = todayAt(start, now);
+  if (from < now) from = now - from <= HOUR_MS ? now : from + 24 * HOUR_MS;
+  let until = todayAt(end, now);
+  while (until <= from) until += 24 * HOUR_MS;
+  return { from, until };
+}
+
+// 남은 시간 "1:12:05" (한 시간 안이면 "12:05")
+function countdown(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad2(m)}:${pad2(s % 60)}` : `${m}:${pad2(s % 60)}`;
+}
+
+// 일시 중지: 시작·종료 시간을 고르면 그동안 새 배달 주문과 오늘 예약을 받지 않고, 종료 시간이 되면 저절로 다시 받는다.
+// 시작을 앞으로 잡으면 미리 정해 두는 것. 정해 두면 아래 타이머가 시작·끝까지 남은 시간을 1초마다 보여 준다
+function PauseCard({ storeId }: { storeId: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  const pause = storePause(storeId, now);
+  const hasPause = !!pause;
+  useEffect(() => {
+    if (!hasPause) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [hasPause]);
+
+  // 칸: 정해 둔 일시 중지가 있으면 그 시각, 없으면 시작은 지금·종료는 비워 둔다.
+  // 저장된 값이 바뀌면(저장·해제·다른 기기에서 바꿈) 칸도 그 값으로 맞춘다 (렌더 중에 맞추는 파생 상태 방식)
+  const savedKey = pause ? `${pause.from}-${pause.until}` : "none";
+  const fill = () => ({ start: clockText(pause ? pause.from : Date.now()), end: pause ? clockText(pause.until) : "" });
+  const [fields, setFields] = useState(fill);
+  const [seenKey, setSeenKey] = useState(savedKey);
+  if (seenKey !== savedKey) {
+    setSeenKey(savedKey);
+    setFields(fill());
+  }
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const changed = !pause || fields.start !== clockText(pause.from) || fields.end !== clockText(pause.until);
+
+  async function save(next: { from: number; until: number } | null) {
+    setBusy(true);
+    setError(null);
+    try {
+      await setStorePause(storeId, next);
+      setNow(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onSave() {
+    if (!fields.start || !fields.end) return setError("시작 시간과 종료 시간을 골라 주세요.");
+    void save(pausePlan(fields.start, fields.end));
+  }
+
+  return (
+    <section className="dash-section pause-card">
+      <h2>일시 중지</h2>
+      <div className="hours-row">
+        <label>
+          <span>시작 시간</span>
+          <input type="time" value={fields.start} onChange={(e) => setFields((f) => ({ ...f, start: e.target.value }))} />
+        </label>
+        <label>
+          <span>종료 시간</span>
+          <input type="time" value={fields.end} onChange={(e) => setFields((f) => ({ ...f, end: e.target.value }))} />
+        </label>
+      </div>
+      {pause && (
+        <div className={"pause-timer" + (pause.active ? " active" : "")} role="timer">
+          <span>{pause.active ? "다시 받기까지" : "일시 중지 시작까지"}</span>
+          <b>{countdown((pause.active ? pause.until : pause.from) - now)}</b>
+          {!pause.active && <small>{`${untilText(pause.from, now)}부터 ${untilText(pause.until, now)}까지 멈춰요.`}</small>}
+        </div>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="pause-actions">
+        {pause ? (
+          <>
+            <button type="button" className="btn" disabled={busy || !changed} onClick={onSave}>
+              시간 바꾸기
+            </button>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => void save(null)}>
+              {pause.active ? "지금 다시 받기" : "일시 중지 취소"}
+            </button>
+          </>
+        ) : (
+          <button type="button" className="btn primary" disabled={busy || !fields.end} onClick={onSave}>
+            일시 중지
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// 매장 탭: 영업 상태(일시 중지)·영업시간·매장 정보. 바꾸면 소비자 챗봇에 바로 반영된다
+function StoreTab({ store }: { store: Restaurant }) {
+  useDb(["settings"]);
   const [hoursError, setHoursError] = useState<string | null>(null);
-  // 서버에 바꾸라고 보내고, 실패하면(연결 끊김·서버가 거절) 이유를 보여 준다. 영업시간 오류는 영업시간 칸 위에
-  const run = (work: Promise<unknown>, where: "menu" | "hours" = "menu") => {
-    const show = where === "hours" ? setHoursError : setMenuError;
-    show(null);
-    work.catch((err: unknown) => show(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
+  const run = (work: Promise<unknown>) => {
+    setHoursError(null);
+    work.catch((err: unknown) => setHoursError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
   };
-  const toggle = (itemId: string, active: boolean) => run(setMenuActive(storeId, itemId, active));
-  const special = specialItemId(storeId);
   // 자정 마감은 데이터에 "24:00"으로 적혀 있지만 시간 입력칸은 "00:00"까지만 받는다 (예약 시간 계산은 둘 다 자정으로 본다)
-  const [open, close] = hours.split("-").map((s) => s.trim()).map((t) => (t === "24:00" ? "00:00" : t));
-  const mine = db.menu.filter((d) => d.restaurantId === storeId);
-  const items = mine.filter((d) => d.active !== false);
-  const stopped = mine.filter((d) => d.active === false);
-  const settings = db.storeSettings[storeId]?.items ?? {};
+  const [open, close] = store.hours.split("-").map((s) => s.trim()).map((t) => (t === "24:00" ? "00:00" : t));
 
   return (
     <>
+      <PauseCard storeId={store.id} />
+
       <section className="dash-section">
         <div className="section-head hours-head">
           <h2>영업시간</h2>
@@ -391,15 +648,54 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
         <div className="hours-row">
           <label>
             <span>여는 시간</span>
-            <input type="time" value={open} onChange={(e) => e.target.value && run(setStoreHours(storeId, `${e.target.value} - ${close}`), "hours")} />
+            <input type="time" value={open} onChange={(e) => e.target.value && run(setStoreHours(store.id, `${e.target.value} - ${close}`))} />
           </label>
           <label>
             <span>닫는 시간</span>
-            <input type="time" value={close} onChange={(e) => e.target.value && run(setStoreHours(storeId, `${open} - ${e.target.value}`), "hours")} />
+            <input type="time" value={close} onChange={(e) => e.target.value && run(setStoreHours(store.id, `${open} - ${e.target.value}`))} />
           </label>
         </div>
       </section>
 
+      <section className="dash-section">
+        <h2>매장 정보</h2>
+        <dl className="policy-items">
+          <div>
+            <dt>매장 이름</dt>
+            <dd>{store.name}</dd>
+          </div>
+          <div>
+            <dt>주소</dt>
+            <dd>{store.address}</dd>
+          </div>
+          <div>
+            <dt>대표 메뉴</dt>
+            <dd>{store.signature}</dd>
+          </div>
+        </dl>
+      </section>
+    </>
+  );
+}
+
+// 메뉴 탭: 오늘의 메뉴, 배달 메뉴(가격·할인·품절·판매 중지), 메뉴 추가, 판매 중지한 메뉴. 바꾸면 소비자 챗봇에 바로 반영된다
+function MenuTab({ storeId }: { storeId: string }) {
+  const db = useDb(["settings", "menu"]);
+  const [menuError, setMenuError] = useState<string | null>(null);
+  // 서버에 바꾸라고 보내고, 실패하면(연결 끊김·서버가 거절) 이유를 보여 준다
+  const run = (work: Promise<unknown>) => {
+    setMenuError(null);
+    work.catch((err: unknown) => setMenuError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
+  };
+  const toggle = (itemId: string, active: boolean) => run(setMenuActive(storeId, itemId, active));
+  const special = specialItemId(storeId);
+  const mine = db.menu.filter((d) => d.restaurantId === storeId);
+  const items = mine.filter((d) => d.active !== false);
+  const stopped = mine.filter((d) => d.active === false);
+  const settings = db.storeSettings[storeId]?.items ?? {};
+
+  return (
+    <>
       <section className="dash-section">
         <h2>배달 메뉴</h2>
         {items.length === 0 && <p className="empty">이 매장에 등록된 배달 메뉴가 없어요.</p>}
@@ -416,76 +712,17 @@ function StoreTab({ storeId, hours }: { storeId: string; hours: string }) {
           </div>
         )}
         <ul className="menu-list">
-          {items.map((d) => {
-            const s = settings[d.id] ?? {};
-            const pct = s.discountPct ?? 0;
-            const list = s.price ?? d.price;
-            return (
-              <li key={d.id} className={s.soldOut ? "sold-out" : undefined}>
-                <b>
-                  {d.name}
-                  {special === d.id && <span className="badge-special">오늘의 메뉴</span>}
-                </b>
-                {/* 가격과 할인율은 한 줄에 나란히. 할인한 가격은 그 아래 한 줄로 (휴대폰 폭에서도 두 칸이 한 줄에 들어가게) */}
-                <div className="price-row">
-                  <label className="price-field">
-                    <input
-                      key={`${d.id}:${s.price ?? d.price}`} // 서버 값이 바뀌면(저장 실패로 되돌아오거나 다른 기기에서 바꾸면) 칸도 그 값으로
-                      type="number"
-                      min={0}
-                      step={500}
-                      defaultValue={s.price ?? d.price}
-                      aria-label={`${d.name} 가격`}
-                      onBlur={(e) => {
-                        const v = Number(e.target.value);
-                        if (v > 0 && v !== (s.price ?? d.price)) run(setMenuItem(storeId, d.id, { price: v }));
-                      }}
-                    />
-                    <span>원 / 1{d.unit}</span>
-                  </label>
-                  <label className="discount-field">
-                    <input
-                      key={`${d.id}:${pct}`}
-                      type="number"
-                      min={0}
-                      max={DISCOUNT_MAX}
-                      step={5}
-                      defaultValue={pct || ""}
-                      placeholder="0"
-                      aria-label={`${d.name} 할인율`}
-                      onBlur={(e) => {
-                        const v = e.target.value === "" ? 0 : Number(e.target.value);
-                        if (v === pct) return;
-                        if (!Number.isInteger(v) || v < 0 || v > DISCOUNT_MAX) {
-                          setMenuError(`할인율은 0~${DISCOUNT_MAX}% 사이 정수로 적어 주세요.`);
-                          e.target.value = pct ? String(pct) : "";
-                          return;
-                        }
-                        run(setMenuItem(storeId, d.id, { discountPct: v }));
-                      }}
-                    />
-                    <span>% 할인</span>
-                  </label>
-                </div>
-                {pct > 0 && <p className="sale-price">할인가 {won(discountedPrice(list, pct))}</p>}
-                {/* 품절은 눌러서 켜고 끄는 버튼(켜지면 파란 칸), 판매 중지는 같은 모양의 버튼 */}
-                <div className="menu-actions">
-                  <button
-                    type="button"
-                    className={"btn small" + (s.soldOut ? " on" : "")}
-                    aria-pressed={!!s.soldOut}
-                    aria-label={`${d.name} 품절`}
-                    onClick={() => run(setMenuItem(storeId, d.id, { soldOut: !s.soldOut }))}
-                  >
-                    품절
-                  </button>
-                  <button type="button" className="btn small" onClick={() => toggle(d.id, false)} aria-label={`${d.name} 판매 중지`}>
-                    판매 중지
-                  </button>
-                </div>
-              </li>
-            );
-          })}
+          {items.map((d) => (
+            <MenuCard
+              key={d.id}
+              item={d}
+              setting={settings[d.id] ?? {}}
+              special={special === d.id}
+              onSave={(patch) => run(setMenuItem(storeId, d.id, patch))}
+              onStop={() => toggle(d.id, false)}
+              onError={setMenuError}
+            />
+          ))}
         </ul>
         <p className="hint">품절은 오늘처럼 잠깐 못 파는 것, 판매 중지는 메뉴에서 내리는 것이에요. 판매 중지한 메뉴는 아래에서 다시 판매할 수 있어요.</p>
         {menuError && (

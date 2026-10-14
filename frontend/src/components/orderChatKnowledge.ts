@@ -1,7 +1,7 @@
 // 주문 챗봇의 문장 해석 규칙과 주문서 모델. 가게·메뉴 목록은 서버와 같이 쓰는 server/catalog.json 에서 읽는다
 // (지금은 화면 확인용 가상 데이터이고, 실제 목록이 오면 그 파일만 바꾼다)
 import catalog from "../../../server/catalog.json";
-import { getMenu, getPopularity, getStoreSettings } from "../data/db";
+import { getMenu, getPopularity, getStoreSettings, storePausedUntil } from "../data/db";
 import { discountedPrice, specialItemId } from "./deals";
 
 export interface Store {
@@ -78,9 +78,9 @@ export function matchFood(text: string): FoodCategory | undefined {
   return FOODS.find((f) => f.keywords.some((k) => low.includes(k)));
 }
 
-// 해당 음식을 다루는 식당을 가까운 순으로
+// 해당 음식을 다루는 식당을 가까운 순으로 (일시 중지 중인 곳은 추천하지 않는다)
 export function nearbyRestaurants(food: FoodKey): Restaurant[] {
-  return RESTAURANTS.filter((r) => r.food === food)
+  return RESTAURANTS.filter((r) => r.food === food && !storePausedUntil(r.id))
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .map(withStoreSettings);
 }
@@ -156,12 +156,12 @@ export const deliveryMenu = (): DeliveryItem[] => getMenu().filter((d) => d.acti
 export const MAX_QTY = 10;
 
 // 메뉴 이름이 그대로 들어 있으면 그 메뉴 하나, 아니면 키워드에 걸리는 메뉴 전부
-// 사장님이 바꾼 가격을 입히고, 품절 메뉴는 뺀 배달 메뉴
+// 사장님이 바꾼 가격을 입히고, 품절 메뉴와 일시 중지 중인 매장의 메뉴는 뺀 배달 메뉴
 // 할인 중이면 price 는 할인한 가격이고 listPrice 에 원래 가격, 오늘의 메뉴면 special
 export function availableDeliveryMenu(): DeliveryItem[] {
   return deliveryMenu().flatMap((d) => {
     const s = getStoreSettings(d.restaurantId).items?.[d.id];
-    if (s?.soldOut) return [];
+    if (s?.soldOut || storePausedUntil(d.restaurantId)) return [];
     const list = s?.price ?? d.price;
     const pct = s?.discountPct ?? 0;
     return [
@@ -331,8 +331,22 @@ export function isWithinHours(restaurant: Restaurant, time: string): boolean {
 const isPastTime = (date: Date, time: string, now: Date) =>
   daysBetween(now, date) === 0 && toMinutes(time) <= now.getHours() * 60 + now.getMinutes();
 
-type TimeCheck = "ok" | "closed" | "past";
+// 일시 중지 중인 매장은 오늘 예약을 받지 않는다 (내일 이후 예약은 받는다)
+export const pausedToday = (restaurant: Restaurant, date: Date, now: Date) => daysBetween(now, date) === 0 && !!storePausedUntil(restaurant.id, now.getTime());
+
+// 시각 "15:30" (일시 중지가 끝나는 시각 안내에)
+export const clockText = (ms: number) => {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+// 일시 중지가 끝나는 때: 오늘이면 "15:30", 내일이면 "내일 09:00" (한 번에 24시간 안까지라 그보다 멀지 않다)
+export const untilText = (until: number, now = Date.now()) => `${daysBetween(new Date(now), new Date(until)) >= 1 ? "내일 " : ""}${clockText(until)}`;
+// "장락 옛날통닭은 지금 잠시 주문을 받지 않아요. 15:30부터 다시 받아요."
+export const pausedText = (storeName: string, until: number) => `${withTopicParticle(storeName)} 지금 잠시 주문을 받지 않아요. ${untilText(until)}부터 다시 받아요.`;
+
+type TimeCheck = "ok" | "closed" | "past" | "paused";
 export function checkVisitTime(restaurant: Restaurant, date: Date, time: string, now: Date): TimeCheck {
+  if (pausedToday(restaurant, date, now)) return "paused";
   if (!isWithinHours(restaurant, time)) return "closed";
   if (isPastTime(date, time, now)) return "past";
   return "ok";
@@ -491,8 +505,9 @@ export function dealsSay(menu: DeliveryItem[]): string {
   return parts.length ? `${parts.join(" ")} ` : "";
 }
 
-// 메뉴 카드·표에 붙이는 오늘의 메뉴·할인 표시: ["오늘의 메뉴", "20% 할인"] (없으면 빈 목록)
-export const dealTags = (d: DeliveryItem): string[] => [d.special ? "오늘의 메뉴" : "", d.discountPct ? `${d.discountPct}% 할인` : ""].filter(Boolean);
+// 메뉴 카드·표에 붙이는 표시: 오늘의 메뉴는 이름 옆 태그, 할인은 설명 줄 앞 ("20% 할인")
+export const menuBadge = (d: DeliveryItem): string | undefined => (d.special ? "오늘의 메뉴" : undefined);
+export const discountTag = (d: DeliveryItem): string | undefined => (d.discountPct ? `${d.discountPct}% 할인` : undefined);
 
 // 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 하고, 인기 순서도 바뀐다
 export const deliveryPrompt = (): BotPrompt => {
@@ -562,6 +577,7 @@ export interface OrderRow {
   label: string;
   value: string;
   emphasis?: boolean;
+  badge?: string; // 이름 옆에 붙는 작은 태그 (오늘의 메뉴)
 }
 
 export function orderCardRows(order: Order): OrderRow[] {

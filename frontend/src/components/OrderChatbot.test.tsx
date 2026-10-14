@@ -109,7 +109,7 @@ describe("OrderChatbot", () => {
     expect(screen.queryByRole("button", { name: "국물떡볶이" })).not.toBeInTheDocument();
   });
 
-  it("결제수단을 고르면 결제 팝업이 뜨고, 결제하면 완료 메시지를 보낸다", () => {
+  it("결제수단을 고르면 결제 팝업이 뜨고, 결제하면 서버가 주문을 받은 뒤 완료 메시지를 보낸다", async () => {
     renderChat();
     orderAndConfirm();
 
@@ -125,8 +125,9 @@ describe("OrderChatbot", () => {
     wait(1100 + 250);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    wait(500);
-    expect(screen.getByText(/토스페이로 20,000원 결제가 완료되었어요/)).toBeInTheDocument();
+    // 완료는 서버가 주문을 받은 뒤에 보여 준다: 실제 응답을 기다리도록 진짜 시계로 바꾼다
+    vi.useRealTimers();
+    expect(await screen.findByText(/토스페이로 20,000원 결제가 완료되었어요/, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getByText(/청전 치킨공방에서 간장치킨 1마리를 준비 중이에요/)).toBeInTheDocument();
   });
 
@@ -260,7 +261,7 @@ describe("OrderChatbot", () => {
     expect(other).toBeDisabled();
   });
 
-  it("식당: 식당을 고르면 날짜 → 시간 → 인원을 묻고 예약을 마친다", () => {
+  it("식당: 식당을 고르면 날짜 → 시간 → 인원을 묻고, 서버가 받으면 예약을 마친다", async () => {
     vi.setSystemTime(new Date(2026, 9, 1, 10, 0)); // 10월 1일(목) 오전 10시
     renderChat();
     send("식당");
@@ -299,8 +300,9 @@ describe("OrderChatbot", () => {
     expect(screen.getByText(/예약 내용을 확인해 주세요/)).toBeInTheDocument();
     expect(screen.getByText("10월 2일 (금)")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
-    wait(900);
-    expect(screen.getByText(/예약이 완료되었어요!/)).toBeInTheDocument();
+    // 완료는 서버가 예약을 받은 뒤에 보여 준다: 실제 응답을 기다리도록 진짜 시계로 바꾼다
+    vi.useRealTimers();
+    expect(await screen.findByText(/예약이 완료되었어요!/, {}, { timeout: 3000 })).toBeInTheDocument();
     // 완료 내용은 표로 보인다
     const done = screen.getByText(/예약이 완료되었어요!/).closest(".bubble")!;
     expect(within(done as HTMLElement).getByText("10월 2일 (금) 19:00")).toBeInTheDocument();
@@ -513,6 +515,36 @@ describe("OrderChatbot", () => {
     expect(chat.closest(".chat-area")).toHaveClass("chat-hidden");
   });
 
+  it("채팅창이 꺼져 있어도 메뉴·식당 표의 줄을 누르면 그것을 고른 것으로 넘어간다", () => {
+    render(<OrderChatbot />); // 채팅창은 처음에 꺼져 있다
+    const caption = () => document.querySelector(".caption-text")?.textContent ?? "";
+    const rowStarting = (name: string) =>
+      [...document.querySelectorAll<HTMLElement>(".caption-row")].find((r) => r.querySelector("dt")?.textContent?.startsWith(name));
+
+    send("배달");
+    wait(700);
+    wait(10_000); // 자막을 다 적고 표가 뜰 때까지
+    const chicken = rowStarting("간장치킨")!;
+    expect(chicken).toHaveAttribute("role", "button");
+    expect(chicken).toHaveAccessibleName("간장치킨");
+    fireEvent.click(chicken);
+    wait(700);
+    wait(10_000);
+    expect(caption()).toMatch(/간장치킨은 청전 치킨공방에서 1마리 20,000원이에요\.\s*몇 마리 주문할까요\?/);
+
+    // 식당 표도 같다 (Enter 로도 고른다)
+    send("치킨집 예약");
+    wait(900);
+    wait(10_000);
+    const place = rowStarting("장락 옛날통닭")!;
+    expect(place).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(place, { key: "Enter" });
+    wait(700);
+    wait(10_000);
+    expect(caption()).toMatch(/장락 옛날통닭 예약을 도와드릴게요/);
+    // 지난 표의 줄은 더 이상 누를 수 없다 (지금 답할 질문의 표만)
+    expect(document.querySelectorAll(".caption-row.pickable")).toHaveLength(0);
+  });
   it("채팅창이 꺼져 있으면 봇이 소리로 하는 말만 가운데에 한 글자씩 적히고, 답을 준비하는 동안은 점이 깜빡인다", () => {
     render(<OrderChatbot />);
     const caption = () => document.querySelector(".caption-text")?.textContent ?? "";
@@ -534,11 +566,11 @@ describe("OrderChatbot", () => {
     wait(700);
     expect(document.querySelector(".caption-dots")).not.toBeInTheDocument();
     wait(10_000);
-    // 메뉴 추천은 이름을 자막에 늘어놓지 않고 짧은 안내만 적은 뒤, 식당 추천과 같은 모양의 표로 메뉴·가격·가게·영업 여부를 보여 준다
+    // 메뉴 추천은 이름을 자막에 늘어놓지 않고 짧은 안내만 적은 뒤, 식당 추천과 같은 모양의 표로 메뉴·가격·가게를 보여 준다
     // (사용자가 한 말은 자막에 없다)
     expect(caption()).toBe("오늘은 이런 메뉴 어떠세요? 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
     const menuRows = [...document.querySelectorAll(".caption-card .caption-row")].map((r) => r.textContent);
-    expect(menuRows[0]).toMatch(/^옛날통닭18,000원 · 장락 옛날통닭 · (영업 중|15:00 오픈)$/);
+    expect(menuRows[0]).toBe("옛날통닭18,000원 · 장락 옛날통닭");
     expect(menuRows).toHaveLength(4);
 
     // 표가 있는 답(주문서)은 자막에 제목·질문만 적고, 다 적은 뒤에 그 아래 표를 띄운다

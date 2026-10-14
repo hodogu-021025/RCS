@@ -5,6 +5,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { LOGIN_MAX_PER_IP, LOGIN_MAX_PER_USER, LOGIN_WINDOW_MS, PRIVACY_VERSION, createApp } from "./app.mjs";
 import { normalizePhone } from "./contact.mjs";
 import { WITHDRAWN, openDb } from "./db.mjs";
+import { pauseEndText, todayKST, withTopic } from "./stores.mjs";
 import { hashPassword } from "./auth.mjs";
 import { createVerifier } from "./verification.mjs";
 
@@ -719,5 +720,95 @@ describe("계정 관리: 연락처·배달지", () => {
     const c = users.find((u) => u.username === "contact001");
     assert.equal(c.phone, "010-9876-5432");
     assert.equal("address" in c, false);
+  });
+});
+
+describe("매장 일시 중지", () => {
+  it("사장님이 고른 시각까지 새 배달 주문과 오늘 예약을 받지 않고, 그 시각이 지나면 저절로 다시 받는다", async () => {
+    const owner = await signup({ role: "owner", username: "pauseboss1", email: "pauseboss@example.com", storeId: "h1", name: "통닭 사장" });
+    db.approveOwner("pauseboss1");
+    const tongdak = { ...chicken, storeId: "h1", store: { name: "장락 옛날통닭" }, item: "옛날통닭", qty: 1 };
+    const until = clock + 30 * 60_000;
+
+    const r = await call("PATCH", "/api/stores/h1/settings", { pause: { until } }, owner);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.pausedUntil, until);
+    assert.equal((await call("GET", "/api/stores/settings")).body.h1.pausedUntil, until);
+
+    const refused = await call("POST", "/api/orders", { order: tongdak, payment: "카드" }, buyer);
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /^장락 옛날통닭은 지금 잠시 주문을 받지 않아요\. (내일 )?\d{2}:\d{2}부터 다시 받아요\.$/);
+    // 다른 매장은 그대로 받는다
+    assert.equal((await call("POST", "/api/orders", { order: { ...chicken, storeId: "s1", item: "국물떡볶이", qty: 1 }, payment: "카드" }, buyer)).status, 200);
+
+    // 오늘 예약만 막고, 내일 예약은 받는다
+    const rsv = { restaurantId: "h1", restaurantName: "장락 옛날통닭", time: "19:00", people: 2 };
+    const today = await call("POST", "/api/reservations", { ...rsv, date: todayKST(new Date(clock)) });
+    assert.equal(today.status, 400);
+    assert.match(today.body.error, /오늘 예약은 잠시 받지 않아요/);
+    assert.equal((await call("POST", "/api/reservations", { ...rsv, date: todayKST(new Date(clock + 24 * 60 * 60_000)) })).status, 200);
+
+    // 정한 시각이 지나면 화면에도 안 보내고 주문도 받는다
+    // 끝나는 때가 내일이면 "내일 09:00"처럼 알린다 (한국 날짜 기준)
+    assert.equal(pauseEndText(Date.parse("2026-10-13T00:00:00Z"), Date.parse("2026-10-12T14:00:00Z")), "내일 09:00");
+    assert.equal(pauseEndText(Date.parse("2026-10-12T14:30:00Z"), Date.parse("2026-10-12T14:00:00Z")), "23:30"); // 같은 한국 날짜(10/12 23:30)
+    assert.equal(withTopic("장락 떡볶이"), "장락 떡볶이는");
+    clock = until + 1;
+    assert.equal("pausedUntil" in (await call("GET", "/api/stores/settings")).body.h1, false);
+    assert.equal((await call("POST", "/api/orders", { order: tongdak, payment: "카드" }, buyer)).status, 200);
+  });
+
+  it("바로 다시 받기(null), 시각 검사, 권한", async () => {
+    const owner = (await call("POST", "/api/auth/login", { username: "pauseboss1", password: "password1" })).body.token;
+    await call("PATCH", "/api/stores/h1/settings", { pause: { until: clock + 60 * 60_000 } }, owner);
+    const resumed = await call("PATCH", "/api/stores/h1/settings", { pause: null }, owner);
+    assert.equal(resumed.status, 200);
+    assert.equal("pausedUntil" in resumed.body, false);
+
+    for (const [until, why] of [[clock - 1, /시작 시간보다 뒤/], [clock + 25 * 60 * 60_000, /24시간 안/], ["내일", /24시간 안/], [null, /시작 시간보다 뒤/]]) {
+      const r = await call("PATCH", "/api/stores/h1/settings", { pause: { until } }, owner);
+      assert.equal(r.status, 400, String(until));
+      assert.match(r.body.error, why);
+    }
+    // 시작이 끝보다 늦으면 거절
+    const backwards = await call("PATCH", "/api/stores/h1/settings", { pause: { from: clock + 60 * 60_000, until: clock + 30 * 60_000 } }, owner);
+    assert.equal(backwards.status, 400);
+    assert.match(backwards.body.error, /종료 시간은 시작 시간보다 뒤여야 해요/);
+    // 다른 매장 사장님·비로그인은 바꿀 수 없다
+    assert.equal((await call("PATCH", "/api/stores/s1/settings", { pause: { until: clock + 60_000 } }, owner)).status, 403);
+    assert.equal((await call("PATCH", "/api/stores/h1/settings", { pause: { until: clock + 60_000 } })).status, 401);
+  });
+});
+
+describe("매장 일시 중지: 미리 정해 두기", () => {
+  it("시작 시각을 정하면 그 전까지는 받고, 그 사이에는 막고, 끝나면 다시 받는다", async () => {
+    const owner = (await call("POST", "/api/auth/login", { username: "pauseboss1", password: "password1" })).body.token;
+    const tongdak = { ...chicken, storeId: "h1", store: { name: "장락 옛날통닭" }, item: "옛날통닭", qty: 1 };
+    const from = clock + 10 * 60_000;
+    const until = clock + 40 * 60_000;
+    const r = await call("PATCH", "/api/stores/h1/settings", { pause: { from, until } }, owner);
+    assert.equal(r.status, 200);
+    assert.deepEqual([r.body.pausedFrom, r.body.pausedUntil], [from, until]);
+    // 시작 전: 화면에는 예정으로 보이고, 주문은 받는다
+    assert.equal((await call("GET", "/api/stores/settings")).body.h1.pausedFrom, from);
+    assert.equal((await call("POST", "/api/orders", { order: tongdak, payment: "카드" }, buyer)).status, 200);
+    // 시작한 뒤: 막는다
+    clock = from + 1;
+    const refused = await call("POST", "/api/orders", { order: tongdak, payment: "카드" }, buyer);
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /잠시 주문을 받지 않아요/);
+    // 끝난 뒤: 다시 받고, 화면에도 안 보낸다
+    clock = until + 1;
+    assert.equal((await call("POST", "/api/orders", { order: tongdak, payment: "카드" }, buyer)).status, 200);
+    const s = (await call("GET", "/api/stores/settings")).body.h1;
+    assert.equal("pausedFrom" in s || "pausedUntil" in s, false);
+  });
+
+  it("시작 시각이 이미 지났으면 지금부터 멈춘다", async () => {
+    const owner = (await call("POST", "/api/auth/login", { username: "pauseboss1", password: "password1" })).body.token;
+    const r = await call("PATCH", "/api/stores/h1/settings", { pause: { from: clock - 60 * 60_000, until: clock + 60 * 60_000 } }, owner);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.pausedFrom, clock); // 지난 시작 시각은 지금으로 맞춘다
+    await call("PATCH", "/api/stores/h1/settings", { pause: null }, owner);
   });
 });

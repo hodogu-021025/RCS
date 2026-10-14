@@ -42,6 +42,8 @@ export interface StoreSettings {
   hours?: string; // "11:00 - 21:00"
   items?: Record<string, { price?: number; soldOut?: boolean; discountPct?: number }>; // 배달 메뉴 id 별 (discountPct: 할인율 %)
   special?: { itemId: string; date: string }; // 오늘의 메뉴 (date 가 오늘(한국 날짜)일 때만 유효)
+  pausedFrom?: number; // 미리 정해 둔 일시 중지가 시작되는 시각(밀리초). 없으면 바로 시작한 것
+  pausedUntil?: number; // 일시 중지가 끝나는 시각(밀리초). 그때까지 새 배달 주문과 오늘 예약을 받지 않는다
 }
 
 export interface Account {
@@ -213,6 +215,26 @@ export async function setReservationStatus(id: string, status: ReservationStatus
 }
 
 export const getStoreSettings = (storeId: string): StoreSettings => db.storeSettings[storeId] ?? {};
+// 지금 일시 중지 중이면 끝나는 시각, 아니면 null. 미리 정해 둔 것은 시작 시각이 지나야 멈춘 것으로 본다
+// (정한 시각이 지나면 서버에 다시 묻기 전에도 바로 시작·해제된 것으로 본다)
+export function storePausedUntil(storeId: string, now = Date.now()): number | null {
+  const { pausedFrom, pausedUntil } = getStoreSettings(storeId);
+  return pausedUntil && pausedUntil > now && (pausedFrom ?? 0) <= now ? pausedUntil : null;
+}
+
+// 지금 멈춘 중이거나 미리 정해 둔 일시 중지 (사장님·관리자 화면용). active: 이미 시작했는지.
+// 시작 시각이 비어 있으면(예전에 바로 멈춘 것) 지금으로 본다
+export function storePause(storeId: string, now = Date.now()): { from: number; until: number; active: boolean } | null {
+  const { pausedFrom, pausedUntil } = getStoreSettings(storeId);
+  if (!pausedUntil || pausedUntil <= now) return null;
+  return { from: pausedFrom ?? now, until: pausedUntil, active: (pausedFrom ?? 0) <= now };
+}
+
+// 일시 중지: from(없으면 지금)부터 until 까지 새 주문과 오늘 예약을 받지 않는다. null 이면 지우고 바로 다시 받는다
+export async function setStorePause(storeId: string, pause: { from?: number; until: number } | null) {
+  await api("PATCH", `/api/stores/${storeId}/settings`, { pause });
+  await refresh(["settings"]);
+}
 
 export async function setStoreHours(storeId: string, hours: string) {
   await api("PATCH", `/api/stores/${storeId}/settings`, { hours });

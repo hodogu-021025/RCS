@@ -250,6 +250,11 @@ header .title {
 .caption-card.list .caption-row dt { color: var(--text); font-size: 15px; font-weight: 700; }
 .caption-card.list .caption-row dd { color: var(--muted); font-size: 13px; font-weight: 500; }
 .caption-card.list .caption-row + .caption-row { padding-top: 8px; border-top: 1px solid rgba(15, 23, 42, .06); }
+/* 눌러서 고를 수 있는 목록 줄: 마우스를 올리면 옅은 파란 바탕 (말풍선 카드와 같은 색) */
+.caption-row.pickable { margin: 0 -8px; padding: 6px 8px; border-radius: 12px; cursor: pointer; transition: background .15s; }
+.caption-card.list .caption-row.pickable + .caption-row.pickable { padding-top: 8px; }
+.caption-row.pickable:hover { background: var(--accent-weak); }
+.caption-row.pickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 html[data-keyboard] .caption-card { padding: 10px 12px; }
 html[data-keyboard] .caption-card dl { gap: 5px; }
 @keyframes card-rise { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
@@ -506,6 +511,14 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .place-main small { font-size: 12px; color: var(--muted); }
 /* 메뉴 카드의 오늘의 메뉴·할인 표시 */
 .place-deal { font-style: normal; font-weight: 700; color: var(--accent); }
+/* 메뉴 이름 옆 작은 태그 (오늘의 메뉴). 말풍선 카드와 채팅창을 끈 동안의 표가 같이 쓴다 */
+.place-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.place-badge {
+  flex-shrink: 0; padding: 2px 7px; border-radius: 999px;
+  background: var(--accent-weak); color: var(--accent);
+  font-size: 11px; font-weight: 700; line-height: 1.4; white-space: nowrap;
+}
+.caption-row dt .place-badge { display: inline-block; margin-left: 6px; vertical-align: 2px; }
 .place-distance {
   margin-left: auto; flex-shrink: 0;
   padding: 3px 8px; border-radius: 999px;

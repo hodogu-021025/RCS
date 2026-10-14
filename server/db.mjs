@@ -69,6 +69,8 @@ const toSettings = (r) => ({
   ...(r.hours ? { hours: r.hours } : {}),
   items: JSON.parse(r.items_json),
   ...(r.special_json ? { special: JSON.parse(r.special_json) } : {}),
+  ...(r.paused_from ? { pausedFrom: r.paused_from } : {}),
+  ...(r.paused_until ? { pausedUntil: r.paused_until } : {}),
 });
 
 const toMenuItem = (r) =>
@@ -144,6 +146,10 @@ export function openDb(path) {
   if (!userCols.includes("address")) db.exec("ALTER TABLE users ADD COLUMN address TEXT");
   // 오늘의 메뉴 { itemId, date }: 그 날짜(한국 시간)에만 오늘의 메뉴로 보인다
   if (!db.prepare("PRAGMA table_info(store_settings)").all().some((c) => c.name === "special_json")) db.exec("ALTER TABLE store_settings ADD COLUMN special_json TEXT");
+  // 일시 중지가 끝나는 시각(밀리초). 비어 있거나 지난 시각이면 주문을 받는다
+  if (!db.prepare("PRAGMA table_info(store_settings)").all().some((c) => c.name === "paused_until")) db.exec("ALTER TABLE store_settings ADD COLUMN paused_until INTEGER");
+  // 일시 중지가 시작되는 시각(밀리초). 미리 정해 두면 앞으로의 시각, 바로 멈추면 그 순간. 비어 있으면 끝나는 시각까지 멈춘 것
+  if (!db.prepare("PRAGMA table_info(store_settings)").all().some((c) => c.name === "paused_from")) db.exec("ALTER TABLE store_settings ADD COLUMN paused_from INTEGER");
   const q = (sql) => db.prepare(sql);
 
   const stmts = {
@@ -197,7 +203,7 @@ export function openDb(path) {
     allSettings: q("SELECT * FROM store_settings"),
     settingsById: q("SELECT * FROM store_settings WHERE store_id = ?"),
     upsertSettings: q(
-      "INSERT INTO store_settings (store_id, hours, items_json, special_json) VALUES (?, ?, ?, ?) ON CONFLICT(store_id) DO UPDATE SET hours = excluded.hours, items_json = excluded.items_json, special_json = excluded.special_json",
+      "INSERT INTO store_settings (store_id, hours, items_json, special_json, paused_from, paused_until) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(store_id) DO UPDATE SET hours = excluded.hours, items_json = excluded.items_json, special_json = excluded.special_json, paused_from = excluded.paused_from, paused_until = excluded.paused_until",
     ),
   };
 
@@ -339,7 +345,7 @@ export function openDb(path) {
       for (const r of stmts.allSettings.all()) out[r.store_id] = toSettings(r);
       return out;
     },
-    // patch: { hours?, item?: { id, patch }, special?: { itemId, date } | null }
+    // patch: { hours?, item?: { id, patch }, special?: { itemId, date } | null, pausedFrom?: 밀리초 | null, pausedUntil?: 밀리초 | null }
     updateStoreSettings(storeId, patch) {
       const cur = stmts.settingsById.get(storeId);
       const hours = patch.hours ?? cur?.hours ?? null;
@@ -350,8 +356,10 @@ export function openDb(path) {
         items[patch.item.id] = next;
       }
       const special = patch.special !== undefined ? patch.special : cur?.special_json ? JSON.parse(cur.special_json) : null;
-      stmts.upsertSettings.run(storeId, hours, JSON.stringify(items), special ? JSON.stringify(special) : null);
-      return toSettings({ hours, items_json: JSON.stringify(items), special_json: special ? JSON.stringify(special) : null });
+      const pausedFrom = patch.pausedFrom !== undefined ? patch.pausedFrom : (cur?.paused_from ?? null);
+      const pausedUntil = patch.pausedUntil !== undefined ? patch.pausedUntil : (cur?.paused_until ?? null);
+      stmts.upsertSettings.run(storeId, hours, JSON.stringify(items), special ? JSON.stringify(special) : null, pausedFrom, pausedUntil);
+      return toSettings({ hours, items_json: JSON.stringify(items), special_json: special ? JSON.stringify(special) : null, paused_from: pausedFrom, paused_until: pausedUntil });
     },
 
     close: () => db.close(),

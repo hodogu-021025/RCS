@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import type { CaptionCard } from "./OrderChatbot";
 
 // 한 글자씩 나오는 간격. 긴 답은 조금 빠르게 적어 전체가 5초 안팎에 끝나게 한다
@@ -34,19 +34,37 @@ function Typewriter({ text, after }: { text: string; after?: ReactNode }) {
   );
 }
 
-// 자막 아래 표. 카드가 떠오르고 줄이 하나씩 차례로 나타난다 (--i: 줄 순서)
-function CaptionCards({ cards }: { cards: CaptionCard[] }) {
+// 자막 아래 표. 카드가 떠오르고 줄이 하나씩 차례로 나타난다 (--i: 줄 순서).
+// 메뉴·식당 목록 표는 줄을 눌러(또는 Enter·Space) 그 메뉴·식당을 고를 수 있다
+function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messageId: number, index: number) => void }) {
   return (
     <div className="caption-cards">
       {cards.map((c) => (
         <div key={c.key} className={"caption-card" + (c.list ? " list" : "")}>
           <dl>
-            {c.rows.map((row, i) => (
-              <div key={`${i}-${row.label}`} className="caption-row" style={{ "--i": i } as CSSProperties}>
-                <dt>{row.label}</dt>
-                <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
-              </div>
-            ))}
+            {c.rows.map((row, i) => {
+              const pick = c.pickable && onPick ? () => onPick(c.messageId, i) : undefined;
+              const onKeyDown = (e: KeyboardEvent) => {
+                if (pick && (e.key === "Enter" || e.key === " ")) {
+                  e.preventDefault();
+                  pick();
+                }
+              };
+              return (
+                <div
+                  key={`${i}-${row.label}`}
+                  className={"caption-row" + (pick ? " pickable" : "")}
+                  style={{ "--i": i } as CSSProperties}
+                  {...(pick ? { role: "button", tabIndex: 0, "aria-label": row.label, onClick: pick, onKeyDown } : {})}
+                >
+                  <dt>
+                    {row.label}
+                    {row.badge && <span className="place-badge">{row.badge}</span>}
+                  </dt>
+                  <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
+                </div>
+              );
+            })}
           </dl>
         </div>
       ))}
@@ -62,11 +80,12 @@ interface Props {
   text: string;
   cards?: CaptionCard[]; // 자막을 다 적은 뒤 아래에 띄울 표 (주문서·예약 확인·식당·안내)
   thinking: boolean;
+  onPick?: (messageId: number, index: number) => void; // 목록 표의 줄을 눌렀을 때
 }
 
 // 채팅창을 끈 동안 배경 구체 가운데에 띄우는 자막: 봇이 소리로 읽어 주는 바로 그 문장.
 // 봇이 답을 준비하는 동안은 점 세 개가 깜빡인다
-export function VoiceCaption({ id, text, cards = [], thinking }: Props) {
+export function VoiceCaption({ id, text, cards = [], thinking, onPick }: Props) {
   const hasCards = !thinking && cards.length > 0;
   return (
     <div className={"voice-caption" + (hasCards ? " has-cards" : "")}>
@@ -77,7 +96,7 @@ export function VoiceCaption({ id, text, cards = [], thinking }: Props) {
           <span />
         </span>
       ) : (
-        text && <Typewriter key={id} text={breakAfterSentences(text)} after={hasCards ? <CaptionCards cards={cards} /> : undefined} />
+        text && <Typewriter key={id} text={breakAfterSentences(text)} after={hasCards ? <CaptionCards cards={cards} onPick={onPick} /> : undefined} />
       )}
       {/* 화면 읽기 프로그램에는 한 글자씩이 아니라 문장 전체를 한 번에 알린다 */}
       <p className="sr-only" aria-live="polite">

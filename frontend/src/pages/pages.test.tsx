@@ -360,11 +360,11 @@ describe("사장님 페이지", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("새 주문: 간장치킨 1마리");
   });
 
-  it("매장·메뉴 탭에서 품절·가격·영업시간을 바꾸면 서버에 저장된다", async () => {
+  it("메뉴 탭에서 품절·가격을, 매장 탭에서 영업시간을 바꾸면 서버에 저장된다", async () => {
     server.createAccount(boss);
     await loginAs("chickenboss");
     open("#/owner");
-    fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "메뉴" }));
 
     const soldOut = screen.getByRole("button", { name: "간장치킨 품절" });
     expect(soldOut).toHaveAttribute("aria-pressed", "false");
@@ -375,18 +375,22 @@ describe("사장님 페이지", () => {
     await act(async () => void fireEvent.click(screen.getByRole("button", { name: "간장치킨 품절" })));
     await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2?.soldOut).toBe(false));
     const price = screen.getByRole("spinbutton", { name: "간장치킨 가격" });
+    expect(screen.getByLabelText("간장치킨 판매가")).toHaveValue("20,000원");
     fireEvent.change(price, { target: { value: "23000" } });
+    // 판매가는 칸을 벗어나기 전에도 적는 대로 바뀐다
+    expect(screen.getByLabelText("간장치킨 판매가")).toHaveValue("23,000원");
     fireEvent.blur(price);
     await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2?.price).toBe(23000));
+    fireEvent.click(screen.getByRole("tab", { name: "매장" }));
     fireEvent.change(screen.getByLabelText("닫는 시간"), { target: { value: "23:00" } });
     await waitFor(() => expect(server.db.allStoreSettings().h3?.hours).toBe("16:00 - 23:00"));
   });
 
-  it("매장·메뉴 탭에서 메뉴를 추가하면 바로 판매되고, 판매 중지하면 아래로 내려가 다시 판매할 수 있다", async () => {
+  it("메뉴 탭에서 메뉴를 추가하면 바로 판매되고, 판매 중지하면 아래로 내려가 다시 판매할 수 있다", async () => {
     server.createAccount(boss);
     await loginAs("chickenboss");
     open("#/owner");
-    fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "메뉴" }));
 
     // 화면에서 먼저 거르는 입력
     fill({ "메뉴 이름": "양념치킨", "가격 (원)": "50" });
@@ -410,11 +414,11 @@ describe("사장님 페이지", () => {
     expect(screen.queryByText(/^판매 중지한 메뉴 \(\d+\)$/)).not.toBeInTheDocument();
   });
 
-  it("매장·메뉴 탭에서 오늘의 메뉴를 고르고 메뉴별 할인율을 정하면 서버에 저장된다", async () => {
+  it("메뉴 탭에서 오늘의 메뉴를 고르고 메뉴별 할인율을 정하면 서버에 저장된다", async () => {
     server.createAccount(boss);
     await loginAs("chickenboss");
     open("#/owner");
-    fireEvent.click(await screen.findByRole("tab", { name: "매장·메뉴" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "메뉴" }));
 
     choose("오늘의 메뉴", "간장치킨");
     await waitFor(() => expect(server.db.allStoreSettings().h3 as unknown as { special?: { itemId: string } }).toMatchObject({ special: { itemId: "d2" } }));
@@ -425,9 +429,11 @@ describe("사장님 페이지", () => {
     fireEvent.blur(pct);
     expect(await screen.findByRole("alert")).toHaveTextContent("할인율은 0~90%");
     fireEvent.change(pct, { target: { value: "25" } });
+    expect(screen.getByLabelText("간장치킨 판매가")).toHaveValue("15,000원"); // 저장 전에도 할인을 반영해 보여 준다
     fireEvent.blur(pct);
     await waitFor(() => expect(server.db.allStoreSettings().h3?.items.d2 as { discountPct?: number }).toMatchObject({ discountPct: 25 }));
-    expect(await screen.findByText("할인가 15,000원")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("간장치킨 판매가")).toHaveValue("15,000원"));
+    expect(screen.getByLabelText("간장치킨 판매가")).toHaveClass("discounted");
 
     choose("오늘의 메뉴", "없음");
     await waitFor(() => expect((server.db.allStoreSettings().h3 as unknown as { special?: unknown }).special).toBeUndefined());
@@ -442,7 +448,7 @@ describe("사장님 페이지", () => {
     await click("방문 완료");
     await waitFor(() => expect(server.db.reservationById(rsv.id)?.status).toBe("방문 완료"));
 
-    fireEvent.click(screen.getByRole("tab", { name: "매장·메뉴" }));
+    fireEvent.click(screen.getByRole("tab", { name: "매장" }));
     expect(screen.getByLabelText("여는 시간")).toHaveValue("15:00");
     expect(screen.getByLabelText("닫는 시간")).toHaveValue("00:00");
   });
@@ -613,7 +619,7 @@ describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
     open("#/owner");
     expect(await screen.findByText("16,000원 (20% 할인)")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "매장·메뉴" }));
+    fireEvent.click(screen.getByRole("tab", { name: "메뉴" }));
     await act(async () => void fireEvent.click(await screen.findByRole("button", { name: "마늘치킨 품절" })));
     await waitFor(() => expect((server.db as unknown as MenuDb).allStoreSettings().h3?.items[added.id]?.soldOut).toBe(true));
     const price = await screen.findByRole("spinbutton", { name: "마늘치킨 가격" });
@@ -832,5 +838,93 @@ describe("로그인한 고객님의 연락처·배달지", () => {
     await click("저장");
     expect(await screen.findByRole("status")).toHaveTextContent("저장했어요");
     expect(server.db.findUser("chickenboss")).toMatchObject({ phone: "010-5555-6666" });
+  });
+});
+
+describe("매장 일시 중지 (사장님·관리자 화면)", () => {
+  const onServer = () => server.db.allStoreSettings().h3 as unknown as { pausedFrom?: number; pausedUntil?: number } | undefined;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hhmm = (ms: number) => `${pad(new Date(ms).getHours())}:${pad(new Date(ms).getMinutes())}`;
+  async function openStoreTab() {
+    server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
+    await loginAs("chickenboss");
+    open("#/owner");
+    fireEvent.click(await screen.findByRole("tab", { name: "매장" }));
+    expect(await screen.findByRole("heading", { name: "일시 중지" })).toBeInTheDocument();
+  }
+
+  it("시작은 지금, 종료 시간을 고르면 그때까지 멈추고 타이머가 남은 시간을 보여 주며, 다른 탭의 띠로 바로 풀 수 있다", async () => {
+    await openStoreTab();
+    // 태그·설명·빠른 버튼 없이 시작·종료 두 칸
+    expect(screen.queryByText("주문 받는 중")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /30분/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("시작 시간")).toHaveValue(hhmm(Date.now()));
+    expect(screen.getByRole("button", { name: "일시 중지" })).toBeDisabled(); // 종료 시간을 고르기 전
+
+    const end = Date.now() + 2 * 60 * 60_000;
+    fireEvent.change(screen.getByLabelText("종료 시간"), { target: { value: hhmm(end) } });
+    await click("일시 중지");
+    await waitFor(() => expect(onServer()?.pausedUntil).toBeDefined());
+    expect(hhmm(onServer()!.pausedUntil!)).toBe(hhmm(end));
+    expect(onServer()!.pausedFrom).toBeLessThanOrEqual(Date.now()); // 바로 시작
+
+    const timer = await screen.findByRole("timer");
+    expect(timer).toHaveTextContent("다시 받기까지");
+    expect(timer).toHaveTextContent(/1:5\d:\d\d|2:00:00/);
+    expect(timer).not.toHaveTextContent("저절로 다시 주문을 받아요");
+
+    fireEvent.click(screen.getByRole("tab", { name: "주문·예약" }));
+    expect(screen.getByText(/^새 주문을 잠시 받지 않고 있어요 · (내일 )?\d{2}:\d{2}까지$/)).toBeInTheDocument();
+    await click("다시 받기");
+    await waitFor(() => expect(onServer()?.pausedUntil).toBeUndefined());
+    await waitFor(() => expect(document.querySelector(".pause-banner")).toBeNull());
+  });
+
+  it("시작 시간을 앞으로 잡으면 미리 정해 두고, 시작까지 남은 시간을 보여 주며, 취소할 수 있다", async () => {
+    await openStoreTab();
+    const from = Date.now() + 2 * 60 * 60_000;
+    const until = Date.now() + 3 * 60 * 60_000;
+    fireEvent.change(screen.getByLabelText("시작 시간"), { target: { value: hhmm(from) } });
+    fireEvent.change(screen.getByLabelText("종료 시간"), { target: { value: hhmm(until) } });
+    await click("일시 중지");
+    await waitFor(() => expect(onServer()?.pausedFrom).toBeGreaterThan(Date.now()));
+    expect(hhmm(onServer()!.pausedFrom!)).toBe(hhmm(from));
+
+    const timer = await screen.findByRole("timer");
+    expect(timer).toHaveTextContent("일시 중지 시작까지");
+    expect(timer).toHaveTextContent(`${hhmm(from)}부터 ${hhmm(until)}까지 멈춰요.`);
+    // 아직 시작 전이라 주문은 받는다
+    fireEvent.click(screen.getByRole("tab", { name: "메뉴" }));
+    expect(screen.getByText(/일시 중지 예정이에요$/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "매장" }));
+
+    await click("일시 중지 취소");
+    await waitFor(() => expect(onServer()?.pausedUntil).toBeUndefined());
+    await waitFor(() => expect(screen.queryByRole("timer")).not.toBeInTheDocument());
+  });
+
+  it("멈춘 동안 종료 시간을 바꿀 수 있다 (바꾸지 않으면 시간 바꾸기 버튼은 꺼져 있다)", async () => {
+    await openStoreTab();
+    fireEvent.change(screen.getByLabelText("종료 시간"), { target: { value: hhmm(Date.now() + 60 * 60_000) } });
+    await click("일시 중지");
+    expect(await screen.findByRole("button", { name: "시간 바꾸기" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "지금 다시 받기" })).toBeEnabled());
+    const later = Date.now() + 3 * 60 * 60_000;
+    fireEvent.change(screen.getByLabelText("종료 시간"), { target: { value: hhmm(later) } });
+    await click("시간 바꾸기");
+    await waitFor(() => expect(hhmm(onServer()!.pausedUntil!)).toBe(hhmm(later)));
+    await click("지금 다시 받기");
+    await waitFor(() => expect(onServer()?.pausedUntil).toBeUndefined());
+  });
+
+  it("관리자 매장 목록에 일시 중지와 예정이 보인다", async () => {
+    server.createAccount({ username: "adminuser", name: "관리자", role: "admin" });
+    server.db.updateStoreSettings("h3", { pausedUntil: Date.now() + 60 * 60_000 } as never);
+    server.db.updateStoreSettings("h1", { pausedFrom: Date.now() + 60 * 60_000, pausedUntil: Date.now() + 2 * 60 * 60_000 } as never);
+    await loginAs("adminuser");
+    open("#/admin");
+    fireEvent.click(await screen.findByRole("tab", { name: "매장·사장님" }));
+    expect(await screen.findByText(/^일시 중지 · (내일 )?\d{2}:\d{2}까지$/)).toBeInTheDocument();
+    expect(screen.getByText(/^일시 중지 예정 · (내일 )?\d{2}:\d{2}~(내일 )?\d{2}:\d{2}$/)).toBeInTheDocument();
   });
 });

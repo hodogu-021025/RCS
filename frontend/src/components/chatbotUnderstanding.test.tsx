@@ -71,10 +71,15 @@ const buttonsIn = (re: RegExp) =>
   within(screen.getAllByText(re).at(-1)!.closest(".bubble")!)
     .getAllByRole("button")
     .map((b) => b.querySelector("b")?.textContent ?? b.textContent);
-// 추천 카드 설명에 붙은 오늘의 메뉴·할인 표시와 가격: "간장치킨" → { tags: ["20% 할인"], price: "16,000원" }
+// 추천 카드의 이름 옆 태그(오늘의 메뉴), 설명 앞 할인 표시, 가격, 설명 줄: "간장치킨" → { badge: null, tags: ["20% 할인"], price: "16,000원", info }
 const cardOf = (name: string) => {
   const card = screen.getAllByRole("button", { name }).at(-1)!;
-  return { tags: [...card.querySelectorAll("em")].map((e) => e.textContent), price: card.querySelector(".place-distance")?.textContent };
+  return {
+    badge: card.querySelector(".place-badge")?.textContent ?? null,
+    tags: [...card.querySelectorAll("em")].map((e) => e.textContent),
+    price: card.querySelector(".place-distance")?.textContent,
+    info: card.querySelector("small")?.textContent,
+  };
 };
 
 // 처음 점검 때 쓴 20문장. 예전에는 7개만 기능으로 이어졌다
@@ -361,11 +366,22 @@ describe("할인과 오늘의 메뉴", () => {
     // 오늘의 메뉴·할인은 식당 추천과 같은 메뉴 카드에 표시하고, 가격은 할인한 값
     await find(/오늘은 이런 메뉴 어떠세요/);
     expect(buttonsIn(/오늘은 이런 메뉴 어떠세요/).slice(0, 2)).toEqual(["국물떡볶이", "간장치킨"]);
-    expect(cardOf("국물떡볶이")).toEqual({ tags: ["오늘의 메뉴"], price: "6,000원" });
-    expect(cardOf("간장치킨")).toEqual({ tags: ["20% 할인"], price: "16,000원" });
-    expect(cardOf("옛날통닭").tags).toEqual([]);
+    // 오늘의 메뉴는 이름 옆 태그로, 할인은 설명 앞에. 영업 상태는 적지 않는다 (일시 중지한 가게는 아예 안 나온다)
+    expect(cardOf("국물떡볶이")).toEqual({ badge: "오늘의 메뉴", tags: [], price: "6,000원", info: "장락 떡볶이" });
+    expect(cardOf("간장치킨")).toEqual({ badge: null, tags: ["20% 할인"], price: "16,000원", info: "20% 할인 · 청전 치킨공방" });
+    expect(cardOf("옛날통닭")).toMatchObject({ badge: null, tags: [], info: "장락 옛날통닭" });
   });
 
+  it("채팅창을 끈 동안의 메뉴 표에도 오늘의 메뉴는 이름 옆 태그로 보인다", async () => {
+    await setDeals();
+    render(<OrderChatbot />); // 채팅창은 처음에 꺼져 있다
+    await act(() => refresh(["settings", "popular", "menu"]));
+    await say("배달");
+    await wait(15_000); // 자막이 한 글자씩 다 적히고 표가 뜰 때까지
+    const special = [...document.querySelectorAll(".caption-row")].find((r) => r.querySelector("dt")?.textContent?.startsWith("국물떡볶이"));
+    expect(special?.querySelector(".place-badge")?.textContent).toBe("오늘의 메뉴");
+    expect(special?.querySelector("dd")?.textContent).toBe("6,000원 · 장락 떡볶이");
+  });
   it("할인 메뉴를 주문하면 할인 가격으로 주문서를 만든다", async () => {
     await setDeals();
     await renderChat();
@@ -380,7 +396,7 @@ describe("할인과 오늘의 메뉴", () => {
     await say("할인하는 거 있어?");
     expect(await find(/오늘의 메뉴와 할인 중인 메뉴예요/)).toBeTruthy();
     expect(buttonsIn(/오늘의 메뉴와 할인 중인 메뉴예요/)).toEqual(["국물떡볶이", "간장치킨", "직접 입력"]);
-    expect(cardOf("간장치킨")).toEqual({ tags: ["20% 할인"], price: "16,000원" });
+    expect(cardOf("간장치킨")).toMatchObject({ tags: ["20% 할인"], price: "16,000원" });
   });
 
   it("할인이나 오늘의 메뉴가 없으면 그렇다고 하고 다른 메뉴를 권한다", async () => {
@@ -554,5 +570,148 @@ describe("6. 앞에서 한 말 기억하기·고치기", () => {
     await say("취소");
     await say("아까 그거 2마리");
     expect(await find(/^옛날통닭 2마리$/)).toBeTruthy();
+  });
+});
+
+describe("일시 중지한 매장", () => {
+  // 청전 치킨공방(간장치킨)을 지금(18:30)부터 한 시간(19:30까지) 일시 중지한다
+  const pauseH3 = () => server.db.updateStoreSettings("h3", { pausedUntil: Date.now() + 60 * 60_000 } as never);
+
+  it("배달 추천에서 빠지고, 메뉴 이름을 말하면 이유를 알려 주고 다른 메뉴를 권한다", async () => {
+    pauseH3();
+    await renderChat();
+    await say("배달");
+    const buttons = buttonsIn(/오늘은 이런 메뉴 어떠세요/);
+    expect(buttons).not.toContain("간장치킨");
+    expect(buttons).toContain("옛날통닭");
+    await type("간장치킨 2마리");
+    expect(await find(/청전 치킨공방은 지금 잠시 주문을 받지 않아요\. 19:30부터 다시 받아요\./)).toBeTruthy();
+    expect(buttonsIn(/잠시 주문을 받지 않아요/)).toContain("옛날통닭");
+    expect(screen.queryByText(/몇 마리 주문할까요/)).not.toBeInTheDocument();
+  });
+
+  it("가게 이름으로 배달을 청해도 이유를 알려 주고, 가게 정보에는 쉬는 중으로 보인다", async () => {
+    pauseH3();
+    await renderChat();
+    await say("청전 치킨공방 배달");
+    expect(await find(/청전 치킨공방은 지금 잠시 주문을 받지 않아요/)).toBeTruthy();
+    await type("청전 치킨공방 영업시간 알려줘");
+    expect(await find(/청전 치킨공방 정보예요/)).toBeTruthy();
+    expect(inCard("16:00 - 01:00 · 잠시 쉬는 중 (19:30까지)")).toBe(true);
+  });
+
+  it("식당 추천에서 빠지고, 이름으로 예약하면 오늘은 빼고 내일부터 고르게 한다", async () => {
+    pauseH3();
+    await renderChat();
+    await say("치킨집 예약");
+    await find(/근처 치킨 맛집을 추천해요/);
+    expect(buttonsIn(/근처 치킨 맛집을 추천해요/)).toEqual(["장락 옛날통닭"]);
+    fireEvent.click(screen.getByRole("button", { name: "새 대화" }));
+    await say("청전 치킨공방 예약");
+    expect(await find(/청전 치킨공방은 오늘 예약을 잠시 받지 않아요/)).toBeTruthy();
+    const dates = buttonsIn(/언제 방문하실 건가요/);
+    expect(dates.some((d) => d?.startsWith("오늘"))).toBe(false);
+    expect(dates.some((d) => d?.startsWith("내일"))).toBe(true);
+  });
+
+  it("주문서를 보는 사이에 가게가 일시 중지하면 '응'이라고 해도 결제로 가지 않는다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리");
+    await find(/^간장치킨 2마리$/);
+    pauseH3();
+    await act(() => refresh(["settings"]));
+    await say("응");
+    expect(await find(/청전 치킨공방은 지금 잠시 주문을 받지 않아요/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /신용카드/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("일시 중지 검토에서 찾은 문제", () => {
+  const pause = (storeId: string, until = Date.now() + 60 * 60_000) => server.db.updateStoreSettings(storeId, { pausedUntil: until } as never);
+
+  it("'장락 옛날통닭 내일 7시 예약'은 가게 이름 속 메뉴 이름(옛날통닭)이 있어도 예약으로 간다 ('2마리'는 그대로 배달)", async () => {
+    await renderChat();
+    await say("장락 옛날통닭 내일 7시 예약");
+    expect(await find(/몇 명이 방문하시나요/)).toBeTruthy();
+    expect(screen.queryByText(/몇 마리 주문할까요/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "새 대화" }));
+    await say("장락 옛날통닭 2마리");
+    expect(await find(/^옛날통닭 2마리$/)).toBeTruthy();
+  });
+
+  it("일시 중지한 장락 옛날통닭도 이름으로 예약하면 배달 거절 대신 내일 예약으로 간다", async () => {
+    pause("h1");
+    await renderChat();
+    await say("장락 옛날통닭 내일 7시 예약");
+    expect(await find(/몇 명이 방문하시나요/)).toBeTruthy();
+    expect(screen.queryByText(/잠시 주문을 받지 않아요/)).not.toBeInTheDocument();
+  });
+
+  it("그 음식의 가게가 모두 쉬면 빈 목록 대신 그렇다고 알리고 다른 음식을 권한다", async () => {
+    pause("h1");
+    pause("h3");
+    await renderChat();
+    await say("치킨집 예약");
+    expect(await find(/지금 근처 치킨 가게가 모두 잠시 쉬고 있어요/)).toBeTruthy();
+    const foods = buttonsIn(/모두 잠시 쉬고 있어요/);
+    expect(foods).not.toContain("치킨");
+    expect(foods).toContain("중식");
+    expect(document.querySelectorAll(".places button")).toHaveLength(0);
+  });
+
+  it("확인하는 사이에 가게가 멈춰 서버가 예약을 거절하면 완료 대신 이유를 알린다", async () => {
+    await renderChat();
+    await say("장락 옛날통닭 오늘 저녁 7시 2명 예약");
+    expect(await find(/예약 내용을 확인해 주세요/)).toBeTruthy();
+    pause("h1"); // 화면은 아직 모른다 (서버만 멈춤)
+    await say("응");
+    expect(await find(/오늘 예약은 잠시 받지 않아요/)).toBeTruthy();
+    expect(screen.queryByText(/예약이 완료되었어요/)).not.toBeInTheDocument();
+  });
+
+  it("결제하는 사이에 가게가 멈춰 서버가 주문을 거절하면 완료 대신 이유를 알리고 결제는 하지 않는다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await find(/^간장치킨 1마리$/);
+    await say("응");
+    await say("카카오페이");
+    const pay = await screen.findByRole("button", { name: /결제하기/ }, { timeout: 3000 });
+    pause("h3"); // 화면은 아직 모른다 (서버만 멈춤)
+    fireEvent.click(pay);
+    await wait(3500); // 결제 팝업이 "결제 진행 중 → 결제 완료"를 보여 주고 닫힐 때까지
+    expect(await find(/청전 치킨공방은 지금 잠시 주문을 받지 않아요/)).toBeTruthy();
+    expect(await find(/주문이 접수되지 않아 결제는 진행되지 않았어요/)).toBeTruthy();
+    expect(screen.queryByText(/결제가 완료되었어요/)).not.toBeInTheDocument();
+  });
+
+  it("끝나는 때가 내일이면 '내일 09:00부터'라고 알린다", async () => {
+    pause("h3", new Date(2026, 9, 11, 9, 0).getTime());
+    await renderChat();
+    await say("간장치킨 2마리");
+    expect(await find(/청전 치킨공방은 지금 잠시 주문을 받지 않아요\. 내일 09:00부터 다시 받아요\./)).toBeTruthy();
+  });
+
+  it("'오늘'로 예약을 청하면 오늘은 쉰다는 안내가 한 번만 나온다", async () => {
+    pause("h3");
+    await renderChat();
+    await say("청전 치킨공방 오늘 저녁 8시 예약");
+    await find(/언제 방문하실 건가요/);
+    expect(screen.getAllByText(/오늘 예약을 잠시 받지 않아요/)).toHaveLength(1);
+  });
+
+  it("로그인하고 돌아왔는데 고르던 메뉴의 가게가 멈췄으면 이유를 말하고 다른 메뉴를 권한다", async () => {
+    await logout();
+    const first = render(<OrderChatbot />);
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+    await say("간장치킨 2마리");
+    await find(/로그인한 뒤에 할 수 있어요/);
+    first.unmount();
+    pause("h3");
+    await loginCustomer2();
+    await renderChat();
+    // 이어 가기(한 박자 뒤) → 봇 답(0.7초)까지 넉넉히 넘긴 뒤 바로 확인한다
+    await wait(2500);
+    expect(screen.getAllByText(/청전 치킨공방은 지금 잠시 주문을 받지 않아요/).length).toBeGreaterThan(0);
+    expect(buttonsIn(/잠시 주문을 받지 않아요/)).toContain("옛날통닭");
   });
 });

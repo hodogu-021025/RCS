@@ -8,7 +8,9 @@ import {
   availableDeliveryMenu,
   bookableTimes,
   checkVisitTime,
+  untilText,
   formatDate,
+  pausedToday,
   km,
   withTopicParticle,
   type InfoCard,
@@ -23,7 +25,7 @@ import {
   type Meal,
   type Restaurant,
 } from "./orderChatKnowledge";
-import type { OrderRecord } from "../data/db";
+import { storePausedUntil, type OrderRecord } from "../data/db";
 
 // ---- 무엇을 하려는 말인지 ----
 export type Intent =
@@ -96,7 +98,12 @@ export function isOpenNow(r: Restaurant, now: Date): boolean {
 
 // ---- 가게 찾기 ----
 export const allRestaurants = () => RESTAURANTS.map(withStoreSettings);
-export const nearestRestaurants = (n = 3) => allRestaurants().sort((a, b) => a.distanceKm - b.distanceKm).slice(0, n);
+// 가까운 곳 추천 (일시 중지 중인 곳은 추천하지 않는다)
+export const nearestRestaurants = (n = 3) =>
+  allRestaurants()
+    .filter((r) => !storePausedUntil(r.id))
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .slice(0, n);
 
 // 문장에 들어 있는 식당 이름 (띄어쓰기 무시)
 export function restaurantNamed(text: string): Restaurant | undefined {
@@ -148,12 +155,13 @@ export function usableSlots(r: Restaurant, s: ReservationSlots, now: Date): { sl
   let issue: string | undefined;
   if (s.date) {
     if (bookableTimes(r, s.date, now).length > 0) slots.date = s.date;
+    else if (pausedToday(r, s.date, now)) issue = `${withTopicParticle(r.name)} 오늘 예약을 잠시 받지 않아요. 내일 이후 날짜로 골라 주세요.`;
     else issue = `${formatDate(s.date)}은 예약할 수 있는 시간이 지났어요.`;
   }
   if (s.time) {
     const check = checkVisitTime(r, slots.date ?? now, s.time, now);
-    // 날짜를 아직 모르면 영업시간만 본다 (지난 시간인지는 날짜를 정한 뒤에)
-    if (check === "ok" || (check === "past" && !slots.date)) slots.time = s.time;
+    // 날짜를 아직 모르면 영업시간만 본다 (지난 시간인지, 오늘 일시 중지인지는 날짜를 정한 뒤에)
+    if (check === "ok" || ((check === "past" || check === "paused") && !slots.date)) slots.time = s.time;
     else issue ??= check === "past" ? "이미 지난 시간이에요." : `${s.time}에는 예약할 수 없어요. 마감 1시간 전까지 예약할 수 있어요.`;
   }
   if (s.people !== undefined) slots.people = s.people;
@@ -288,11 +296,18 @@ export function orderStatusCard(o: OrderRecord): InfoCard {
 
 // 가게 정보를 표로: 영업시간(지금 영업 중인지)·주소·대표 메뉴·거리
 export function storeInfoCard(r: Restaurant, now: Date): InfoCard {
-  const state = isOpenNow(r, now) ? "지금 영업 중이에요." : "지금은 영업시간이 아니에요.";
+  // 일시 중지 중이면 영업 중이어도 "잠시 쉬는 중"으로 알린다
+  const paused = storePausedUntil(r.id, now.getTime());
+  const state = paused
+    ? `지금 잠시 주문을 받지 않아요. ${untilText(paused, now.getTime())}부터 다시 받아요.`
+    : isOpenNow(r, now)
+      ? "지금 영업 중이에요."
+      : "지금은 영업시간이 아니에요.";
+  const tag = paused ? `잠시 쉬는 중 (${untilText(paused, now.getTime())}까지)` : isOpenNow(r, now) ? "영업 중" : "영업 전·후";
   return {
     title: `${r.name} 정보예요.`,
     rows: [
-      { label: "영업시간", value: `${r.hours} · ${isOpenNow(r, now) ? "영업 중" : "영업 전·후"}`, emphasis: true },
+      { label: "영업시간", value: `${r.hours} · ${tag}`, emphasis: true },
       { label: "주소", value: r.address },
       { label: "대표 메뉴", value: r.signature },
       { label: "거리", value: km(r.distanceKm) },

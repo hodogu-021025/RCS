@@ -24,7 +24,10 @@
 //   POST   /api/stores/:id/menu        { name, price, unit, keywords? }  그 매장 사장님(승인)·관리자: 메뉴 추가, 바로 판매
 //   PATCH  /api/stores/:id/menu/:itemId  { active }                 판매 중지(false)·다시 판매(true)
 //   GET    /api/stats/popular          누구나: 최근 30일 메뉴별 주문 수·식당별 예약 수 (챗봇 추천 순서)
-//   PATCH  /api/stores/:id/settings    { hours? } · { item: { id, patch: { price?, soldOut?, discountPct? } } } · { special: { itemId } | null }  그 매장 사장님·관리자
+//   PATCH  /api/stores/:id/settings    { hours? } · { item: { id, patch: { price?, soldOut?, discountPct? } } } · { special: { itemId } | null }
+//                                      · { pause: { from?: 밀리초, until: 밀리초 } | null }  그 매장 사장님·관리자
+//                                      (pause: from(없거나 지났으면 지금)부터 until 까지 새 배달 주문과 오늘 예약을 받지 않는다.
+//                                       둘 다 지금부터 24시간 안, until 은 from 보다 뒤. null 이면 일시 중지를 지우고 바로 다시 받는다)
 //                                      (special: 오늘의 메뉴. 서버가 한국 날짜로 오늘을 붙이고, 그날만 보인다. discountPct 0 은 할인 끔)
 //   GET    /api/owners                 관리자
 //   POST   /api/owners                 { username, password, name?, storeId }   관리자
@@ -49,6 +52,10 @@ import {
   RESERVATION_NEXT,
   RESERVATION_STATUSES,
   hoursError,
+  isPaused,
+  PAUSE_MAX_MS,
+  pauseEndText,
+  withTopic,
   STORE_IDS,
   discountedPrice,
   foodLabelOf,
@@ -104,11 +111,21 @@ export const LOGIN_MAX_PER_IP = 20;
 const str = (v, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 // db: openDb() 결과, verifier: createVerifier() 결과, mailer: createMailer() 결과
-// now: 시계 (테스트에서 로그인 제한 시간을 넘길 때)
-export function createApp({ db, verifier, mailer, now = Date.now }) {
+// now: 시계 (테스트에서 로그인 제한 시간을 넘길 때). 기본은 부를 때마다 Date.now 를 읽는다 (테스트가 시계를 바꿔도 따라가게)
+export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
   // 목록 파일의 배달 메뉴 중 DB 에 없는 것을 채워 넣는다 (사장님이 추가·판매 중지한 메뉴는 그대로)
   db.seedMenu(DELIVERY_MENU);
   // 판매 중인 그 매장의 그 이름 메뉴
+  // 끝난 일시 중지는 화면에 보내지 않는다 (정한 시각이 지나면 저절로 다시 받는다). 시작 전인 것(미리 정해 둔 것)은 보낸다
+  const liveSettings = (s) => {
+    if (!s?.pausedUntil || s.pausedUntil > now()) return s;
+    const { pausedFrom: _from, pausedUntil: _ended, ...rest } = s;
+    return rest;
+  };
+  const storePaused = (storeId) => {
+    const s = db.allStoreSettings()[storeId];
+    return isPaused(s, now()) ? s.pausedUntil : null;
+  };
   const activeMenuItem = (storeId, name) => {
     const item = db.menuItemByName(storeId, name);
     return item?.active ? item : null;
@@ -299,6 +316,8 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       const qty = Number(o.qty);
       if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) throw bad("주문 내용이 맞지 않아요.");
       if (!STORE_IDS.has(o.storeId)) throw bad("매장을 알 수 없어요.");
+      const pausedUntil = storePaused(o.storeId);
+      if (pausedUntil) throw bad(`${withTopic(restaurantName(o.storeId))} 지금 잠시 주문을 받지 않아요. ${pauseEndText(pausedUntil, now())}부터 다시 받아요.`);
       // 메뉴·단위·금액은 화면이 보낸 값을 믿지 않고 목록(catalog.json)과 사장님 설정(가격·품절)으로 다시 정한다
       const item = activeMenuItem(o.storeId, str(o.item));
       if (!item) throw bad(db.menuItemByName(o.storeId, str(o.item)) ? `${str(o.item)}은(는) 지금 판매하지 않아요.` : "메뉴를 알 수 없어요.");
@@ -363,6 +382,8 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
       if (!STORE_IDS.has(body.restaurantId)) throw bad("식당을 알 수 없어요.");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) || !/^\d{2}:\d{2}$/.test(String(body.time))) throw bad("날짜·시간이 맞지 않아요.");
       if (!Number.isInteger(people) || people < 1 || people > MAX_PEOPLE) throw bad("인원이 맞지 않아요.");
+      // 일시 중지 중에는 오늘 예약만 막는다 (내일 이후 예약은 그대로 받는다)
+      if (body.date === todayKST(new Date(now())) && storePaused(body.restaurantId)) throw bad("오늘 예약은 잠시 받지 않아요. 내일 이후 날짜로 예약해 주세요.");
       const who = user ?? GUEST;
       return db.addReservation({
         customer: who.username,
@@ -387,7 +408,7 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
     }],
 
     // ---- 매장 설정 ----
-    ["GET", "/api/stores/settings", () => db.allStoreSettings()],
+    ["GET", "/api/stores/settings", () => Object.fromEntries(Object.entries(db.allStoreSettings()).map(([id, s]) => [id, liveSettings(s)]))],
     // 챗봇 추천용: 최근 30일 메뉴별 주문 수(배달 메뉴 id 로)와 식당별 예약 수. 개인 정보 없이 숫자만
     ["GET", "/api/stats/popular", () => {
       const { items, restaurants } = db.popularity(Date.now() - 30 * 24 * 60 * 60_000);
@@ -471,7 +492,23 @@ export function createApp({ db, verifier, mailer, now = Date.now }) {
           patch.special = { itemId: item.id, date: todayKST() };
         }
       }
-      return db.updateStoreSettings(params.id, patch);
+      // 일시 중지: 사장님이 고른 시각까지. null 이면 바로 다시 받는다
+      if (body.pause !== undefined) {
+        if (body.pause === null) {
+          patch.pausedFrom = null;
+          patch.pausedUntil = null;
+        } else {
+          const until = Number(body.pause?.until);
+          // 시작 시각이 없거나 이미 지났으면 지금부터
+          const asked = body.pause?.from === undefined || body.pause?.from === null ? now() : Number(body.pause.from);
+          if (!Number.isInteger(until) || !Number.isInteger(asked) || until > now() + PAUSE_MAX_MS) throw bad("일시 중지는 지금부터 24시간 안의 시각으로 정해 주세요.");
+          const from = Math.max(asked, now());
+          if (until <= from) throw bad("종료 시간은 시작 시간보다 뒤여야 해요.");
+          patch.pausedFrom = from; // 실제로 멈추기 시작하는 시각 (사장님 화면의 시작 시간 칸에 보인다)
+          patch.pausedUntil = until;
+        }
+      }
+      return liveSettings(db.updateStoreSettings(params.id, patch));
     }],
 
     // ---- 관리자: 사장님·고객님 ----

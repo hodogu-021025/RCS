@@ -217,6 +217,29 @@
 .hours-row label > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .dash .hours-row input[type="time"] { width: 100%; min-width: 0; }
 .section-head .head-note { font-size: 12.5px; color: var(--muted); }
+/* 관리자 매장 목록의 일시 중지 표시 */
+.status-pill { padding: 4px 10px; border-radius: 999px; background: #e7f7ee; color: #15803d; font-size: 12.5px; font-weight: 700; }
+.status-pill.paused { background: #fff4e5; color: #b45309; }
+/* 일시 중지 카드: 시작·종료 시간(영업시간 카드와 같은 두 칸), 남은 시간 타이머, 버튼 */
+.pause-timer {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  margin-top: 12px; padding: 14px 12px; border-radius: 14px;
+  background: var(--surface); text-align: center;
+}
+.pause-timer.active { background: #fff4e5; }
+.pause-timer span { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.pause-timer b { font-size: 28px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.pause-timer.active b { color: #b45309; }
+.pause-timer small { font-size: 12.5px; color: var(--muted); }
+.pause-card .form-error { margin: 12px 0 0; }
+.pause-actions { display: flex; gap: 8px; margin-top: 12px; }
+.pause-actions .btn { flex: 1; height: 44px; }
+/* 다른 탭 위의 일시 중지 안내 띠 */
+.pause-banner {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 10px 12px;
+  border-radius: 14px; background: #fff4e5; color: #b45309; font-size: 13.5px; font-weight: 600;
+}
+.pause-banner span { flex: 1; min-width: 0; }
 /* 영업시간: 안내 문구를 제목 바로 옆에 붙인다 (제목이 남는 폭을 차지하지 않게) */
 .section-head.hours-head { gap: 8px; align-items: baseline; }
 .section-head.hours-head h2 { flex: 0 0 auto; }
@@ -230,13 +253,19 @@
 .special-field small { display: block; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .special-field .select { margin-bottom: 0; }
 .badge-special { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-weak); color: var(--accent); font-size: 11.5px; font-weight: 700; vertical-align: 2px; }
-.discount-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-.discount-field input { width: 64px !important; height: 38px !important; }
-.sale-price { margin: -4px 0 0; color: var(--accent); font-size: 13px; font-weight: 700; }
-/* 사장님 화면에서 판매 중인 메뉴 카드는 칸 순서가 늘 같게: 이름 / 가격·할인율(한 줄) / 품절·판매 중지 버튼 */
+/* 메뉴 카드의 가격 · 할인율 · 판매가 세 칸 (칸 위에 이름) */
+.price-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.price-grid label { display: block; min-width: 0; }
+.price-grid span { display: block; margin-bottom: 4px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash .price-grid input { width: 100%; min-width: 0; height: 40px; padding: 0 10px; }
+/* 판매가: 적을 수 없는 칸. 흰 바탕·테두리로 입력칸과 구분하고, 할인 중이면 파란색 */
+.dash .price-grid input.sale-input, .dash .price-grid input.sale-input:focus { background: #fff; border-color: var(--line); font-weight: 700; cursor: default; }
+.dash .price-grid input.sale-input.discounted { border-color: var(--accent); color: var(--accent); }
+/* 사장님 화면에서 판매 중인 메뉴 카드는 칸 순서가 늘 같게: 이름·품절·판매 중지(한 줄) / 가격·할인율(한 줄) / 판매가 */
 .dash-section .menu-list li:not(.stopped) { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
-.menu-list li:not(.stopped) > b { flex: none; }
-.price-row { display: flex; align-items: center; gap: 14px; }
+.menu-head { display: flex; align-items: center; gap: 8px; }
+.menu-head b { flex: 1; min-width: 0; }
+.menu-head .menu-actions { flex-shrink: 0; }
 .menu-actions { display: flex; gap: 8px; }
 /* 품절처럼 눌러서 켜고 끄는 버튼이 켜진 상태 */
 .btn.on, .btn.on:hover { border-color: var(--accent); background: var(--accent-weak); color: var(--accent); }
@@ -248,8 +277,6 @@
 .menu-form-row > label { min-width: 0; }
 .menu-form-row input { min-width: 0; }
 .menu-form .hint { margin: -4px 2px 12px; }
-.price-field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-.price-field input { width: 92px !important; height: 38px !important; }
 
 /* 숫자 타일 */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }

@@ -39,6 +39,21 @@ export const discountedPrice = (price, pct) => (pct > 0 ? Math.round((price * (1
 // 한국 날짜 "YYYY-MM-DD" (오늘의 메뉴는 그날 자정까지만)
 export const todayKST = (now = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
 
+// ---- 일시 중지: 사장님이 정한 시각까지 새 배달 주문과 오늘 예약을 받지 않는다. 그 시각이 지나면 저절로 다시 받는다 ----
+export const PAUSE_MAX_MS = 24 * 60 * 60_000; // 한 번에 최대 24시간 뒤까지
+// 지금 멈춘 중인지: 시작 시각(없으면 바로)이 지났고 끝나는 시각 전. 미리 정해 둔 일시 중지는 시작 전까지 주문을 받는다
+export const isPaused = (settings, now = Date.now()) => (settings?.pausedFrom ?? 0) <= now && (settings?.pausedUntil ?? 0) > now;
+// 한국 시각 "15:30"
+export const timeKST = (ms) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ms);
+// 받침에 맞춘 은/는 ("장락 옛날통닭은", "장락 떡볶이는"). 한글로 끝나지 않으면 둘 다 적는다
+export function withTopic(word) {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  if (code < 0 || code > 11171) return `${word}은(는)`;
+  return word + (code % 28 ? "은" : "는");
+}
+// 일시 중지가 끝나는 때: 오늘이면 "15:30", 내일이면 "내일 09:00" (한국 날짜 기준)
+export const pauseEndText = (until, now = Date.now()) => `${todayKST(new Date(until)) === todayKST(new Date(now)) ? "" : "내일 "}${timeKST(until)}`;
+
 // 메뉴 입력 규칙 (화면 frontend/src/pages/OwnerPage.tsx 도 같은 범위로 미리 검사한다)
 export const MENU_NAME_MAX = 30;
 export const MENU_PRICE_MIN = 100;

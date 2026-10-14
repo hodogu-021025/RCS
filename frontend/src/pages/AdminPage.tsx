@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { RESTAURANTS, formatDate, orderPriceLabel, withStoreSettings, won } from "../components/orderChatKnowledge";
-import { addOwner, approveOwner, removeOwner, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
+import { RESTAURANTS, formatDate, untilText, orderPriceLabel, withStoreSettings, won } from "../components/orderChatKnowledge";
+import { addOwner, approveOwner, removeOwner, storePause, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
 import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime } from "./format";
@@ -210,6 +210,7 @@ function StoresTab() {
         <ul className="record-list">
           {RESTAURANTS.map((r) => {
             const mine = owners.filter((o) => o.storeId === r.id);
+            const pause = storePause(r.id);
             const removable = mine;
             return (
               <li key={r.id} className="record">
@@ -220,6 +221,20 @@ function StoresTab() {
                   <div>
                     <dt>영업시간</dt>
                     <dd>{withStoreSettings(r).hours}</dd>
+                  </div>
+                  <div>
+                    <dt>영업 상태</dt>
+                    <dd>
+                      {!pause ? (
+                        "주문 받는 중"
+                      ) : pause.active ? (
+                        <span className="status-pill paused">일시 중지 · {untilText(pause.until)}까지</span>
+                      ) : (
+                        <span className="status-pill paused">
+                          일시 중지 예정 · {untilText(pause.from)}~{untilText(pause.until)}
+                        </span>
+                      )}
+                    </dd>
                   </div>
                   <div>
                     <dt>사장님</dt>

@@ -3,7 +3,7 @@ import backgroundVideo from "../image/saylo_background.mp4";
 import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { useSession } from "../auth/auth";
-import { addOrder, addReservation, cancelMyOrder, fetchMyOrders, getReceipts, useDb, type OrderRecord } from "../data/db";
+import { addOrder, addReservation, cancelMyOrder, fetchMyOrders, getReceipts, storePausedUntil, useDb, type OrderRecord } from "../data/db";
 import { deliveryChange, hasDelivery, rememberResume, takeResume, type DeliveryInfo, type ResumeDelivery } from "./delivery";
 import { CalendarPicker } from "./CalendarPicker";
 import { CountPicker } from "./CountPicker";
@@ -12,10 +12,15 @@ import { VoiceCaption } from "./VoiceCaption";
 import { FALLBACK_PROMPT, QUICK_MENUS, menuIntent, menuReply, quickMenuReply } from "./quickMenu";
 import {
   DEFAULT_PEOPLE,
+  pausedToday,
+  deliveryMenu,
+  pausedText,
+  squash,
   deliveryPrompt,
   popularFirst,
   priceText,
-  dealTags,
+  discountTag,
+  menuBadge,
   restaurantById,
   FOOD_PROMPT,
   FOODS,
@@ -244,11 +249,13 @@ function spokenText(m: Message): string {
 interface PickCard {
   id: string;
   name: string;
+  badge?: string; // 이름 옆 작은 태그 (오늘의 메뉴)
   tags: string[];
   info: string[];
   pill: string;
 }
 
+// 식당 카드의 영업 상태 (예약할 때 참고). 일시 중지한 곳은 목록에 아예 나오지 않는다
 const openText = (r: Restaurant, now: Date) => (isOpenNow(r, now) ? "영업 중" : `${r.hours.split("-")[0].trim()} 오픈`);
 
 const restaurantCard = (r: Restaurant, now: Date): PickCard => ({
@@ -259,12 +266,14 @@ const restaurantCard = (r: Restaurant, now: Date): PickCard => ({
   pill: km(r.distanceKm),
 });
 
-function menuCard(d: DeliveryItem, now: Date): PickCard {
-  const store = restaurantById(d.restaurantId);
-  return { id: d.id, name: d.name, tags: dealTags(d), info: [store.name, openText(store, now)], pill: won(d.price) };
+// 메뉴 카드: 오늘의 메뉴는 이름 옆 태그, 할인은 설명 앞, 그다음 가게 이름. 일시 중지한 가게의 메뉴는 목록에 아예 나오지 않으므로
+// 영업 상태는 적지 않는다
+function menuCard(d: DeliveryItem): PickCard {
+  const deal = discountTag(d);
+  return { id: d.id, name: d.name, badge: menuBadge(d), tags: deal ? [deal] : [], info: [restaurantById(d.restaurantId).name], pill: won(d.price) };
 }
 
-const pickCardRow = (c: PickCard): OrderRow => ({ label: c.name, value: [c.pill, ...c.tags, ...c.info].join(" · ") });
+const pickCardRow = (c: PickCard): OrderRow => ({ label: c.name, badge: c.badge, value: [c.pill, ...c.tags, ...c.info].join(" · ") });
 
 // 카드 목록. 버튼의 이름은 식당·메뉴 이름이고, 설명·알약은 읽기 프로그램에 덧붙는 설명으로 준다
 function PickCards({ cards, selected, disabled, onPick }: { cards: PickCard[]; selected?: string; disabled: boolean; onPick: (c: PickCard) => void }) {
@@ -281,10 +290,17 @@ function PickCards({ cards, selected, disabled, onPick }: { cards: PickCard[]; s
             disabled={disabled}
             onClick={() => onPick(c)}
             aria-labelledby={id}
-            aria-describedby={`${id}-info ${id}-pill`}
+            aria-describedby={`${c.badge ? `${id}-badge ` : ""}${id}-info ${id}-pill`}
           >
             <span className="place-main">
-              <b id={id}>{c.name}</b>
+              <span className="place-name">
+                <b id={id}>{c.name}</b>
+                {c.badge && (
+                  <span className="place-badge" id={`${id}-badge`}>
+                    {c.badge}
+                  </span>
+                )}
+              </span>
               <small id={`${id}-info`}>
                 {c.tags.map((t) => (
                   <Fragment key={t}>
@@ -310,20 +326,24 @@ function PickCards({ cards, selected, disabled, onPick }: { cards: PickCard[]; s
 // 소리로는 지금처럼 표 내용까지 읽는다 (spokenText)
 export interface CaptionCard {
   key: string;
+  messageId: number; // 이 표를 낸 봇 말풍선
   rows: OrderRow[];
-  list?: boolean; // 식당 목록: 왼쪽이 이름, 오른쪽이 거리·대표 메뉴
+  list?: boolean; // 메뉴·식당 목록: 이름이 앞, 아래 줄에 가격·가게·거리 등
+  pickable?: boolean; // 줄을 눌러 고를 수 있는지 (그 질문이 지금 답할 차례일 때만)
 }
 
 function captionCard(m: Message, now: Date): CaptionCard | null {
   if (m.role === "user") return null;
   const key = `m${m.id}`;
+  const messageId = m.id;
   switch (m.kind) {
     case "order":
-      return { key, rows: orderCardRows(m.order) };
+      return { key, messageId, rows: orderCardRows(m.order) };
     case "reservation": {
       const r = m.reservation;
       return {
         key,
+        messageId,
         rows: [
           { label: "식당", value: r.restaurant.name },
           { label: "날짜", value: formatDate(r.date) },
@@ -337,6 +357,7 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
       const r = m.restaurant;
       return {
         key,
+        messageId,
         rows: [
           { label: "식당", value: r.name },
           { label: "거리", value: km(r.distanceKm) },
@@ -347,12 +368,12 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
       };
     }
     case "info":
-      return { key, rows: m.card.rows };
+      return { key, messageId, rows: m.card.rows };
     case "text":
       if (!m.menu?.length) return null;
-      return { key, list: true, rows: m.menu.map((d) => pickCardRow(menuCard(d, now))) };
+      return { key, messageId, list: true, rows: m.menu.map((d) => pickCardRow(menuCard(d))) };
     case "restaurants":
-      return { key, list: true, rows: m.list.map((r) => pickCardRow(restaurantCard(r, now))) };
+      return { key, messageId, list: true, rows: m.list.map((r) => pickCardRow(restaurantCard(r, now))) };
     default:
       return null;
   }
@@ -602,6 +623,18 @@ export function OrderChatbot() {
 
   // 식당 목록 말풍선. heading 이 있으면 "근처 ○○ 맛집" 대신 그 문장으로 시작한다 (가장 가까운 곳, 어느 가게인지 묻기)
   function showRestaurants(foodLabel: string, list: Restaurant[], opts: { heading?: string; lead?: NewMessage[]; next?: Stage } = {}) {
+    // 추천할 곳이 하나도 없으면(그 음식 가게가 모두 일시 중지 중) 빈 목록 대신 그렇다고 알리고 다른 음식을 권한다
+    if (list.length === 0) {
+      const text = `지금 ${foodLabel ? `근처 ${foodLabel} 가게가` : "근처 가게가"} 모두 잠시 쉬고 있어요.\n다른 음식은 어떠세요?`;
+      setStage("food");
+      botReply(() =>
+        push(
+          ...(opts.lead ?? []),
+          botPrompt({ ...FOOD_PROMPT, text, say: text.replace("\n", " "), choices: FOOD_PROMPT.choices?.filter((c) => c.label !== foodLabel) }),
+        ),
+      );
+      return;
+    }
     setStage(opts.next ?? "restaurant");
     botReply(() => push(...(opts.lead ?? []), { role: "bot", kind: "restaurants", foodLabel, list, heading: opts.heading }), 900);
   }
@@ -646,8 +679,15 @@ export function OrderChatbot() {
 
   // 로그인하거나 배달지를 등록하고 돌아왔을 때: 메뉴·수량을 다 골랐으면 주문서로, 메뉴만 골랐으면 수량부터, 아니면 메뉴부터
   function continueOrder(resume: ResumeDelivery) {
-    const item = resume.itemId ? availableDeliveryMenu().find((d) => d.id === resume.itemId) : undefined;
+    const chosen = resume.itemId ? deliveryMenu().find((d) => d.id === resume.itemId) : undefined;
+    const item = chosen && availableDeliveryMenu().find((d) => d.id === chosen.id);
     push(botText(`${session ? `${session.name}님, ` : ""}고르시던 배달 주문을 이어서 도와드릴게요.`));
+    // 그사이 그 가게가 일시 중지했거나 메뉴가 품절됐으면 이유를 말하고 다른 메뉴를 권한다
+    if (chosen && !item) {
+      const paused = storePausedUntil(chosen.restaurantId);
+      offerInstead(paused ? pausedText(restaurantById(chosen.restaurantId).name, paused) : `${withTopicParticle(chosen.name)} 지금 품절이에요.`, alternativesFor(chosen));
+      return;
+    }
     if (item && qtyInRange(resume.qty)) startOrder(item, resume.qty);
     else if (item) deliverItems([item], "");
     else startMenu("배달");
@@ -693,12 +733,18 @@ export function OrderChatbot() {
       deliverItems(one ? [one] : items, text);
       return true;
     }
+    // 이름을 말한 메뉴가 품절이거나, 그 가게가 일시 중지 중이면 이유를 말하고 비슷한 메뉴를 권한다
     const gone = soldOutItemNamed(text);
     if (!gone) return false;
-    const alts = alternativesFor(gone);
+    const paused = storePausedUntil(gone.restaurantId);
+    offerInstead(paused ? pausedText(restaurantById(gone.restaurantId).name, paused) : `${withTopicParticle(gone.name)} 지금 품절이에요.`, alternativesFor(gone));
+    return true;
+  }
+
+  // 지금 주문할 수 없는 메뉴·가게(품절·일시 중지) 대신 다른 메뉴를 권한다
+  function offerInstead(head: string, alts: DeliveryItem[]) {
     setPendingItem(null);
     setStage(alts.length ? "menu" : "idle");
-    const head = `${withTopicParticle(gone.name)} 지금 품절이에요.`;
     botReply(() =>
       push(
         alts.length
@@ -710,7 +756,6 @@ export function OrderChatbot() {
           : botText(`${head}\n지금은 주문할 수 있는 다른 메뉴가 없어요.`),
       ),
     );
-    return true;
   }
 
   function cancelDelivery() {
@@ -749,7 +794,12 @@ export function OrderChatbot() {
   function beginReservation(restaurant: Restaurant, slots: ReservationSlots, lead: NewMessage[] = []) {
     setRsvSlots({});
     setLastPlace(restaurant);
-    proceedReservation({ restaurant, ...slots }, [{ role: "bot", kind: "restaurantPicked", restaurant }, ...lead]);
+    // 일시 중지 중인 곳은 오늘 예약만 받지 않는다 (날짜 버튼·달력에서 오늘이 빠진다).
+    // "오늘"이라고 말했으면 날짜를 다시 물을 때 같은 안내가 나오므로 여기서는 뺀다
+    const askedToday = !!slots.date && pausedToday(restaurant, slots.date, new Date());
+    const pausedNote: NewMessage[] =
+      storePausedUntil(restaurant.id) && !askedToday ? [botText(`${withTopicParticle(restaurant.name)} 오늘 예약을 잠시 받지 않아요. 내일 이후 날짜로 도와드릴게요.`)] : [];
+    proceedReservation({ restaurant, ...slots }, [{ role: "bot", kind: "restaurantPicked", restaurant }, ...pausedNote, ...lead]);
   }
 
   // 예약 단계별 처리. 한 번에 여러 값을 말해도("내일 8시 4명") 받아 두고, 확인 단계에서 "8시로 바꿔줘"처럼 고칠 수도 있다
@@ -764,15 +814,16 @@ export function OrderChatbot() {
         return;
       }
       if (isYes(text) && draft.date && draft.time && draft.people) {
-        const done = reservationDoneCard({ restaurant, date: draft.date, time: draft.time, people: draft.people });
-        // 사장님·관리자 화면에서 보이도록 기록한다
-        // 로그인했으면 그 사람 이름으로, 아니면 비회원으로 서버에 남는다 (실패해도 대화는 이어 간다)
-        addReservation({ restaurantId: restaurant.id, restaurantName: restaurant.name, date: draft.date, time: draft.time, people: draft.people }).catch(
-          () => {},
-        );
+        const { date, time, people } = draft;
+        const done = reservationDoneCard({ restaurant, date, time, people });
         setRsv(null);
         setStage("idle");
-        botReply(() => push({ role: "bot", kind: "info", card: done }), 900);
+        // 서버가 받은 뒤에 완료로 보여 준다 (로그인했으면 그 사람 이름으로, 아니면 비회원으로 남는다).
+        // 그사이 가게가 일시 중지했거나 연결이 끊기면 완료 대신 그 이유를 알려 준다
+        botReplyAsync(async () => {
+          await addReservation({ restaurantId: restaurant.id, restaurantName: restaurant.name, date, time, people });
+          return () => push({ role: "bot", kind: "info", card: done });
+        });
         return;
       }
     }
@@ -810,7 +861,9 @@ export function OrderChatbot() {
           ? "시간을 잘 모르겠어요."
           : check === "past"
             ? "이미 지난 시간이에요."
-            : `${time}에는 예약할 수 없어요. 마감 1시간 전까지 예약할 수 있어요.`;
+            : check === "paused"
+              ? `${withTopicParticle(restaurant.name)} 오늘 예약을 잠시 받지 않아요.`
+              : `${time}에는 예약할 수 없어요. 마감 1시간 전까지 예약할 수 있어요.`;
         botReply(() => push(botPrompt(timePrompt(restaurant, date, now, lead))));
         return;
       }
@@ -1071,6 +1124,13 @@ export function OrderChatbot() {
         setOrder(null);
         setPendingPay(null);
         botReply(() => push(botText("주문을 취소했어요. 다른 게 필요하면 말씀해 주세요!")));
+      } else if (isYes(text) && storePausedUntil(order.storeId ?? "")) {
+        // 주문서를 보는 사이에 가게가 일시 중지했으면 결제로 가지 않는다
+        const until = storePausedUntil(order.storeId ?? "")!;
+        setStage("idle");
+        setOrder(null);
+        setPendingPay(null);
+        botReply(() => push(botText(`${pausedText(order.store.name, until)}\n이 주문은 접었어요. 다른 메뉴를 주문하시겠어요?`)));
       } else if (isYes(text)) {
         // 처음에 결제수단까지 말했으면("카카오페이로") 고르는 단계를 건너뛰고 결제 화면으로
         if (pendingPay) {
@@ -1149,7 +1209,8 @@ export function OrderChatbot() {
 
     // 배달 메뉴 고르는 중
     if (stage === "menu") {
-      if (!wantsRestaurant && tryDelivery(text)) return;
+      // 식당·예약 말이나 가게 이름("청전 치킨공방 영업시간")이 있으면 아래 일반 처리가 그 가게 기준으로 다룬다
+      if (!wantsRestaurant && !restaurantNamed(text) && tryDelivery(text)) return;
       if (isNo(text)) {
         cancelDelivery();
         return;
@@ -1264,9 +1325,20 @@ export function OrderChatbot() {
 
     // 가게 이름을 말했으면: 메뉴·배달 얘기면 그 가게 배달, 아니면 그 가게 예약
     if (place) {
+      // "장락 옛날통닭 내일 7시 예약": 예약·식당 말이 있으면 가게 이름 속 메뉴 이름(옛날통닭)보다 예약을 먼저 본다
+      const wantsBooking = menu === "식당";
+      // 일시 중지 중인 가게에 배달을 청하면 이유를 말하고 같은 음식의 다른 가게 메뉴를 권한다 (예약은 아래에서 내일 이후로)
+      const paused = storePausedUntil(place.id);
+      const placeItemNamed = deliveryMenu().some((d) => d.restaurantId === place.id && squash(text).includes(squash(d.name)));
+      if (!wantsBooking && paused && (menu === "배달" || placeItemNamed)) {
+        startFresh();
+        const sameFood = availableDeliveryMenu().filter((d) => restaurantById(d.restaurantId).food === place.food);
+        offerInstead(pausedText(place.name, paused), sameFood.length ? sameFood : availableDeliveryMenu());
+        return;
+      }
       const storeMenu = availableDeliveryMenu().filter((d) => d.restaurantId === place.id);
       const named = findDeliveryItems(text).filter((d) => d.restaurantId === place.id);
-      if (storeMenu.length && (named.length || menu === "배달")) {
+      if (!wantsBooking && storeMenu.length && (named.length || menu === "배달")) {
         startFresh();
         setLastPlace(place);
         deliverItems(named.length ? named : storeMenu, text);
@@ -1421,14 +1493,27 @@ export function OrderChatbot() {
 
   function onPaid() {
     if (!order || !payMethod) return;
-    const card = completionCard(order, payMethod);
-    // 사장님·관리자 화면에서 보이도록 기록한다
-    addOrder(order, payMethod.label).catch(() => {});
+    const placed = order;
+    const card = completionCard(placed, payMethod);
+    const method = payMethod.label;
     setPayMethod(null);
     setPendingPay(null);
     setOrder(null);
     setStage("done");
-    botReply(() => push({ role: "bot", kind: "info", card }), 500);
+    // 서버가 주문을 받은 뒤에 완료로 보여 준다 (사장님·관리자 화면에 보이게 기록된다).
+    // 그사이 가게가 일시 중지했거나 품절되면 서버가 거절하므로 완료 대신 그 이유를 알리고, 결제는 하지 않은 것으로 한다
+    botReplyAsync(async () => {
+      try {
+        await addOrder(placed, method);
+      } catch (e) {
+        const why = e instanceof Error && e.message ? e.message : "잠시 후 다시 시도해 주세요.";
+        return () => {
+          setStage("idle");
+          push(botText(`${why}\n주문이 접수되지 않아 결제는 진행되지 않았어요.`));
+        };
+      }
+      return () => push({ role: "bot", kind: "info", card });
+    });
   }
 
   function reset() {
@@ -1463,6 +1548,14 @@ export function OrderChatbot() {
       prev.map((m) => (m.id === promptId && m.role === "bot" && m.kind === "text" ? { ...m, picked: choice.value } : m)),
     );
     handle(choice.value);
+  }
+
+  // 채팅창을 끈 동안 표의 줄을 누르면 그 메뉴·식당을 고른 것으로 한다 (말풍선 카드를 누른 것과 같다)
+  function pickCaptionRow(messageId: number, index: number) {
+    const m = messages.find((x) => x.id === messageId);
+    if (m?.role !== "bot") return;
+    if (m.kind === "text" && m.menu?.[index]) pickChoice(m.id, { label: m.menu[index].name, value: m.menu[index].name });
+    else if (m.kind === "restaurants" && m.list[index]) handle(m.list[index].name);
   }
 
   // 카운터(예약 인원·배달 수량)에서 고른 수. "3명", "2마리"처럼 입력한 것으로 처리한다
@@ -1549,13 +1642,12 @@ export function OrderChatbot() {
         // 추천 메뉴는 식당 추천과 같은 카드로 보여 주고, 나머지 선택지(식당 찾기·지난번 메뉴 다시 등)는 그 아래 작은 버튼으로
         const menu = m.menu ?? [];
         const others = m.choices.filter((c) => !menu.some((d) => d.name === c.value));
-        const now = new Date();
         return (
           <>
             {m.text}
             {menu.length > 0 && (
               <PickCards
-                cards={menu.map((d) => menuCard(d, now))}
+                cards={menu.map((d) => menuCard(d))}
                 selected={menu.find((d) => d.name === m.picked)?.id}
                 disabled={!active}
                 onPick={(c) => pickChoice(m.id, { label: c.name, value: c.name })}
@@ -1858,7 +1950,15 @@ export function OrderChatbot() {
           )}
         </div>
 
-        {chatHidden && <VoiceCaption id={captionId} text={captionText} cards={captionCards} thinking={thinking} />}
+        {chatHidden && (
+          <VoiceCaption
+            id={captionId}
+            text={captionText}
+            cards={captionCards.map((c) => ({ ...c, pickable: c.list && (c.messageId === activeChoicesId || c.messageId === activeRestaurantsId) }))}
+            thinking={thinking}
+            onPick={pickCaptionRow}
+          />
+        )}
 
         {/* 음성 카드: 대화 영역 위에 겹쳐서 아래에서 올라오고(show) 내려간다. 내려가는 동안은 마지막 내용을 그대로 보여 준다.
             듣는 동안은 중간 인식 결과, 아니면 오류·안내 문구 */}
