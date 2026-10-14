@@ -6,3 +6,6 @@ saylo.html
 
 # API 서버의 SQLite 데이터 (개발용)
 server/data/
+
+# 로컬 메모 (운영 계정 비밀번호 등). 저장소에 올리지 않는다
+*.local.txt
