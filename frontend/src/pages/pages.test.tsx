@@ -103,14 +103,14 @@ describe("첫 화면과 로그인", () => {
     const first = open("#/login");
     typeLogin("chickenboss", "password1");
     await waitFor(() => expect(window.location.hash).toBe("#/owner"));
-    expect(await screen.findByText("청전 치킨공방 · 사장님")).toBeInTheDocument();
+    expect(await screen.findByText("청전 치킨공방 사장님")).toBeInTheDocument();
 
     // 새로고침: 토큰은 남아 있고 세션은 서버에 다시 물어본다
     first.unmount();
     const { restoreSession } = await import("../auth/auth");
     await restoreSession();
     open("#/owner");
-    expect(await screen.findByText("청전 치킨공방 · 사장님")).toBeInTheDocument();
+    expect(await screen.findByText("청전 치킨공방 사장님")).toBeInTheDocument();
   });
 
   it("로그인 없이 사장님·관리자 페이지에 가면 로그인 페이지로 보내고, 역할이 다르면 안내만 보여 준다", async () => {
@@ -127,7 +127,7 @@ describe("첫 화면과 로그인", () => {
     server.createAccount({ username: "jangrakboss", name: "장락반점 사장님", role: "owner", storeId: "c1" });
     await loginAs("jangrakboss");
     open("#/owner");
-    expect(await screen.findByText("장락반점 · 사장님")).toBeInTheDocument();
+    expect(await screen.findByText("장락반점 사장님")).toBeInTheDocument();
 
     server.db.deleteUser("jangrakboss"); // 세션도 같이 지워진다
     await act(() => refresh(["records"])); // 화면이 몇 초마다 하는 새로 받기
@@ -195,7 +195,7 @@ describe("회원가입", () => {
     server.createAccount({ username: "banjeom01", name: "김사장", role: "owner", storeId: "c1", approved: false });
     await loginAs("banjeom01");
     open("#/owner");
-    expect(await screen.findByText("장락반점 · 사장님")).toBeInTheDocument();
+    expect(await screen.findByText("장락반점 사장님")).toBeInTheDocument();
     expect(screen.getByText("관리자 승인을 기다리고 있어요")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /주문·예약/ })).not.toBeInTheDocument();
 
@@ -390,6 +390,7 @@ describe("사장님 페이지", () => {
     await loginAs("chickenboss");
     open("#/owner");
     fireEvent.click(await screen.findByRole("tab", { name: "메뉴" }));
+    fireEvent.click(screen.getByRole("tab", { name: "메뉴 추가" }));
 
     // 화면에서 먼저 거르는 입력
     fill({ "메뉴 이름": "양념치킨", "가격 (원)": "50" });
@@ -402,12 +403,17 @@ describe("사장님 페이지", () => {
     const added = (server.db as unknown as { listMenu(): { id: string; name: string; price: number; keywords: string[]; active: boolean }[] }).listMenu().find((d) => d.name === "양념치킨")!;
     expect(added).toMatchObject({ price: 21000, active: true });
     expect(added.keywords).toEqual(["양념", "양념통닭", "치킨"]);
+    // 세부 메뉴: 판매 중 → 판매 중지 → 판매 중
+    fireEvent.click(screen.getByRole("tab", { name: "판매 중" }));
     expect(await screen.findByRole("spinbutton", { name: "양념치킨 가격" })).toHaveValue(21000);
 
     await click("양념치킨 판매 중지");
+    await waitFor(() => expect(screen.queryByRole("spinbutton", { name: "양념치킨 가격" })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("tab", { name: "판매 중지" }));
     expect(await screen.findByText("판매 중지한 메뉴 (1)")).toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton", { name: "양념치킨 가격" })).not.toBeInTheDocument();
     await click("양념치킨 다시 판매");
+    expect(await screen.findByText("판매 중지한 메뉴 (0)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "판매 중" }));
     expect(await screen.findByRole("spinbutton", { name: "양념치킨 가격" })).toBeInTheDocument();
     // 목록 제목만 찾는다 (안내 문장에도 "판매 중지한 메뉴"가 들어 있다)
     expect(screen.queryByText(/^판매 중지한 메뉴 \(\d+\)$/)).not.toBeInTheDocument();
@@ -443,6 +449,7 @@ describe("사장님 페이지", () => {
     const rsv = server.db.addReservation({ ...GUEST, customer: "guest", customerName: "비회원", restaurantId: "h1", restaurantName: "장락 옛날통닭", date: "2026-10-10", time: "19:00", people: 3 });
     await loginAs("tongdakboss");
     open("#/owner");
+    fireEvent.click(await screen.findByRole("tab", { name: "식당 예약" }));
     expect(await screen.findByText(/10월 10일 \(토\) 19:00/)).toBeInTheDocument();
     await click("방문 완료");
     await waitFor(() => expect(server.db.reservationById(rsv.id)?.status).toBe("방문 완료"));
@@ -526,9 +533,10 @@ describe("관리자 페이지", () => {
     server.createAccount({ username: "newstoreboss", name: "닭강정 사장", role: "owner", storeId: store.id });
     await loginAs("newstoreboss");
     open("#/owner");
-    expect(await screen.findByText("하소 닭강정 · 사장님")).toBeInTheDocument();
+    expect(await screen.findByText("하소 닭강정 사장님")).toBeInTheDocument();
     expect(screen.queryByText("매장 정보를 찾을 수 없어요")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "매장" }));
+    fireEvent.click(screen.getByRole("tab", { name: "매장 정보" }));
     expect(await screen.findByText("매장 이름")).toBeInTheDocument();
     expect(screen.queryByText("대표 메뉴", { selector: "dt" })).not.toBeInTheDocument();
     expect(screen.queryByText("주소", { selector: "dt" })).not.toBeInTheDocument();
@@ -561,6 +569,7 @@ describe("계좌이체 (사장님·관리자·내 주문)", () => {
     await loginAs("chickenboss");
     open("#/owner");
     fireEvent.click(await screen.findByRole("tab", { name: "매장" }));
+    fireEvent.click(screen.getByRole("tab", { name: "입금 계좌" }));
     expect(await screen.findByText(TEST_BANK.account)).toBeInTheDocument();
     expect(screen.getByText(/고객님이 주문하면 이 계좌로 입금 안내를 받아요/)).toBeInTheDocument();
 
@@ -582,6 +591,7 @@ describe("계좌이체 (사장님·관리자·내 주문)", () => {
     expect(await screen.findByText(/입금 계좌가 없어 배달 주문을 받지 못하고 있어요/)).toBeInTheDocument();
     await click("계좌 등록");
     expect(await screen.findByRole("tab", { name: "매장" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "입금 계좌" })).toHaveAttribute("aria-selected", "true"); // 세부 메뉴까지 입금 계좌로
     expect(screen.getByRole("button", { name: "계좌 등록" })).toBeInTheDocument(); // 등록 폼
   });
 
@@ -786,6 +796,7 @@ describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
     server.db.addReservation({ customer: "guest", customerName: "비회원", restaurantId: "h3", restaurantName: "청전 치킨공방", date: "2099-01-01", time: "19:00", people: 2 });
     await loginAs("chickenboss");
     open("#/owner");
+    fireEvent.click(await screen.findByRole("tab", { name: "식당 예약" }));
     expect(await screen.findByRole("button", { name: "방문 완료" })).toBeDisabled();
   });
 

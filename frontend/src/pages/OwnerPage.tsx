@@ -28,6 +28,10 @@ import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
 
 type Tab = "orders" | "store" | "menu" | "sales";
+// 상단 메뉴 아래 세부 메뉴 (관리자 화면과 같은 방식). 매출은 한 화면이라 세부 메뉴가 없다
+type OrdersView = "delivery" | "reservations";
+type StoreView = "hours" | "bank" | "info";
+type MenuView = "selling" | "add" | "stopped";
 type Filter = "all" | "입금 대기" | "접수" | "준비 중" | "완료";
 // 사장님이 손을 써야 하는 주문: 입금 확인을 기다리거나, 입금이 확인돼 준비를 시작해야 하는 주문
 const needsAction = (o: OrderRecord) => o.status === "입금 대기" || o.status === "접수";
@@ -86,7 +90,7 @@ function PendingApproval({ storeName }: { storeName: string }) {
     setChecking(false);
   }
   return (
-    <DashLayout title={`${storeName} · 사장님`}>
+    <DashLayout title={`${storeName} 사장님`}>
       <section className="dash-section pending-approval">
         <h2>관리자 승인을 기다리고 있어요</h2>
         <p>
@@ -114,6 +118,9 @@ export function OwnerPage() {
   const pending = orders.filter(needsAction).length;
 
   const [tab, setTab] = useState<Tab>("orders");
+  const [ordersView, setOrdersView] = useState<OrdersView>("delivery");
+  const [storeView, setStoreView] = useState<StoreView>("hours");
+  const [menuView, setMenuView] = useState<MenuView>("selling");
   const [filter, setFilter] = useState<Filter>("all");
   // 입금 계좌: 없으면 배달 주문을 받지 못하므로 매장 탭이 아닌 화면에서도 위에 띠로 알린다
   const [bank, setBank] = useState<StoreBank | null>(null);
@@ -169,7 +176,7 @@ export function OwnerPage() {
   if (session.approved === false) return <PendingApproval storeName={store.name} />;
 
   return (
-    <DashLayout title={`${store.name} · 사장님`}>
+    <DashLayout title={`${store.name} 사장님`}>
       {isNew && <NewOrderToast key={latest.id} record={latest} />}
       <Tabs
         tabs={[
@@ -181,7 +188,43 @@ export function OwnerPage() {
         value={tab}
         onChange={setTab}
       />
-      {pauseInfo && tab !== "store" && (
+      {tab === "orders" && (
+        <Tabs
+          sub
+          tabs={[
+            { key: "delivery", label: "배달 주문", badge: pending },
+            { key: "reservations", label: "식당 예약" },
+          ]}
+          value={ordersView}
+          onChange={setOrdersView}
+        />
+      )}
+      {tab === "store" && (
+        <Tabs
+          sub
+          tabs={[
+            { key: "hours", label: "영업 관리" },
+            { key: "bank", label: "입금 계좌" },
+            { key: "info", label: "매장 정보" },
+          ]}
+          value={storeView}
+          onChange={setStoreView}
+        />
+      )}
+      {tab === "menu" && (
+        <Tabs
+          sub
+          tabs={[
+            { key: "selling", label: "판매 중" },
+            { key: "add", label: "메뉴 추가" },
+            { key: "stopped", label: "판매 중지" },
+          ]}
+          value={menuView}
+          onChange={setMenuView}
+        />
+      )}
+      {/* 일시 중지는 매장 > 영업 관리에서 다루므로 그 화면이 아닐 때 위에 띠로 알린다 */}
+      {pauseInfo && !(tab === "store" && storeView === "hours") && (
         <div className="pause-banner" role="status">
           <span role={bannerError ? "alert" : undefined}>
             {bannerError ??
@@ -195,16 +238,23 @@ export function OwnerPage() {
         </div>
       )}
 
-      {bank && !bank.account && tab !== "store" && (
+      {bank && !bank.account && !(tab === "store" && storeView === "bank") && (
         <div className="pause-banner" role="status">
           <span>입금 계좌가 없어 배달 주문을 받지 못하고 있어요</span>
-          <button type="button" className="btn small" onClick={() => setTab("store")}>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => {
+              setTab("store");
+              setStoreView("bank");
+            }}
+          >
             계좌 등록
           </button>
         </div>
       )}
 
-      {tab === "orders" && (
+      {tab === "orders" && ordersView === "delivery" && (
         <>
           <section className="dash-section">
             <div className="section-head">
@@ -224,21 +274,23 @@ export function OwnerPage() {
               ))}
             </ul>
           </section>
-
-          <section className="dash-section">
-            <h2>식당 예약</h2>
-            {reservations.length === 0 && <p className="empty">예약이 없어요.</p>}
-            <ul className="record-list">
-              {reservations.map((r) => (
-                <ReservationRow key={r.id} record={r} />
-              ))}
-            </ul>
-          </section>
         </>
       )}
 
-      {tab === "store" && <StoreTab store={store} bank={bank} bankError={bankError} onBankChange={setBank} />}
-      {tab === "menu" && <MenuTab storeId={store.id} />}
+      {tab === "orders" && ordersView === "reservations" && (
+        <section className="dash-section">
+          <h2>식당 예약</h2>
+          {reservations.length === 0 && <p className="empty">예약이 없어요.</p>}
+          <ul className="record-list">
+            {reservations.map((r) => (
+              <ReservationRow key={r.id} record={r} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {tab === "store" && <StoreTab view={storeView} store={store} bank={bank} bankError={bankError} onBankChange={setBank} />}
+      {tab === "menu" && <MenuTab view={menuView} storeId={store.id} />}
       {tab === "sales" && <SalesTab orders={orders} />}
     </DashLayout>
   );
@@ -729,7 +781,8 @@ function BankCard({ storeId, bank, bankError, onBankChange }: BankProps & { stor
   );
 }
 
-function StoreTab({ store, bank, bankError, onBankChange }: BankProps & { store: Restaurant }) {
+// 매장 탭: 세부 메뉴에 따라 영업 관리(일시 중지·영업시간) / 입금 계좌 / 매장 정보 중 하나를 보여 준다
+function StoreTab({ view, store, bank, bankError, onBankChange }: BankProps & { view: StoreView; store: Restaurant }) {
   useDb(["settings"]);
   const [hoursError, setHoursError] = useState<string | null>(null);
   const run = (work: Promise<unknown>) => {
@@ -739,10 +792,34 @@ function StoreTab({ store, bank, bankError, onBankChange }: BankProps & { store:
   // 자정 마감은 데이터에 "24:00"으로 적혀 있지만 시간 입력칸은 "00:00"까지만 받는다 (예약 시간 계산은 둘 다 자정으로 본다)
   const [open, close] = store.hours.split("-").map((s) => s.trim()).map((t) => (t === "24:00" ? "00:00" : t));
 
+  if (view === "bank") return <BankCard storeId={store.id} bank={bank} bankError={bankError} onBankChange={onBankChange} />;
+  if (view === "info")
+    return (
+      <section className="dash-section">
+        <h2>매장 정보</h2>
+        <dl className="policy-items">
+          <div>
+            <dt>매장 이름</dt>
+            <dd>{store.name}</dd>
+          </div>
+          {store.address && (
+            <div>
+              <dt>주소</dt>
+              <dd>{store.address}</dd>
+            </div>
+          )}
+          {store.signature && (
+            <div>
+              <dt>대표 메뉴</dt>
+              <dd>{store.signature}</dd>
+            </div>
+          )}
+        </dl>
+      </section>
+    );
   return (
     <>
       <PauseCard storeId={store.id} />
-      <BankCard storeId={store.id} bank={bank} bankError={bankError} onBankChange={onBankChange} />
 
       <section className="dash-section">
         <div className="section-head hours-head">
@@ -766,34 +843,13 @@ function StoreTab({ store, bank, bankError, onBankChange }: BankProps & { store:
           </label>
         </div>
       </section>
-
-      <section className="dash-section">
-        <h2>매장 정보</h2>
-        <dl className="policy-items">
-          <div>
-            <dt>매장 이름</dt>
-            <dd>{store.name}</dd>
-          </div>
-          {store.address && (
-            <div>
-              <dt>주소</dt>
-              <dd>{store.address}</dd>
-            </div>
-          )}
-          {store.signature && (
-            <div>
-              <dt>대표 메뉴</dt>
-              <dd>{store.signature}</dd>
-            </div>
-          )}
-        </dl>
-      </section>
     </>
   );
 }
 
 // 메뉴 탭: 오늘의 메뉴, 배달 메뉴(가격·할인·품절·판매 중지), 메뉴 추가, 판매 중지한 메뉴. 바꾸면 소비자 챗봇에 바로 반영된다
-function MenuTab({ storeId }: { storeId: string }) {
+// 세부 메뉴에 따라 판매 중(오늘의 메뉴·가격·할인·품절) / 메뉴 추가 / 판매 중지한 메뉴 중 하나를 보여 준다
+function MenuTab({ view, storeId }: { view: MenuView; storeId: string }) {
   const db = useDb(["settings", "menu"]);
   const [menuError, setMenuError] = useState<string | null>(null);
   // 서버에 바꾸라고 보내고, 실패하면(연결 끊김·서버가 거절) 이유를 보여 준다
@@ -808,6 +864,34 @@ function MenuTab({ storeId }: { storeId: string }) {
   const stopped = mine.filter((d) => d.active === false);
   const settings = db.storeSettings[storeId]?.items ?? {};
 
+  const errorLine = menuError && (
+    <p className="form-error" role="alert">
+      {menuError}
+    </p>
+  );
+
+  if (view === "add") return <AddMenuForm storeId={storeId} />;
+  if (view === "stopped")
+    return (
+      <section className="dash-section">
+        <h2>판매 중지한 메뉴 ({stopped.length})</h2>
+        {stopped.length === 0 && <p className="empty">판매 중지한 메뉴가 없어요.</p>}
+        <ul className="menu-list">
+          {stopped.map((d) => (
+            <li key={d.id} className="stopped">
+              <b>{d.name}</b>
+              <span className="muted">
+                {won(settings[d.id]?.price ?? d.price)} / 1{d.unit}
+              </span>
+              <button type="button" className="btn small" onClick={() => toggle(d.id, true)} aria-label={`${d.name} 다시 판매`}>
+                다시 판매
+              </button>
+            </li>
+          ))}
+        </ul>
+        {errorLine}
+      </section>
+    );
   return (
     <>
       <section className="dash-section">
@@ -838,34 +922,9 @@ function MenuTab({ storeId }: { storeId: string }) {
             />
           ))}
         </ul>
-        <p className="hint">품절은 오늘처럼 잠깐 못 파는 것, 판매 중지는 메뉴에서 내리는 것이에요. 판매 중지한 메뉴는 아래에서 다시 판매할 수 있어요.</p>
-        {menuError && (
-          <p className="form-error" role="alert">
-            {menuError}
-          </p>
-        )}
+        <p className="hint">품절은 오늘처럼 잠깐 못 파는 것, 판매 중지는 메뉴에서 내리는 것이에요. 판매 중지한 메뉴는 "판매 중지" 메뉴에서 다시 판매할 수 있어요.</p>
+        {errorLine}
       </section>
-
-      <AddMenuForm storeId={storeId} />
-
-      {stopped.length > 0 && (
-        <section className="dash-section">
-          <h2>판매 중지한 메뉴 ({stopped.length})</h2>
-          <ul className="menu-list">
-            {stopped.map((d) => (
-              <li key={d.id} className="stopped">
-                <b>{d.name}</b>
-                <span className="muted">
-                  {won(settings[d.id]?.price ?? d.price)} / 1{d.unit}
-                </span>
-                <button type="button" className="btn small" onClick={() => toggle(d.id, true)} aria-label={`${d.name} 다시 판매`}>
-                  다시 판매
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </>
   );
 }
