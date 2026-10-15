@@ -5,6 +5,9 @@ import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
   addMenuItem,
+  deleteStoreBank,
+  fetchStoreBank,
+  saveStoreBank,
   setMenuActive,
   setMenuItem,
   setSpecialMenu,
@@ -16,14 +19,18 @@ import {
   useDb,
   type OrderRecord,
   type ReservationRecord,
+  type StoreBank,
   type StoreSettings,
 } from "../data/db";
+import { BankAccountForm } from "./BankAccountForm";
 import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
-import { formatDateTime } from "./format";
+import { formatDateTime, statusClass } from "./format";
 
 type Tab = "orders" | "store" | "menu" | "sales";
-type Filter = "all" | "접수" | "준비 중" | "완료";
+type Filter = "all" | "입금 대기" | "접수" | "준비 중" | "완료";
+// 사장님이 손을 써야 하는 주문: 입금 확인을 기다리거나, 입금이 확인돼 준비를 시작해야 하는 주문
+const needsAction = (o: OrderRecord) => o.status === "입금 대기" || o.status === "접수";
 
 const DAY = 86_400_000;
 
@@ -61,7 +68,7 @@ function NewOrderToast({ record }: { record: OrderRecord }) {
   return (
     <div className="toast" role="status">
       새 주문: {record.order.item} {record.order.qty}
-      {record.order.unit} · {orderPriceLabel(record.order)}
+      {record.order.unit} · {orderPriceLabel(record.order)} · 입금을 확인해 주세요
     </div>
   );
 }
@@ -101,10 +108,24 @@ export function OwnerPage() {
   const storeMissing = !findRestaurantById(session.storeId);
   const orders = db.orders.filter((o) => o.storeId === store.id);
   const reservations = db.reservations.filter((r) => r.restaurantId === store.id);
-  const pending = orders.filter((o) => o.status === "접수").length;
+  const pending = orders.filter(needsAction).length;
 
   const [tab, setTab] = useState<Tab>("orders");
   const [filter, setFilter] = useState<Filter>("all");
+  // 입금 계좌: 없으면 배달 주문을 받지 못하므로 매장 탭이 아닌 화면에서도 위에 띠로 알린다
+  const [bank, setBank] = useState<StoreBank | null>(null);
+  const [bankError, setBankError] = useState<string | null>(null);
+  const canLoadBank = !storeMissing && session.approved !== false;
+  useEffect(() => {
+    if (!canLoadBank) return;
+    let alive = true;
+    fetchStoreBank(store.id)
+      .then((b) => alive && setBank(b))
+      .catch((err: unknown) => alive && setBankError(err instanceof Error ? err.message : "계좌 정보를 불러오지 못했어요."));
+    return () => {
+      alive = false;
+    };
+  }, [store.id, canLoadBank]);
   // 페이지를 열 때 이미 있던 주문에는 알리지 않는다: 서버에서 처음 받아 온 뒤의 맨 위 주문을 기억해 두고, 그 뒤에 생긴 것만 알린다
   // (렌더 중에 상태를 맞추는 React 의 파생 상태 방식)
   // 계정이 바뀌면(같은 기기에서 다른 사장님 로그인) 기준도 다시 잡는다
@@ -112,7 +133,7 @@ export function OwnerPage() {
   const seenAtOpen = seen?.user === session.username ? seen.id : undefined;
   if (db.recordsLoaded && seenAtOpen === undefined) setSeen({ user: session.username, id: orders[0]?.id ?? null });
   const latest = orders[0];
-  const isNew = seenAtOpen !== undefined && latest && latest.id !== seenAtOpen && latest.status === "접수";
+  const isNew = seenAtOpen !== undefined && latest && latest.id !== seenAtOpen && latest.status === "입금 대기";
 
   const shownOrders = filter === "all" ? orders : orders.filter((o) => o.status === filter);
   // 일시 중지 중이거나 미리 정해 두었으면 매장 탭이 아닌 화면에서도 위에 띠로 알린다 (잊지 않게)
@@ -162,13 +183,22 @@ export function OwnerPage() {
         </div>
       )}
 
+      {bank && !bank.account && tab !== "store" && (
+        <div className="pause-banner" role="status">
+          <span>입금 계좌가 없어 배달 주문을 받지 못하고 있어요</span>
+          <button type="button" className="btn small" onClick={() => setTab("store")}>
+            계좌 등록
+          </button>
+        </div>
+      )}
+
       {tab === "orders" && (
         <>
           <section className="dash-section">
             <div className="section-head">
               <h2>배달 주문</h2>
               <div className="chips">
-                {(["all", "접수", "준비 중", "완료"] as Filter[]).map((f) => (
+                {(["all", "입금 대기", "접수", "준비 중", "완료"] as Filter[]).map((f) => (
                   <button key={f} type="button" className={filter === f ? "chip active" : "chip"} onClick={() => setFilter(f)}>
                     {f === "all" ? "전체" : f}
                   </button>
@@ -195,7 +225,7 @@ export function OwnerPage() {
         </>
       )}
 
-      {tab === "store" && <StoreTab store={store} />}
+      {tab === "store" && <StoreTab store={store} bank={bank} bankError={bankError} onBankChange={setBank} />}
       {tab === "menu" && <MenuTab storeId={store.id} />}
       {tab === "sales" && <SalesTab orders={orders} />}
     </DashLayout>
@@ -204,14 +234,14 @@ export function OwnerPage() {
 
 function OrderRow({ record: o }: { record: OrderRecord }) {
   return (
-    <li className={"record" + (o.status === "접수" ? " pending" : "")}>
+    <li className={"record" + (needsAction(o) ? " pending" : "")}>
       <div className="record-head">
         <b>
           {o.order.item} {o.order.qty}
           {o.order.unit}
         </b>
         <span className="price">{orderPriceLabel(o.order)}</span>
-        <span className={"status s-" + o.status}>{o.status}</span>
+        <span className={statusClass(o.status)}>{o.status}</span>
       </div>
       <dl>
         {o.order.address && (
@@ -239,12 +269,41 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
           <dt>결제</dt>
           <dd>{o.payment}</dd>
         </div>
+        {/* 계좌이체: 통장에서 이 이름·금액으로 들어왔는지 보고 입금 확인을 누른다 */}
+        {o.order.depositor && (
+          <div>
+            <dt>입금자명</dt>
+            <dd>{o.order.depositor}</dd>
+          </div>
+        )}
+        {o.status === "입금 대기" && o.order.payBy && (
+          <div>
+            <dt>입금 기한</dt>
+            <dd>{untilText(o.order.payBy)}까지 (지나면 자동 취소)</dd>
+          </div>
+        )}
+        {o.status === "취소" && o.order.cancelNote && (
+          <div>
+            <dt>취소 이유</dt>
+            <dd>{o.order.cancelNote}</dd>
+          </div>
+        )}
         <div>
           <dt>시각</dt>
           <dd>{formatDateTime(o.createdAt)}</dd>
         </div>
       </dl>
       <div className="record-actions">
+        {o.status === "입금 대기" && (
+          <>
+            <button type="button" className="btn primary" onClick={() => setOrderStatus(o.id, "접수")}>
+              입금 확인
+            </button>
+            <button type="button" className="btn" onClick={() => setOrderStatus(o.id, "취소")}>
+              취소
+            </button>
+          </>
+        )}
         {o.status === "접수" && (
           <>
             <button type="button" className="btn primary" onClick={() => setOrderStatus(o.id, "준비 중")}>
@@ -273,7 +332,7 @@ function ReservationRow({ record: r }: { record: ReservationRecord }) {
           {formatDate(new Date(r.date))} {r.time}
         </b>
         <span>{r.people}명</span>
-        <span className={"status s-" + r.status}>{r.status}</span>
+        <span className={statusClass(r.status)}>{r.status}</span>
       </div>
       <dl>
         <div>
@@ -620,7 +679,45 @@ function PauseCard({ storeId }: { storeId: string }) {
 }
 
 // 매장 탭: 영업 상태(일시 중지)·영업시간·매장 정보. 바꾸면 소비자 챗봇에 바로 반영된다
-function StoreTab({ store }: { store: Restaurant }) {
+// 입금 계좌: 결제는 계좌이체 하나라 고객님이 이 계좌로 입금한다. 없으면 이 매장은 배달 주문을 받지 못한다
+interface BankProps {
+  bank: StoreBank | null; // 아직 못 받아 왔으면 null
+  bankError: string | null;
+  onBankChange: (bank: StoreBank) => void;
+}
+function BankCard({ storeId, bank, bankError, onBankChange }: BankProps & { storeId: string }) {
+  return (
+    <section className="dash-section">
+      <div className="section-head hours-head">
+        <h2>입금 계좌</h2>
+        <span className="head-note">결제는 계좌이체만 받아요.</span>
+      </div>
+      {bankError && (
+        <p className="form-error" role="alert">
+          {bankError}
+        </p>
+      )}
+      {bank && (
+        <>
+          <p className="hint bank-hint">
+            {bank.account
+              ? "고객님이 주문하면 이 계좌로 입금 안내를 받아요. 입금을 확인하면 주문 목록에서 '입금 확인'을 눌러 주세요."
+              : "계좌를 등록해야 배달 주문을 받을 수 있어요. 등록 전에는 고객님이 이 매장의 배달 주문을 할 수 없어요."}
+          </p>
+          <BankAccountForm
+            key={bank.account ? `${bank.account.bank}-${bank.account.account}` : "none"}
+            account={bank.account}
+            onSave={async (a) => onBankChange(await saveStoreBank(storeId, a))}
+            onDelete={async () => onBankChange(await deleteStoreBank(storeId))}
+            deleteLabel="지우기 (배달 주문 중지)"
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
+function StoreTab({ store, bank, bankError, onBankChange }: BankProps & { store: Restaurant }) {
   useDb(["settings"]);
   const [hoursError, setHoursError] = useState<string | null>(null);
   const run = (work: Promise<unknown>) => {
@@ -633,6 +730,7 @@ function StoreTab({ store }: { store: Restaurant }) {
   return (
     <>
       <PauseCard storeId={store.id} />
+      <BankCard storeId={store.id} bank={bank} bankError={bankError} onBankChange={onBankChange} />
 
       <section className="dash-section">
         <div className="section-head hours-head">
@@ -760,7 +858,8 @@ function MenuTab({ storeId }: { storeId: string }) {
 function SalesTab({ orders }: { orders: OrderRecord[] }) {
   const [now] = useState(() => Date.now()); // 렌더마다 바뀌지 않게 열 때의 시각으로 계산한다
   const todayStart = new Date(new Date().toDateString()).getTime();
-  const valid = orders.filter((o) => o.status !== "취소");
+  // 매출은 입금이 확인된 주문만 (취소·입금 대기는 뺀다)
+  const valid = orders.filter((o) => o.status !== "취소" && o.status !== "입금 대기");
   const today = valid.filter((o) => o.createdAt >= todayStart);
   const week = valid.filter((o) => o.createdAt >= now - 7 * DAY);
   const sum = (list: OrderRecord[]) => list.reduce((a, o) => a + o.order.price, 0);

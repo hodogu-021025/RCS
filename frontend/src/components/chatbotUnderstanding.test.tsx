@@ -178,13 +178,12 @@ describe("2. 한 번에 말한 정보 기억하기", () => {
     expect(await find(/^간장치킨 2마리$/)).toBeTruthy();
   });
 
-  it("결제수단까지 말하면 주문을 확인하자마자 그 결제 화면을 연다", async () => {
+  it("카카오페이처럼 다른 결제수단을 말해도 계좌이체로 주문하고 입금 안내를 보여 준다", async () => {
     await renderChat();
     await say("간장치킨 2마리 카카오페이로");
     await click("응 해줘");
-    await wait(500);
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /카카오페이/ })[0]).toHaveClass("selected");
+    expect(await find(/주문을 받았어요! 아래 계좌로 입금해 주세요/)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
 
@@ -692,19 +691,15 @@ describe("일시 중지 검토에서 찾은 문제", () => {
     expect(screen.queryByText(/예약이 완료되었어요/)).not.toBeInTheDocument();
   });
 
-  it("결제하는 사이에 가게가 멈춰 서버가 주문을 거절하면 완료 대신 이유를 알리고 결제는 하지 않는다", async () => {
+  it("주문서를 보는 사이에 가게가 멈춰 서버가 주문을 거절하면 입금 안내 대신 이유를 알린다", async () => {
     await renderChat();
     await say("간장치킨 1마리");
     await find(/^간장치킨 1마리$/);
-    await say("응");
-    await say("카카오페이");
-    const pay = await screen.findByRole("button", { name: /결제하기/ }, { timeout: 3000 });
     pause("h3"); // 화면은 아직 모른다 (서버만 멈춤)
-    fireEvent.click(pay);
-    await wait(3500); // 결제 팝업이 "결제 진행 중 → 결제 완료"를 보여 주고 닫힐 때까지
+    await say("응");
     expect(await find(/청전 치킨공방은 지금 잠시 주문을 받지 않아요/)).toBeTruthy();
-    expect(await find(/주문이 접수되지 않아 결제는 진행되지 않았어요/)).toBeTruthy();
-    expect(screen.queryByText(/결제가 완료되었어요/)).not.toBeInTheDocument();
+    expect(await find(/주문이 접수되지 않았어요/)).toBeTruthy();
+    expect(screen.queryByText(/아래 계좌로 입금해 주세요/)).not.toBeInTheDocument();
   });
 
   it("끝나는 때가 내일이면 '내일 09:00부터'라고 알린다", async () => {

@@ -331,6 +331,17 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 /* 채팅 말풍선 속 표도 살짝 떠오르며 나타난다 */
 .card { animation: card-rise .38s cubic-bezier(.2, .8, .2, 1) both; animation-delay: .08s; }
 .card-note { margin-top: 10px; }
+/* 계좌번호 옆 "복사" 버튼 (CopyButton.tsx). 채팅 카드·자막 표·사장님·내 주문 화면이 같이 쓴다 */
+.copy-btn {
+  display: inline-flex; align-items: center; vertical-align: 1px;
+  height: 24px; margin-left: 8px; padding: 0 9px;
+  border: 1px solid var(--accent); border-radius: 999px;
+  background: #fff; color: var(--accent);
+  font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer;
+}
+.copy-btn:hover { background: var(--accent-weak); }
+.copy-btn.done { background: var(--accent); color: #fff; }
+.copy-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
 
 /* 선택지 질문의 버튼들. 끝의 "직접 입력" 은 점선으로 구분한다 */
@@ -481,10 +492,9 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .actions button.quiet { flex: 1 1 100%; height: 30px; border: none; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
 .actions button.quiet:hover:not(:disabled) { background: none; color: var(--accent); }
 
-/* 결제수단·식당 목록: 같은 모양의 선택 항목 */
-.pay, .places { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
-.pay, .places { min-width: 248px; }
-.pay button, .places button {
+/* 식당 목록: 선택 항목 */
+.places { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; min-width: 248px; }
+.places button {
   display: flex; align-items: center; gap: 12px;
   min-height: 52px; padding: 9px 12px;
   border: 1px solid var(--line); border-radius: var(--radius-item);
@@ -492,20 +502,9 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
   text-align: left; cursor: pointer;
   transition: background .15s, border-color .15s, opacity .15s;
 }
-.pay button { font-size: 14px; font-weight: 600; }
-.pay button:hover:not(:disabled),
 .places button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-weak); }
-.pay button:disabled,
 .places button:disabled { opacity: .4; cursor: default; }
-.pay button.selected,
 .places button.selected { opacity: 1; border-color: var(--accent); background: var(--accent-weak); }
-.pay .ico {
-  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
-  display: grid; place-items: center; font-size: 12.5px; font-weight: 800;
-}
-.ico-card { background: #e0e7ff; color: #3730a3; }
-.ico-kakao { background: #fee500; color: #3c1e1e; }
-.ico-toss { background: #0064ff; color: #fff; }
 .place-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .place-main b { font-size: 14px; font-weight: 700; }
 .place-main small { font-size: 12px; color: var(--muted); }
@@ -647,7 +646,7 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
   .bubble { animation: none; }
 }
 
-/* ---- 결제 팝업 ---- */
+/* ---- 화면 위에 뜨는 팝업의 어두운 바탕 (사용법 안내) ---- */
 .overlay {
   position: fixed; inset: 0; z-index: 10;
   background: rgba(15, 23, 42, .45);
@@ -657,45 +656,9 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
   opacity: 0; transition: opacity .2s;
 }
 .overlay.open { opacity: 1; }
-.sheet {
-  width: 100%; max-width: 440px; max-height: 90dvh; overflow-y: auto;
-  background: #fff; border-radius: 24px 24px 0 0;
-  transform: translateY(100%); transition: transform .25s ease;
-}
-.overlay.open .sheet { transform: none; }
-.sheet-head {
-  display: flex; align-items: center; gap: 10px;
-  padding: 16px 18px; font-size: 17px; font-weight: 800;
-}
-.sheet-head .ico {
-  width: 30px; height: 30px; border-radius: 9px;
-  display: grid; place-items: center; font-size: 13px;
-  background: rgba(255, 255, 255, .25);
-}
-.sheet-head.theme-card { background: #1f2937; color: #fff; }
-.sheet-head.theme-kakao { background: #fee500; color: #3c1e1e; }
-.sheet-head.theme-kakao .ico { background: #3c1e1e; color: #fee500; }
-.sheet-head.theme-toss { background: #0064ff; color: #fff; }
-.sheet-head .close {
-  margin-left: auto; border: none; background: none; color: inherit;
-  font-size: 24px; line-height: 1; cursor: pointer;
-}
-.sheet-head .close:disabled { opacity: .3; cursor: default; }
-.sheet-body { padding: 20px 18px 24px; }
-.sheet-body .label { color: var(--muted); font-size: 13px; }
-.sheet-body .amount { font-size: 28px; font-weight: 800; letter-spacing: -.02em; margin: 2px 0 14px; }
-.summary {
-  margin: 0;
-  background: var(--surface); border-radius: var(--radius-item); padding: 12px 14px;
-  display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; font-size: 13.5px;
-}
-.summary dt { color: var(--muted); }
-.summary dd { margin: 0; font-weight: 600; text-align: right; }
-.field { display: block; margin-top: 16px; }
-.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-/* 드롭다운(카드 선택·할부, Select.tsx): 기본 <select> 대신 직접 그린 버튼 + 목록.
-   열리면 결제수단 색(--theme) 테두리 + 옅은 고리, 목록은 같은 모서리·테두리의 흰 패널. 그림자 없이 평면 */
-.select { position: relative; }
+/* 드롭다운(Select.tsx): 기본 <select> 대신 직접 그린 버튼 + 목록.
+   열리면 --theme 색(기본은 브랜드 파랑) 테두리 + 옅은 고리, 목록은 같은 모서리·테두리의 흰 패널. 그림자 없이 평면 */
+.select { position: relative; --theme: var(--accent); }
 .select-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .select-trigger {
   width: 100%; height: 48px; padding: 0 14px;
@@ -732,39 +695,6 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .select-check { flex-shrink: 0; margin-left: auto; visibility: hidden; }
 .select-option small + .select-check { margin-left: 0; }
 .select-option[aria-selected="true"] .select-check { visibility: visible; }
-.opt {
-  display: flex; align-items: center; gap: 10px;
-  min-height: 46px; padding: 0 12px;
-  border: 1px solid var(--line); border-radius: var(--radius-item);
-  font-size: 14.5px; margin-bottom: 6px; cursor: pointer;
-}
-.opt:has(input:checked) { border-color: var(--theme); background: color-mix(in srgb, var(--theme) 8%, #fff); }
-.opt input { accent-color: var(--theme); }
-.opt small { margin-left: auto; color: var(--muted); }
-.agree { display: flex; gap: 8px; align-items: center; margin-top: 14px; font-size: 13px; color: var(--muted); }
-.agree input { accent-color: var(--theme); }
-.paybtn {
-  width: 100%; height: 52px; margin-top: 16px;
-  border: none; border-radius: 14px; cursor: pointer;
-  background: var(--theme); color: var(--theme-text);
-  font-size: 16px; font-weight: 800;
-}
-.paybtn:disabled { opacity: .4; cursor: default; }
-.status-view { text-align: center; padding: 36px 0 28px; }
-.status-view b { display: block; font-size: 17px; margin-bottom: 4px; }
-.status-view p { margin: 0; color: var(--muted); font-size: 13.5px; }
-.spinner {
-  width: 44px; height: 44px; margin: 0 auto 16px;
-  border: 4px solid var(--line); border-top-color: var(--theme); border-radius: 50%;
-  animation: spin .8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-.done-ico {
-  width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%;
-  background: #16a34a; color: #fff; display: grid; place-items: center; font-size: 30px;
-  animation: pop .25s ease-out;
-}
-
 /* ---- 사용법 안내 (Tutorial.tsx): 처음 열면 가운데 뜨는 카드. 장을 넘겨 가며 본다 ---- */
 .overlay.tutorial-overlay { z-index: 20; align-items: center; padding: 16px; animation: tutorial-fade .2s ease-out; }
 .tutorial {

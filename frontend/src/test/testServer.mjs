@@ -4,11 +4,15 @@ import { createApp } from "../../../server/app.mjs";
 import { hashPassword } from "../../../server/auth.mjs";
 import { openDb } from "../../../server/db.mjs";
 import { createVerifier } from "../../../server/verification.mjs";
+import { STORE_IDS } from "../../../server/stores.mjs";
 
 export const TEST_CODE = "123456";
+// 결제는 계좌이체라 매장 계좌가 있어야 주문을 받는다. 모든 매장에 같은 시범 계좌를 넣어 둔다
+export const TEST_BANK = { bank: "시범은행", account: "000-0000-0000", holder: "세일로" };
 
 export async function startTestServer() {
   const db = openDb(":memory:");
+  for (const id of STORE_IDS) db.setBankAccount(id, TEST_BANK);
   const sent = [];
   const verifier = createVerifier({ sendMail: async (email, code) => void sent.push({ email, code }), generateCode: () => TEST_CODE });
   const mailer = { mode: "dev-console", sendMail: verifier.sendMail, describe: "test" };
@@ -21,8 +25,8 @@ export async function startTestServer() {
     db,
     sent,
     // 이메일 인증 없이 바로 계정을 만든다 (비밀번호 기본 password1). address 를 주면 배달지도 적어 둔다
-    createAccount({ username, password = "password1", name = username, role = "user", storeId, email, phone, address }) {
-      const user = db.createUser({ username, passwordHash: hashPassword(password), name, email, role, storeId, phone });
+    createAccount({ username, password = "password1", name = username, role = "user", storeId, email, phone, address, approved }) {
+      const user = db.createUser({ username, passwordHash: hashPassword(password), name, email, role, storeId, phone, approved });
       return address ? db.updateContact(username, { address }) : user;
     },
     close: () =>

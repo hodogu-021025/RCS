@@ -7,6 +7,14 @@
 # (로컬 개발용 docker-compose.yml 과는 별개 프로젝트라 같은 PC 에서도 데이터가 섞이지 않는다)
 name: saylo
 
+# 컨테이너 로그는 서비스마다 10MB 파일 3개까지만 두고 오래된 것부터 지운다
+# (오류 기록에 접속 IP 가 섞일 수 있어 무한히 쌓이지 않게 한다. 개인정보 처리방침 1번)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   caddy:
     image: caddy:2-alpine
@@ -22,6 +30,7 @@ services:
     depends_on:
       - chatbot
     restart: unless-stopped
+    logging: *logging
 
   chatbot:
     build:
@@ -31,6 +40,7 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+    logging: *logging
 
   api:
     build: ./server
@@ -41,6 +51,7 @@ services:
     volumes:
       - saylo-data:/data
     restart: unless-stopped
+    logging: *logging
 
 volumes:
   saylo-data:

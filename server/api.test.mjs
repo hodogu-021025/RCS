@@ -1,10 +1,11 @@
 // API 전체를 실제 http 로 돌려 보는 테스트 (메모리 DB, 가짜 메일)
 import assert from "node:assert/strict";
 import http from "node:http";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { LOGIN_MAX_PER_IP, LOGIN_MAX_PER_USER, LOGIN_WINDOW_MS, PRIVACY_VERSION, createApp } from "./app.mjs";
 import { normalizePhone } from "./contact.mjs";
-import { WITHDRAWN, openDb } from "./db.mjs";
+import { ORDER_KEEP_YEARS, WITHDRAWN, openDb } from "./db.mjs";
+import { STORE_IDS } from "./stores.mjs";
 import { pauseEndText, todayKST, withTopic } from "./stores.mjs";
 import { hashPassword } from "./auth.mjs";
 import { createVerifier } from "./verification.mjs";
@@ -15,6 +16,7 @@ let sent; // 가짜로 보낸 메일 [{ email, code }]
 let db;
 let clock = Date.now(); // 로그인 제한 시간을 넘길 때 앞으로 돌린다
 let buyer; // 주문할 때 쓰는 고객님 토큰
+const DEFAULT_ACCOUNT = { bank: "시범은행", account: "000-0000-0000", holder: "세일로" };
 
 before(async () => {
   db = openDb(":memory:");
@@ -27,6 +29,8 @@ before(async () => {
   // 배달 주문은 로그인한 고객님만 한다. 주문이 필요한 테스트는 이 계정으로 주문한다
   db.createUser({ username: "buyer0001", passwordHash: hashPassword("password1"), name: "주문자", role: "user", phone: "010-1234-5678" });
   buyer = (await call("POST", "/api/auth/login", { username: "buyer0001", password: "password1" })).body.token;
+  // 결제는 계좌이체라 매장 계좌가 있어야 주문을 받는다. 모든 매장에 같은 시범 계좌를 넣어 둔다
+  for (const id of STORE_IDS) db.setBankAccount(id, DEFAULT_ACCOUNT);
 });
 after(() => {
   server.close();
@@ -43,9 +47,16 @@ async function call(method, path, body, token, ip) {
   return { status: res.status, body: await res.json() };
 }
 
-// 이메일 인증을 거쳐 가입하고 토큰을 돌려준다
+// 이메일 인증을 거쳐 가입하고 토큰을 돌려준다.
+// 사장님은 회원가입이 막혀 있어, 예전에 스스로 가입해 승인을 기다리는 사장님과 같은 계정을 DB에 바로 만들고 로그인한다
 let ipSeq = 0;
 async function signup({ role = "user", username, email, storeId, name = "테스트" }) {
+  if (role === "owner") {
+    db.createUser({ username, passwordHash: hashPassword("password1"), name, email, role, storeId, phone: "010-1234-5678", approved: false });
+    const r = await call("POST", "/api/auth/login", { username, password: "password1" }, undefined, `10.0.0.${++ipSeq}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    return r.body.token;
+  }
   await call("POST", "/api/email/send-code", { email }, undefined, `10.0.0.${++ipSeq}`);
   const v = await call("POST", "/api/email/verify", { email, code: "123456" });
   const r = await call("POST", "/api/auth/signup", { role, username, name, email, proof: v.body.proof, password: "password1", passwordConfirm: "password1", phone: "01012345678", agreePrivacy: true, storeId });
@@ -104,15 +115,18 @@ describe("회원가입·로그인", () => {
     assert.equal((await call("GET", "/api/orders", undefined, "nope")).status, 401);
   });
 
-  it("사장님 가입은 매장이 있어야 하고, 세션에 매장 id 가 든다", async () => {
+  it("회원가입으로는 사장님 계정을 만들 수 없다 (관리자가 만든다)", async () => {
     await call("POST", "/api/email/send-code", { email: "owner@example.com" });
     const v = await call("POST", "/api/email/verify", { email: "owner@example.com", code: "123456" });
-    const noStore = await call("POST", "/api/auth/signup", { role: "owner", username: "bossbanjeom", name: "김사장", email: "owner@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", phone: "01012345678", agreePrivacy: true, storeId: "zz9" });
-    assert.match(noStore.body.error, /매장을 골라/);
-    // 증표는 실패한 시도에서도 쓰였으므로 다시 인증한다
+    const r = await call("POST", "/api/auth/signup", { role: "owner", username: "bossbanjeom", name: "김사장", email: "owner@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", phone: "01012345678", agreePrivacy: true, storeId: "c1" });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /관리자/);
+    assert.equal(db.findUser("bossbanjeom"), null);
+  });
+
+  it("예전에 스스로 가입한 사장님은 세션에 매장 id 와 승인 대기 상태가 든다", async () => {
     const token = await signup({ role: "owner", username: "bossbanjeom", email: "owner2@example.com", storeId: "c1", name: "김사장" });
     const me = await call("GET", "/api/auth/me", undefined, token);
-    // 스스로 가입한 사장님은 관리자 승인 전이다
     assert.deepEqual(me.body.session, { username: "bossbanjeom", role: "owner", name: "김사장", storeId: "c1", approved: false, phone: "010-1234-5678" });
   });
 
@@ -153,7 +167,12 @@ describe("주문·예약과 권한", () => {
     const guest = await call("POST", "/api/orders", { order: chicken, payment: "카카오페이" }, buyer);
     assert.equal(guest.status, 200);
     assert.equal(guest.body.customer, "buyer0001");
-    assert.equal(guest.body.status, "접수");
+    // 계좌이체: 입금 대기로 들어오고, 입금할 계좌·입금자명·입금 기한이 주문에 적힌다 (화면이 보낸 결제수단은 무시)
+    assert.equal(guest.body.status, "입금 대기");
+    assert.equal(guest.body.payment, "계좌이체");
+    assert.deepEqual(guest.body.order.bank, DEFAULT_ACCOUNT);
+    assert.equal(guest.body.order.depositor, "주문자");
+    assert.ok(Math.abs(guest.body.order.payBy - (guest.body.createdAt + 30 * 60_000)) < 1000);
     const mine = await call("POST", "/api/orders", { order: { ...chicken, qty: 1, price: 20000 }, payment: "토스페이" }, customer);
     assert.equal(mine.body.customerName, "김소비");
     const other = await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", store: { name: "장락 옛날통닭" }, item: "옛날통닭", qty: 1, price: 18000 }, payment: "신용카드" }, buyer);
@@ -167,8 +186,11 @@ describe("주문·예약과 권한", () => {
 
   it("주문 상태는 그 매장 사장님과 관리자만 바꾼다", async () => {
     const o = (await call("POST", "/api/orders", { order: chicken, payment: "카카오페이" }, buyer)).body;
-    assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "준비 중" }, customer)).status, 403);
+    assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "접수" }, customer)).status, 403);
     assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "엉뚱" }, ownerH3)).status, 400);
+    // 입금을 확인하기 전에는 준비를 시작할 수 없다
+    assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "준비 중" }, ownerH3)).status, 409);
+    assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "접수" }, ownerH3)).body.status, "접수");
     assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "준비 중" }, ownerH3)).body.status, "준비 중");
     assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "완료" }, admin)).body.status, "완료");
     const otherStore = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭" }, payment: "카카오페이" }, buyer)).body;
@@ -400,22 +422,21 @@ describe("회원 탈퇴", () => {
 describe("손님의 주문 조회·취소와 인기 통계", () => {
   // 앞 테스트가 간장치킨을 품절로 남겨 두므로 같은 매장의 옛날통닭으로 주문한다
   const tongdak = { ...chicken, storeId: "h1", item: "옛날통닭" };
-  // 예전 비회원 주문처럼 영수증 번호만 가진 경우 (회원 주문에도 영수증 번호가 붙는다)
-  it("영수증 번호로 자기 주문을 보고, 접수 상태일 때만 취소한다", async () => {
+  it("주문한 고객님만 접수 상태일 때 취소하고, 비회원 영수증 번호 조회는 없다", async () => {
     const o = (await call("POST", "/api/orders", { order: tongdak, payment: "카카오페이" }, buyer)).body;
-    assert.match(o.receipt, /^[A-Za-z0-9_-]{20,}$/);
-    const found = await call("POST", "/api/orders/lookup", { receipts: [o.receipt, "nope"] });
-    assert.deepEqual(found.body.map((x) => x.id), [o.id]);
-    assert.equal(found.body[0].receipt, o.receipt); // 화면이 주문과 번호를 짝지을 수 있게 보낸 번호를 붙여 준다
+    assert.equal(o.receipt, undefined);
+    assert.equal((await call("POST", "/api/orders/lookup", { receipts: ["anything"] })).status, 404);
 
-    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, { receipt: "wrong" })).status, 403);
-    const cancelled = await call("POST", `/api/orders/${o.id}/cancel`, { receipt: o.receipt });
+    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, {})).status, 401);
+    const other = await signup({ username: "otherbuyer1", email: "otherbuyer@example.com" });
+    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, {}, other)).status, 403);
+    const cancelled = await call("POST", `/api/orders/${o.id}/cancel`, {}, buyer);
     assert.equal(cancelled.body.status, "취소");
-    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, { receipt: o.receipt })).status, 409);
+    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, {}, buyer)).status, 409);
 
     const started = (await call("POST", "/api/orders", { order: tongdak, payment: "카카오페이" }, buyer)).body;
     db.setOrderStatus(started.id, "준비 중");
-    const late = await call("POST", `/api/orders/${started.id}/cancel`, { receipt: started.receipt });
+    const late = await call("POST", `/api/orders/${started.id}/cancel`, {}, buyer);
     assert.equal(late.status, 409);
     assert.match(late.body.error, /준비를 시작/);
   });
@@ -425,14 +446,14 @@ describe("손님의 주문 조회·취소와 인기 통계", () => {
     await call("POST", "/api/orders", { order: { ...chicken, storeId: "p1", item: "마르게리따 피자" }, payment: "카카오페이" }, buyer);
     await call("POST", "/api/orders", { order: { ...chicken, storeId: "p1", item: "마르게리따 피자" }, payment: "카카오페이" }, buyer);
     const c = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "p1", item: "마르게리따 피자" }, payment: "카카오페이" }, buyer)).body;
-    await call("POST", `/api/orders/${c.id}/cancel`, { receipt: c.receipt });
+    await call("POST", `/api/orders/${c.id}/cancel`, {}, buyer);
     await call("POST", "/api/reservations", { restaurantId: "c2", restaurantName: "하소 만리향", date: "2026-10-12", time: "19:00", people: 2 });
     const after = (await call("GET", "/api/stats/popular")).body;
     assert.equal((after.items.d3 ?? 0) - (before.items.d3 ?? 0), 2);
     assert.equal((after.restaurants.c2 ?? 0) - (before.restaurants.c2 ?? 0), 1);
   });
 
-  it("예전 DB(영수증 칸 없음)를 열어도 칸을 추가한다", async () => {
+  it("예전 DB(영수증 칸 없음)를 열어도 주문을 넣을 수 있고, 남아 있던 영수증 번호는 비운다", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const { mkdtempSync, rmSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
@@ -443,10 +464,110 @@ describe("손님의 주문 조회·취소와 인기 통계", () => {
     old.exec("CREATE TABLE orders (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, status TEXT NOT NULL, customer TEXT NOT NULL, customer_name TEXT NOT NULL, payment TEXT NOT NULL, store_id TEXT NOT NULL, order_json TEXT NOT NULL)");
     old.close();
     const migrated = openDb(file);
-    const rec = migrated.addOrder({ customer: "guest", customerName: "비회원", payment: "x", storeId: "h3", order: { item: "간장치킨" }, receipt: "r1" });
-    assert.equal(migrated.orderByReceipt("r1").id, rec.id);
+    const rec = migrated.addOrder({ customer: "guest", customerName: "비회원", payment: "x", storeId: "h3", order: { item: "간장치킨" } });
+    assert.equal(migrated.orderById(rec.id).order.item, "간장치킨");
     migrated.close();
+    // 예전에 비회원 주문으로 받은 영수증 번호가 남아 있으면 다시 열 때 비운다
+    const raw = new DatabaseSync(file);
+    raw.prepare("UPDATE orders SET receipt = 'old-receipt' WHERE id = ?").run(rec.id);
+    raw.close();
+    openDb(file).close();
+    const check = new DatabaseSync(file);
+    assert.equal(check.prepare("SELECT receipt FROM orders WHERE id = ?").get(rec.id).receipt, null);
+    check.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("계좌이체 (입금 계좌·입금 기한)", () => {
+  let admin;
+  let boss;
+  before(async () => {
+    db.createUser({ username: "bankadmin1", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
+    admin = (await call("POST", "/api/auth/login", { username: "bankadmin1", password: "password1" })).body.token;
+    db.createUser({ username: "bankboss01", passwordHash: hashPassword("password1"), name: "피자 사장", role: "owner", storeId: "p1" });
+    boss = (await call("POST", "/api/auth/login", { username: "bankboss01", password: "password1" })).body.token;
+  });
+  const pizza = { ...chicken, storeId: "p1", item: "마르게리따 피자", qty: 1 };
+  // 테스트가 중간에 실패해도 다른 테스트가 주문할 수 있게 p1 계좌를 되돌린다
+  afterEach(() => db.setBankAccount("p1", DEFAULT_ACCOUNT));
+
+  it("사장님은 자기 매장 계좌를 보고 바꾸고 지우며, 계좌를 지우면 그 매장은 주문을 받지 않는다", async () => {
+    assert.deepEqual((await call("GET", "/api/stores/p1/bank", undefined, boss)).body, { account: DEFAULT_ACCOUNT });
+    assert.equal((await call("GET", "/api/stores/h3/bank", undefined, boss)).status, 403); // 남의 매장
+    assert.equal((await call("GET", "/api/stores/p1/bank", undefined, buyer)).status, 403);
+
+    const bad = await call("PUT", "/api/stores/p1/bank", { bank: "국민은행", account: "12-34", holder: "김사장" }, boss);
+    assert.equal(bad.status, 400);
+    assert.match(bad.body.error, /계좌번호/);
+    assert.equal((await call("PUT", "/api/stores/p1/bank", { bank: "국민은행", account: "123456-01-234567", holder: "" }, boss)).status, 400);
+    const mine = { bank: "국민은행", account: "123456-01-234567", holder: "김사장" };
+    const put = await call("PUT", "/api/stores/p1/bank", { ...mine, account: " 123456-01-234567 " }, boss);
+    assert.deepEqual(put.body, { account: mine }, JSON.stringify(put));
+
+    const order = (await call("POST", "/api/orders", { order: pizza }, buyer)).body;
+    assert.deepEqual(order.order.bank, mine);
+    // 주문에 적힌 계좌는 그때 것 그대로 (나중에 계좌를 바꿔도 이미 한 주문의 안내는 바뀌지 않는다)
+    await call("PUT", "/api/stores/p1/bank", { bank: "신한은행", account: "110-123-456789", holder: "김사장" }, boss);
+    assert.deepEqual(db.orderById(order.id).order.bank, mine);
+
+    assert.deepEqual((await call("DELETE", "/api/stores/p1/bank", undefined, boss)).body, { account: null });
+    const none = await call("POST", "/api/orders", { order: pizza }, buyer);
+    assert.equal(none.status, 400);
+    assert.match(none.body.error, /입금 계좌/);
+    assert.equal((await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭" } }, buyer)).status, 200); // 계좌 있는 매장은 그대로
+  });
+
+  it("관리자는 매장 계좌 전체를 보고 대신 등록할 수 있다 (기본 계좌는 없다)", async () => {
+    assert.equal((await call("GET", "/api/bank", undefined, boss)).status, 403);
+    await call("PUT", "/api/stores/p1/bank", { bank: "우리은행", account: "1002-123-456789", holder: "김사장" }, admin);
+    const all = (await call("GET", "/api/bank", undefined, admin)).body;
+    assert.equal(all.p1.bank, "우리은행");
+    assert.deepEqual(all.h3, DEFAULT_ACCOUNT);
+    assert.equal(all.default, undefined);
+    assert.equal((await call("PUT", "/api/bank/default", DEFAULT_ACCOUNT, admin)).status, 404);
+  });
+
+  it("사장님이 입금을 확인하면 확인 시각이 주문에 남는다", async () => {
+    const o = (await call("POST", "/api/orders", { order: pizza }, buyer)).body;
+    assert.equal(o.order.paidAt, undefined);
+    const paid = (await call("PATCH", `/api/orders/${o.id}`, { status: "접수" }, boss)).body;
+    assert.equal(paid.status, "접수");
+    assert.ok(paid.order.paidAt >= o.createdAt);
+    // 그다음 상태 변경은 확인 시각을 건드리지 않는다
+    await call("PATCH", `/api/orders/${o.id}`, { status: "준비 중" }, boss);
+    assert.equal(db.orderById(o.id).order.paidAt, paid.order.paidAt);
+  });
+
+  it("입금 기한이 지난 입금 대기 주문은 자동으로 취소되고, 그 뒤로는 입금 확인할 수 없다", async () => {
+    const o = (await call("POST", "/api/orders", { order: pizza }, buyer)).body;
+    const paid = (await call("POST", "/api/orders", { order: pizza }, buyer)).body;
+    await call("PATCH", `/api/orders/${paid.id}`, { status: "접수" }, boss);
+    db.expireUnpaidOrders(o.createdAt); // 이 주문은 아직 기한 전 (앞 테스트의 더 오래된 주문만 정리된다)
+    assert.equal(db.orderById(o.id).status, "입금 대기");
+    assert.ok(db.expireUnpaidOrders(o.createdAt + 1) >= 1);
+    const expired = db.orderById(o.id);
+    assert.equal(expired.status, "취소");
+    assert.match(expired.order.cancelNote, /입금 기한/);
+    assert.equal(db.orderById(paid.id).status, "접수"); // 입금 확인된 주문은 그대로
+    assert.equal((await call("PATCH", `/api/orders/${o.id}`, { status: "접수" }, boss)).status, 409);
+  });
+
+  it("탈퇴하면 주문의 입금자명도 지우고, 사장님 계정이 없어지면 그 매장 입금 계좌도 지운다", async () => {
+    const leaver = await signup({ username: "payleaver1", email: "payleaver@example.com", name: "떠날손님" });
+    const o = (await call("POST", "/api/orders", { order: pizza }, leaver)).body;
+    assert.equal(o.order.depositor, "떠날손님");
+    await call("POST", "/api/auth/withdraw", { password: "password1" }, leaver);
+    assert.equal(db.orderById(o.id).order.depositor, undefined);
+
+    assert.ok(db.bankAccount("p1"));
+    assert.equal((await call("DELETE", "/api/owners/bankboss01", undefined, admin)).status, 200);
+    assert.equal(db.bankAccount("p1"), null);
+  });
+
+  it("고객님은 입금 대기·접수 주문을 취소할 수 있다", async () => {
+    const o = (await call("POST", "/api/orders", { order: pizza }, buyer)).body;
+    assert.equal((await call("POST", `/api/orders/${o.id}/cancel`, {}, buyer)).body.status, "취소");
   });
 });
 
@@ -457,7 +578,7 @@ describe("점검에서 찾은 서버 문제", () => {
     assert.equal((await call("GET", "/api/health")).status, 200);
   });
 
-  it("탈퇴하면 주문 기록의 배달지·연락처·영수증 번호도 지워진다", async () => {
+  it("탈퇴하면 주문 기록의 배달지·연락처도 지워진다", async () => {
     const token = await signup({ username: "leaver00002", email: "leaver2@example.com", name: "떠남" });
     const order = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭" }, payment: "카드" }, token)).body;
     assert.equal((await call("POST", "/api/auth/withdraw", { password: "password1" }, token)).status, 200);
@@ -465,8 +586,17 @@ describe("점검에서 찾은 서버 문제", () => {
     assert.equal(kept.order.address, undefined);
     assert.equal(kept.order.phone, undefined);
     assert.equal(kept.order.item, "옛날통닭");
-    assert.equal(db.orderByReceipt(order.receipt), null);
-    assert.equal((await call("POST", `/api/orders/${order.id}/cancel`, { receipt: order.receipt })).status, 403);
+    assert.equal(kept.customerName, WITHDRAWN.name);
+  });
+
+  it("보관 기간(5년)이 지난 주문은 지우고, 그 안의 주문은 남긴다", () => {
+    const rec = db.addOrder({ customer: "buyer0001", customerName: "주문자", payment: "카드", storeId: "h1", order: { item: "옛날통닭" } });
+    const keepUntil = new Date(rec.createdAt);
+    keepUntil.setFullYear(keepUntil.getFullYear() + ORDER_KEEP_YEARS);
+    db.purgeExpiredOrders(keepUntil.getTime()); // 딱 5년째까지는 남는다
+    assert.ok(db.orderById(rec.id));
+    assert.ok(db.purgeExpiredOrders(keepUntil.getTime() + 1) >= 1);
+    assert.equal(db.orderById(rec.id), null);
   });
 
   it("관리자 비밀번호는 이메일로 바꿀 수 없다", async () => {
@@ -655,7 +785,9 @@ describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
     const o = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "m2", item: "한우 불고기", qty: 1 }, payment: "카드" }, buyer)).body;
     await call("PATCH", "/api/stores/m2/settings", { item: { id: (await call("GET", "/api/menu")).body.find((d) => d.name === "한우 불고기").id, patch: { soldOut: false } } }, owner);
     const o2 = (await call("POST", "/api/orders", { order: { ...chicken, storeId: "m2", item: "한우 불고기", qty: 1 }, payment: "카드" }, buyer)).body;
-    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "완료" }, owner)).status, 409); // 접수 → 완료 건너뛰기
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "완료" }, owner)).status, 409); // 입금 대기 → 완료 건너뛰기
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "접수" }, owner)).status, 200); // 입금 확인
+    assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "입금 대기" }, owner)).status, 409); // 되돌리기
     assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "준비 중" }, owner)).status, 200);
     assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "접수" }, owner)).status, 409); // 되돌리기
     assert.equal((await call("PATCH", `/api/orders/${o2.id}`, { status: "완료" }, owner)).status, 200);

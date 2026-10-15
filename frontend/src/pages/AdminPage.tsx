@@ -1,15 +1,25 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { RESTAURANTS, formatDate, untilText, orderPriceLabel, withStoreSettings, won } from "../components/orderChatKnowledge";
-import { addOwner, approveOwner, removeOwner, storePause, useDb, type OrderRecord, type ReservationRecord } from "../data/db";
+import { RESTAURANTS, formatDate, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
+import {
+  addOwner,
+  approveOwner,
+  fetchAllBanks,
+  removeOwner,
+  storePause,
+  useDb,
+  type OrderRecord,
+  type ReservationRecord,
+} from "../data/db";
 import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
-import { formatDateTime } from "./format";
+import { formatDateTime, statusClass } from "./format";
 import { PasswordField } from "./PasswordField";
 
 type Tab = "all" | "stores" | "stats" | "users";
 type KindFilter = "all" | "delivery" | "reservation";
 type StoresView = "stores" | "approve" | "create";
+type AllView = KindFilter | "transfers"; // 전체 현황의 세부 메뉴: 종류별 목록, 또는 계좌이체 거래 내역
 type UsersView = "members" | "history";
 
 const KIND_LABEL: Record<Exclude<KindFilter, "all">, string> = { delivery: "배달", reservation: "식당 예약" };
@@ -70,7 +80,7 @@ export function AdminPage() {
         value={tab}
         onChange={setTab}
       />
-      {tab === "all" && <AllTab rows={rows} />}
+      {tab === "all" && <AllTab rows={rows} orders={db.orders} />}
       {tab === "stores" && <StoresTab />}
       {tab === "stats" && <StatsTab rows={rows} />}
       {tab === "users" && <UsersTab rows={rows} />}
@@ -78,8 +88,8 @@ export function AdminPage() {
   );
 }
 
-function AllTab({ rows }: { rows: Row[] }) {
-  const [kind, setKind] = useState<KindFilter>("all");
+function AllTab({ rows, orders }: { rows: Row[]; orders: OrderRecord[] }) {
+  const [kind, setKind] = useState<AllView>("all");
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
   const shown = rows.filter(
@@ -93,10 +103,14 @@ function AllTab({ rows }: { rows: Row[] }) {
           { key: "all", label: "전체" },
           { key: "delivery", label: KIND_LABEL.delivery },
           { key: "reservation", label: KIND_LABEL.reservation },
+          { key: "transfers", label: "거래 내역" },
         ]}
         value={kind}
         onChange={setKind}
       />
+      {kind === "transfers" ? (
+        <TransfersView orders={orders} />
+      ) : (
       <section className="dash-section">
         <div className="section-head">
           <input className="search" placeholder="메뉴·매장·이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="검색" />
@@ -110,7 +124,7 @@ function AllTab({ rows }: { rows: Row[] }) {
                 <span className={"chip kind-" + r.kind}>{KIND_LABEL[r.kind]}</span>
                 <b>{r.what}</b>
                 {r.amount !== undefined && <span className="price">{r.amountLabel ?? won(r.amount)}</span>}
-                <span className={"status s-" + r.status}>{r.status}</span>
+                <span className={statusClass(r.status)}>{r.status}</span>
               </div>
               <dl>
                 <div>
@@ -125,6 +139,110 @@ function AllTab({ rows }: { rows: Row[] }) {
                   <dt>시각</dt>
                   <dd>{formatDateTime(r.createdAt)}</dd>
                 </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
+      </section>
+      )}
+    </>
+  );
+}
+
+// 관리자 거래 내역: 계좌이체 주문마다 입금 계좌·입금자명·금액·입금 확인 시각·상태를 본다 (입금 확인은 사장님이 한다)
+type PayFilter = "all" | "입금 대기" | "입금 확인" | "취소";
+const payState = (o: OrderRecord): Exclude<PayFilter, "all"> => (o.status === "입금 대기" ? "입금 대기" : o.status === "취소" ? "취소" : "입금 확인");
+function TransfersView({ orders }: { orders: OrderRecord[] }) {
+  const [filter, setFilter] = useState<PayFilter>("all");
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const shown = orders.filter(
+    (o) =>
+      (filter === "all" || payState(o) === filter) &&
+      (!needle || [o.order.store.name, o.order.depositor ?? "", o.customerName, o.order.bank?.holder ?? ""].some((v) => v.toLowerCase().includes(needle))),
+  );
+  const paid = orders.filter((o) => payState(o) === "입금 확인");
+  return (
+    <>
+      <section className="dash-section">
+        <div className="tiles">
+          <div className="tile">
+            <span>입금 대기</span>
+            <b>{orders.filter((o) => o.status === "입금 대기").length}건</b>
+          </div>
+          <div className="tile">
+            <span>입금 확인</span>
+            <b>{paid.length}건</b>
+          </div>
+          <div className="tile">
+            <span>확인된 입금액</span>
+            <b>{won(paid.reduce((a, o) => a + o.order.price, 0))}</b>
+          </div>
+          <div className="tile">
+            <span>취소</span>
+            <b>{orders.filter((o) => o.status === "취소").length}건</b>
+          </div>
+        </div>
+      </section>
+      <section className="dash-section">
+        <div className="section-head">
+          <div className="chips">
+            {(["all", "입금 대기", "입금 확인", "취소"] as PayFilter[]).map((f) => (
+              <button key={f} type="button" className={filter === f ? "chip active" : "chip"} onClick={() => setFilter(f)}>
+                {f === "all" ? "전체" : f}
+              </button>
+            ))}
+          </div>
+          <input className="search" placeholder="매장·입금자명 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="거래 검색" />
+        </div>
+        <p className="hint">{shown.length}건</p>
+        {shown.length === 0 && <p className="empty">거래가 없어요.</p>}
+        <ul className="record-list">
+          {shown.map((o) => (
+            <li key={o.id} className={"record" + (o.status === "입금 대기" ? " pending" : "")}>
+              <div className="record-head">
+                <b>
+                  {o.order.item} {o.order.qty}
+                  {o.order.unit}
+                </b>
+                <span className="price">{orderPriceLabel(o.order)}</span>
+                <span className={statusClass(o.status)}>{o.status}</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>매장</dt>
+                  <dd>{o.order.store.name}</dd>
+                </div>
+                <div>
+                  <dt>입금 계좌</dt>
+                  <dd>{o.order.bank ? `${o.order.bank.bank} ${o.order.bank.account} · ${o.order.bank.holder}` : "-"}</dd>
+                </div>
+                <div>
+                  <dt>입금자명</dt>
+                  <dd>{o.order.depositor ?? o.customerName}</dd>
+                </div>
+                <div>
+                  <dt>주문 시각</dt>
+                  <dd>{formatDateTime(o.createdAt)}</dd>
+                </div>
+                {o.order.paidAt && (
+                  <div>
+                    <dt>입금 확인</dt>
+                    <dd>{formatDateTime(o.order.paidAt)}</dd>
+                  </div>
+                )}
+                {o.status === "입금 대기" && o.order.payBy && (
+                  <div>
+                    <dt>입금 기한</dt>
+                    <dd>{untilText(o.order.payBy)}까지</dd>
+                  </div>
+                )}
+                {o.status === "취소" && o.order.cancelNote && (
+                  <div>
+                    <dt>취소 이유</dt>
+                    <dd>{o.order.cancelNote}</dd>
+                  </div>
+                )}
               </dl>
             </li>
           ))}
@@ -163,15 +281,28 @@ function StoresTab() {
   }
 
   const waiting = owners.filter((o) => o.approved === false);
-  // 세부 메뉴: 직접 고르기 전에는 승인을 기다리는 사장님이 있으면 그것부터 보여 준다 (계정 목록이 늦게 와도 따라간다)
+  // 세부 메뉴: 직접 고르기 전에는 승인을 기다리는 사장님이 있으면 그것부터 보여 준다 (계정 목록이 늦게 와도 따라간다).
+  // 회원가입으로는 사장님이 될 수 없어 "승인 대기"는 예전에 직접 가입한 사장님이 남아 있을 때만 있고, 다 처리하면 매장 목록으로 돌아간다
   const [picked, setView] = useState<StoresView | null>(null);
-  const view: StoresView = picked ?? (waiting.length > 0 ? "approve" : "stores");
+  const wanted = picked ?? "approve";
+  const view: StoresView = wanted === "approve" && waiting.length === 0 ? "stores" : wanted;
   const orphans = owners.filter((o) => !RESTAURANTS.some((r) => r.id === o.storeId));
   const storeName = (id?: string) => RESTAURANTS.find((r) => r.id === id)?.name ?? id;
+  // 매장별 입금 계좌 (사장님이 등록). 사장님 계정이 지워지면 계좌도 지워지므로 계정 수가 바뀔 때 다시 받는다
+  const [banks, setBanks] = useState<Record<string, BankAccount>>({});
+  const ownerCount = owners.length;
+  useEffect(() => {
+    let alive = true;
+    fetchAllBanks()
+      .then((b) => alive && setBanks(b))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [ownerCount]);
   const [actionError, setActionError] = useState<string | null>(null);
   // 승인·삭제가 실패하면(서버 거절, 연결 끊김) 이유를 보여 준다
   const run = (work: Promise<unknown>) => {
-    setView(view); // 마지막 사장님을 승인해도 보던 세부 메뉴에 머문다
     setActionError(null);
     work.catch((err: unknown) => setActionError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
   };
@@ -181,9 +312,9 @@ function StoresTab() {
       <Tabs
         sub
         tabs={[
-          { key: "stores", label: "매장 목록" },
-          { key: "approve", label: "승인 대기", badge: waiting.length },
-          { key: "create", label: "계정 만들기" },
+          { key: "stores" as const, label: "매장 목록" },
+          ...(waiting.length > 0 ? [{ key: "approve" as const, label: "승인 대기", badge: waiting.length }] : []),
+          { key: "create" as const, label: "계정 만들기" },
         ]}
         value={view}
         onChange={setView}
@@ -191,8 +322,7 @@ function StoresTab() {
       {view === "approve" && (
         <section className="dash-section">
           <h2>승인 대기 ({waiting.length})</h2>
-          <p className="hint">스스로 가입한 사장님이에요. 그 매장의 사장님이 맞는지 확인한 뒤 승인하세요. 승인 전에는 매장 주문·예약을 볼 수 없어요.</p>
-          {waiting.length === 0 && <p className="empty">승인을 기다리는 사장님이 없어요.</p>}
+          <p className="hint">예전에 회원가입으로 직접 가입한 사장님이에요. 그 매장의 사장님이 맞는지 확인한 뒤 승인하세요. 승인 전에는 매장 주문·예약을 볼 수 없어요.</p>
           <ul className="record-list">
             {waiting.map((o) => (
               <li key={o.username} className="record pending">
@@ -270,6 +400,16 @@ function StoresTab() {
                             mine.map((o) => `${o.username} (${o.name})${o.approved === false ? " · 승인 대기" : ""}`).join(", ")
                           ) : (
                             <span className="muted">없음</span>
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>입금 계좌</dt>
+                        <dd>
+                          {banks[r.id] ? (
+                            `${banks[r.id].bank} ${banks[r.id].account} · ${banks[r.id].holder}`
+                          ) : (
+                            <span className="status s-입금-대기">없음 · 배달 주문 못 받음</span>
                           )}
                         </dd>
                       </div>
@@ -354,7 +494,8 @@ function StoresTab() {
 function StatsTab({ rows }: { rows: Row[] }) {
   const [now] = useState(() => Date.now()); // 렌더마다 바뀌지 않게 열 때의 시각으로 계산한다
   const valid = rows.filter((r) => r.status !== "취소");
-  const sales = valid.reduce((a, r) => a + (r.amount ?? 0), 0);
+  // 매출은 입금이 확인된 주문만 (입금 대기는 뺀다)
+  const sales = valid.filter((r) => r.status !== "입금 대기").reduce((a, r) => a + (r.amount ?? 0), 0);
   const cancelRate = rows.length ? Math.round(((rows.length - valid.length) / rows.length) * 100) : 0;
 
   const byKind = (["delivery", "reservation"] as const).map((k) => ({
@@ -423,7 +564,7 @@ function UsersTab({ rows }: { rows: Row[] }) {
   const byUser = new Map<string, { name: string; count: number; spent: number; last: number }>();
   for (const r of rows) {
     const cur = byUser.get(r.customer) ?? { name: r.who, count: 0, spent: 0, last: 0 };
-    byUser.set(r.customer, { name: r.who, count: cur.count + 1, spent: cur.spent + (r.status !== "취소" ? (r.amount ?? 0) : 0), last: Math.max(cur.last, r.createdAt) });
+    byUser.set(r.customer, { name: r.who, count: cur.count + 1, spent: cur.spent + (r.status !== "취소" && r.status !== "입금 대기" ? (r.amount ?? 0) : 0), last: Math.max(cur.last, r.createdAt) });
   }
   const users = [...byUser.entries()].sort((a, b) => b[1].last - a[1].last);
   const members = [...useDb(["accounts"]).users].sort((a, b) => b.createdAt - a.createdAt);

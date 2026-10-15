@@ -1,29 +1,20 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { HOME_BY_ROLE, PASSWORD_MIN, USERNAME_RULE, signup, useSession, type SignupInput } from "../auth/auth";
+import { HOME_BY_ROLE, PASSWORD_MIN, USERNAME_RULE, signup, useSession } from "../auth/auth";
 import { normalizeEmail } from "../api/emailVerification";
-import { RESTAURANTS } from "../components/orderChatKnowledge";
-import { Select } from "../components/Select";
 import { EmailVerifyField } from "./EmailVerifyField";
 import { PasswordField } from "./PasswordField";
 import { PhoneField } from "./PhoneField";
 import { PolicyItems } from "./PrivacyPage";
 import { SIGNUP_CONSENT } from "./privacyPolicy";
 
-type SignupRole = SignupInput["role"];
-const ROLES: { value: SignupRole; label: string; hint: string }[] = [
-  { value: "user", label: "고객님", hint: "챗봇으로 주문·예약하고 내 주문 내역을 볼 수 있어요." },
-  { value: "owner", label: "사장님", hint: "내 매장의 주문·예약을 받고 영업시간·메뉴를 관리해요. 가입 후 관리자가 확인하고 승인하면 시작할 수 있어요." },
-];
-
-// 회원가입: 고객님 / 사장님 중 고르고 계정을 만든다. 가입하면 바로 로그인돼 역할에 맞는 화면으로 간다
+// 회원가입: 고객님 계정을 만든다. 가입하면 바로 로그인돼 챗봇으로 간다.
+// 사장님 계정은 관리자가 관리자 화면(매장·사장님 → 계정 만들기)에서 만든다
 export function SignupPage() {
   const session = useSession();
   const navigate = useNavigate();
-  const [role, setRole] = useState<SignupRole>("user");
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
-  const [storeId, setStoreId] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   // 인증을 마친 주소와 그때 받은 증표. 주소를 바꾸면 더 쓰지 않는다
@@ -40,7 +31,6 @@ export function SignupPage() {
     e.preventDefault();
     setBusy(true);
     const result = await signup({
-      role,
       username,
       name,
       email,
@@ -48,7 +38,6 @@ export function SignupPage() {
       proof: verified && verified.email === normalizeEmail(email) ? verified.proof : null,
       password,
       passwordConfirm,
-      storeId: role === "owner" ? storeId : undefined,
       agreePrivacy,
     });
     setBusy(false);
@@ -59,11 +48,6 @@ export function SignupPage() {
     navigate(HOME_BY_ROLE[result.session.role], { replace: true });
   }
 
-  function pickRole(next: SignupRole) {
-    setRole(next);
-    setError(null);
-  }
-
   return (
     <div className="dash dash-center">
       <form className="dash-card login signup" onSubmit={onSubmit} noValidate>
@@ -72,33 +56,16 @@ export function SignupPage() {
         </a>
         <h1>회원가입</h1>
 
-        {/* 흰 바탕 칸이 고른 쪽으로 미끄러진다 (data-active, CSS) */}
-        <div className="role-switch" role="radiogroup" aria-label="가입 유형" data-active={role}>
-          {ROLES.map((r) => (
-            <button key={r.value} type="button" role="radio" aria-checked={role === r.value} onClick={() => pickRole(r.value)}>
-              {r.label}
-            </button>
-          ))}
-        </div>
-        <p className="role-hint">{ROLES.find((r) => r.value === role)!.hint}</p>
+        <p className="role-hint">챗봇으로 주문·예약하고 내 주문 내역을 볼 수 있어요. 사장님 계정은 관리자가 만들어 드려요.</p>
 
         <label>
           <span>아이디</span>
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder={USERNAME_RULE} autoFocus />
         </label>
         <label>
-          <span>{role === "owner" ? "대표자 이름" : "이름"}</span>
+          <span>이름</span>
           <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
         </label>
-        {role === "owner" && (
-          <Select
-            label="매장"
-            placeholder="매장을 골라 주세요"
-            options={RESTAURANTS.map((r) => ({ value: r.id, label: r.name }))}
-            value={storeId}
-            onChange={setStoreId}
-          />
-        )}
         <PhoneField value={phone} onChange={setPhone} />
         <EmailVerifyField email={email} onEmailChange={setEmail} verifiedEmail={verified?.email ?? null} onVerified={setVerified} />
         <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder={`${PASSWORD_MIN}자 이상`} />
@@ -130,7 +97,7 @@ export function SignupPage() {
           </p>
         )}
         <button className="btn primary wide" type="submit" disabled={busy}>
-          {busy ? "가입하는 중…" : `${ROLES.find((r) => r.value === role)!.label}으로 가입하기`}
+          {busy ? "가입하는 중…" : "가입하기"}
         </button>
         <a className="btn wide" href="#/login">
           이미 계정이 있어요 · 로그인

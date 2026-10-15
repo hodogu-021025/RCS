@@ -12,10 +12,10 @@
 //   PATCH  /api/auth/contact           { phone?, address? }           → { session }  내 연락처·배달지 (배달지는 고객님만)
 //   POST   /api/auth/withdraw          { password }                   회원 탈퇴 (고객님·사장님). 주문·예약 기록은 이름을 지우고 남긴다
 //   GET    /api/orders                 고객: 내 것 / 사장님: 내 매장 / 관리자: 전체
-//   POST   /api/orders                 { order, payment }             로그인한 고객님만. order.address·order.phone 필수
-//   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자
-//   POST   /api/orders/lookup          { receipts }                   비회원: 주문할 때 받은 영수증 번호로 내 주문 보기
-//   POST   /api/orders/:id/cancel      { receipt? }                   손님 취소 (접수 상태일 때만)
+//   POST   /api/orders                 { order }                      로그인한 고객님만. order.address·order.phone 필수.
+//                                      결제는 계좌이체: "입금 대기"로 들어오고, 응답의 order.bank 계좌로 order.payBy 까지 입금한다
+//   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자 (입금 대기 → 접수 가 입금 확인)
+//   POST   /api/orders/:id/cancel                                     주문한 고객님이 취소 (입금 대기·접수 상태일 때만)
 //   GET    /api/reservations           (주문과 같은 범위)
 //   POST   /api/reservations           { restaurantId, restaurantName, date, time, people }
 //   PATCH  /api/reservations/:id       { status }
@@ -29,6 +29,10 @@
 //                                      (pause: from(없거나 지났으면 지금)부터 until 까지 새 배달 주문과 오늘 예약을 받지 않는다.
 //                                       둘 다 지금부터 24시간 안, until 은 from 보다 뒤. null 이면 일시 중지를 지우고 바로 다시 받는다)
 //                                      (special: 오늘의 메뉴. 서버가 한국 날짜로 오늘을 붙이고, 그날만 보인다. discountPct 0 은 할인 끔)
+//   GET    /api/stores/:id/bank        그 매장 사장님·관리자 → { account }  매장 입금 계좌 (없으면 그 매장은 배달 주문을 받지 않는다)
+//   PUT    /api/stores/:id/bank        { bank, account, holder }       그 매장 사장님·관리자: 입금 계좌 등록·변경
+//   DELETE /api/stores/:id/bank        (지우면 배달 주문을 받지 않는다)
+//   GET    /api/bank                   관리자 → { 매장 id: 계좌 }  등록된 매장 계좌 전체
 //   GET    /api/owners                 관리자
 //   POST   /api/owners                 { username, password, name?, storeId }   관리자
 //   POST   /api/owners/:username/approve  관리자: 스스로 가입한 사장님 승인 (승인 전에는 매장 주문·예약·설정에 접근할 수 없다)
@@ -47,8 +51,12 @@ import {
   MENU_PRICE_MAX,
   MENU_PRICE_MIN,
   MENU_UNIT_MAX,
+  CUSTOMER_CANCELABLE,
   ORDER_NEXT,
   ORDER_STATUSES,
+  PAYMENT_METHOD,
+  PAY_WINDOW_MS,
+  cleanBankAccount,
   RESERVATION_NEXT,
   RESERVATION_STATUSES,
   hoursError,
@@ -67,7 +75,7 @@ import { ADDRESS_MAX, ADDRESS_MIN, normalizePhone } from "./contact.mjs";
 
 const MAX_BODY = 16 * 1024;
 // 지금 개인정보 처리방침의 시행일 (frontend/src/pages/privacyPolicy.ts 의 PRIVACY_EFFECTIVE 와 같게). 가입할 때 이 버전에 동의한 것으로 남긴다
-export const PRIVACY_VERSION = "2026-10-12";
+export const PRIVACY_VERSION = "2026-10-15";
 const GUEST = { username: "guest", name: "비회원" };
 
 class HttpError extends Error {
@@ -103,6 +111,7 @@ const publicSession = (u) =>
   };
 const PHONE_ERROR = "전화번호를 010-1234-5678 형식으로 적어 주세요.";
 const PENDING_OWNER = "관리자 승인을 기다리고 있어요. 승인되면 매장 주문·예약을 볼 수 있어요.";
+const OWNER_SIGNUP_CLOSED = "사장님 계정은 관리자가 만들어 드려요. 관리자에게 요청해 주세요.";
 
 // 로그인 시도 제한: 비밀번호를 계속 대입해 보는 걸 막는다 (15분 안에 아이디별 5번, IP별 20번 실패하면 잠시 막는다)
 export const LOGIN_WINDOW_MS = 15 * 60_000;
@@ -143,6 +152,15 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     return { customer: user.username };
   }
   // 그 매장의 주문·예약·설정을 바꿀 수 있는지: 관리자, 또는 승인된 그 매장 사장님
+  // 사장님 계정이 없어지면(탈퇴·관리자 삭제) 그 매장에 다른 사장님이 남지 않았을 때 매장 입금 계좌(예금주 이름이 든 사장님 정보)도 지운다.
+  // 그 뒤 그 매장 주문은 관리자 기본 계좌로 받는다
+  function forgetStoreBank(storeId) {
+    if (storeId && !db.listByRole("owner").some((o) => o.storeId === storeId)) db.setBankAccount(storeId, null);
+  }
+
+  // 입금 기한이 지난 "입금 대기" 주문을 취소한다. 주문을 보거나 바꾸기 직전에 부른다 (서버도 1분마다 부른다)
+  const expireUnpaid = () => db.expireUnpaidOrders(now() - PAY_WINDOW_MS);
+
   function assertManages(user, storeId) {
     if (!user) throw needLogin();
     if (user.role === "admin") return;
@@ -217,19 +235,19 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     }],
 
     ["POST", "/api/auth/signup", ({ body }) => {
-      const role = body.role === "owner" ? "owner" : body.role === "user" ? "user" : null;
-      if (!role) throw bad("고객님 또는 사장님을 골라 주세요.");
+      // 회원가입은 고객님만. 사장님 계정은 관리자가 관리자 화면에서 만든다
+      if (body.role === "owner") throw bad(OWNER_SIGNUP_CLOSED);
+      const role = "user";
       const email = normalizeEmail(body.email);
       if (!isValidEmail(email)) throw bad("이메일 주소를 다시 확인해 주세요.");
       if (body.password !== body.passwordConfirm) throw bad("비밀번호가 서로 달라요.");
       // 다른 입력을 먼저 검사하고, 증표는 맨 마지막에 쓴다 (틀린 입력 때문에 증표가 날아가지 않게)
-      const account = checkAccount({ role, username: body.username, password: body.password, name: body.name, email, storeId: str(body.storeId, 10) });
+      const account = checkAccount({ role, username: body.username, password: body.password, name: body.name, email });
       const phone = normalizePhone(body.phone);
       if (!phone) throw bad(PHONE_ERROR);
       if (body.agreePrivacy !== true) throw bad("개인정보 수집·이용에 동의해 주세요.");
       if (!verifier.consumeProof(email, body.proof)) throw bad("이메일 인증을 마쳐 주세요.");
-      // 스스로 가입한 사장님은 관리자가 승인해야 매장 정보를 볼 수 있다 (아무나 남의 가게 주문을 보지 못하게)
-      const user = db.createUser({ ...account, phone, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION, approved: role !== "owner" });
+      const user = db.createUser({ ...account, phone, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION });
       return startSession(user);
     }],
     ["POST", "/api/auth/login", ({ body, ip }) => {
@@ -303,11 +321,15 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
         throw bad("비밀번호가 맞지 않아요.");
       }
       db.withdrawUser(user.username);
+      if (user.role === "owner") forgetStoreBank(user.storeId);
       return { ok: true };
     }],
 
     // ---- 주문 ----
-    ["GET", "/api/orders", ({ user }) => db.listOrders(recordScope(user))],
+    ["GET", "/api/orders", ({ user }) => {
+      expireUnpaid();
+      return db.listOrders(recordScope(user));
+    }],
     ["POST", "/api/orders", ({ body, user }) => {
       // 배달 주문은 로그인한 고객님만 (배달지·연락처를 계정에 두고 쓴다). 식당 예약은 비회원도 된다
       if (!user) throw new HttpError(401, "배달 주문은 로그인한 뒤에 할 수 있어요.");
@@ -344,34 +366,36 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
         address,
         phone,
       };
-      const receipt = newToken();
-      const rec = db.addOrder({ customer: user.username, customerName: user.name, payment: str(body.payment, 20) || "기타", storeId: o.storeId, order, receipt });
-      return { ...rec, receipt };
+      // 결제는 계좌이체: 그 매장의 입금 계좌(없으면 관리자 기본 계좌)를 주문에 적어 두고, 사장님이 입금을 확인할 때까지 "입금 대기"
+      const bank = db.bankAccount(o.storeId);
+      if (!bank) throw bad(`${withTopic(restaurantName(o.storeId))} 아직 입금 계좌를 등록하지 않아 주문을 받을 수 없어요.`);
+      // 입금 기한은 주문 시각 기준: 기한이 지났는지도 같은 주문 시각(created_at)으로 본다
+      const at = now();
+      Object.assign(order, { bank, depositor: user.name, payBy: at + PAY_WINDOW_MS });
+      return db.addOrder({ customer: user.username, customerName: user.name, payment: PAYMENT_METHOD, storeId: o.storeId, order, status: "입금 대기", createdAt: at });
     }],
-    // 비회원도 영수증 번호로 자기 주문을 본다 (로그인 손님은 GET /api/orders)
-    ["POST", "/api/orders/lookup", ({ body }) => {
-      const receipts = Array.isArray(body.receipts) ? body.receipts.slice(0, 20).map((r) => str(r, 100)) : [];
-      // 보낸 번호를 그대로 붙여 돌려준다 (손님이 이미 가진 번호라 새로 드러나는 것은 없다)
-      return receipts.flatMap((r) => { const rec = db.orderByReceipt(r); return rec ? [{ ...rec, receipt: r }] : []; });
-    }],
-    // 손님이 취소: 주문한 사람(로그인)이거나 영수증 번호가 맞고, 가게가 아직 준비를 시작하지 않았을 때만
-    ["POST", "/api/orders/:id/cancel", ({ params, body, user }) => {
+    // 손님이 취소: 주문한 고객님이 로그인해 있고, 가게가 아직 준비를 시작하지 않았을 때만
+    ["POST", "/api/orders/:id/cancel", ({ params, user }) => {
+      expireUnpaid();
       const rec = db.orderById(params.id);
       if (!rec) throw new HttpError(404, "없는 주문이에요.");
-      const mine = (user && user.username === rec.customer) || (body.receipt && body.receipt === db.receiptOf(rec.id));
-      if (!mine) throw forbidden();
-      if (rec.status !== "접수") throw new HttpError(409, rec.status === "취소" ? "이미 취소된 주문이에요." : "가게에서 이미 준비를 시작해서 취소할 수 없어요.");
+      if (!user) throw needLogin();
+      if (user.username !== rec.customer) throw forbidden();
+      if (!CUSTOMER_CANCELABLE.has(rec.status)) throw new HttpError(409, rec.status === "취소" ? "이미 취소된 주문이에요." : "가게에서 이미 준비를 시작해서 취소할 수 없어요.");
       db.setOrderStatus(rec.id, "취소");
       return db.orderById(rec.id);
     }],
     ["PATCH", "/api/orders/:id", ({ params, body, user }) => {
       if (!user) throw needLogin();
+      expireUnpaid(); // 입금 기한이 지난 주문을 뒤늦게 "입금 확인"하지 않게 먼저 정리한다
       const rec = db.orderById(params.id);
       if (!rec) throw new HttpError(404, "없는 주문이에요.");
       assertManages(user, rec.storeId);
       if (!ORDER_STATUSES.has(body.status)) throw bad("상태 값이 맞지 않아요.");
       if (!ORDER_NEXT[rec.status].includes(body.status)) throw new HttpError(409, `${rec.status} 상태의 주문은 ${body.status}(으)로 바꿀 수 없어요.`);
-      db.setOrderStatus(rec.id, body.status);
+      // 입금 대기 → 접수는 사장님의 "입금 확인": 확인 시각을 주문에 남긴다
+      if (rec.status === "입금 대기" && body.status === "접수") db.confirmPayment(rec.id, now());
+      else db.setOrderStatus(rec.id, body.status);
       return db.orderById(rec.id);
     }],
 
@@ -420,6 +444,30 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       }
       return { items: byMenuId, restaurants };
     }],
+    // ---- 입금 계좌 (결제는 계좌이체만) ----
+    ["GET", "/api/stores/:id/bank", ({ params, user }) => {
+      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      assertManages(user, params.id);
+      return { account: db.bankAccount(params.id) };
+    }],
+    ["PUT", "/api/stores/:id/bank", ({ params, body, user }) => {
+      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      assertManages(user, params.id);
+      const account = cleanBankAccount(body);
+      if (account.error) throw bad(account.error);
+      return { account: db.setBankAccount(params.id, account) };
+    }],
+    ["DELETE", "/api/stores/:id/bank", ({ params, user }) => {
+      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      assertManages(user, params.id);
+      db.setBankAccount(params.id, null);
+      return { account: null };
+    }],
+    ["GET", "/api/bank", ({ user }) => {
+      if (user?.role !== "admin") throw user ? forbidden() : needLogin();
+      return db.allBankAccounts();
+    }],
+
     // ---- 배달 메뉴 ----
     ["GET", "/api/menu", () => db.listMenu()],
     // 사장님이 메뉴 추가: 바로 판매된다. 그 매장의 음식 종류 이름("치킨")은 자동으로 키워드에 넣어 챗봇이 찾을 수 있게
@@ -531,6 +579,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       const target = db.findUser(params.username);
       if (!target || target.role !== "owner") throw new HttpError(404, "없는 사장님 계정이에요.");
       db.deleteUser(target.username); // 세션도 같이 지워진다 (ON DELETE CASCADE)
+      forgetStoreBank(target.storeId);
       return { ok: true };
     }],
     ["GET", "/api/users", ({ user }) => {

@@ -1,8 +1,8 @@
 import { StrictMode } from "react";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderChatbot } from "./OrderChatbot";
-import { loginCustomer } from "../test/setup";
+import { TEST_BANK, loginCustomer, server } from "../test/setup";
 
 // 봇 응답·결제 진행이 모두 setTimeout 기반이라 가짜 타이머로 시간을 넘기며 확인한다
 beforeEach(async () => {
@@ -109,86 +109,39 @@ describe("OrderChatbot", () => {
     expect(screen.queryByRole("button", { name: "국물떡볶이" })).not.toBeInTheDocument();
   });
 
-  it("결제수단을 고르면 결제 팝업이 뜨고, 결제하면 서버가 주문을 받은 뒤 완료 메시지를 보낸다", async () => {
+  it("주문을 확인하면 결제수단을 묻지 않고 계좌이체로 주문하고, 입금 계좌·금액·기한과 계좌번호 복사 버튼을 보여 준다", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     renderChat();
     orderAndConfirm();
-
-    fireEvent.click(screen.getByRole("button", { name: /토스페이/ }));
-    wait(300);
-    const dialog = screen.getByRole("dialog", { name: "토스페이" });
-    expect(within(dialog).getByText("20,000원")).toBeInTheDocument();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "20,000원 결제하기" }));
-    expect(within(dialog).getByText("결제 진행 중…")).toBeInTheDocument();
-    wait(1600);
-    expect(within(dialog).getByText("결제 완료")).toBeInTheDocument();
-    wait(1100 + 250);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /신용카드|카카오페이|토스페이/ })).not.toBeInTheDocument();
 
-    // 완료는 서버가 주문을 받은 뒤에 보여 준다: 실제 응답을 기다리도록 진짜 시계로 바꾼다
+    // 서버가 주문을 받은 뒤 입금 안내를 보여 준다: 실제 응답을 기다리도록 진짜 시계로 바꾼다
     vi.useRealTimers();
-    expect(await screen.findByText(/토스페이로 20,000원 결제가 완료되었어요/, {}, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.getByText(/청전 치킨공방에서 간장치킨 1마리를 준비 중이에요/)).toBeInTheDocument();
+    expect(await screen.findByText(/주문을 받았어요! 아래 계좌로 입금해 주세요/, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByText(`${TEST_BANK.bank} ${TEST_BANK.account}`)).toBeInTheDocument();
+    expect(screen.getByText(TEST_BANK.holder)).toBeInTheDocument();
+    expect(screen.getByText("김소비")).toBeInTheDocument(); // 입금자명은 주문한 회원 이름
+    expect(screen.getByText(/^(내일 )?\d{2}:\d{2}까지$/)).toBeInTheDocument();
+    expect(screen.getByText(/기한까지 입금이 확인되지 않으면 주문이 자동으로 취소돼요/)).toBeInTheDocument();
+
+    const copy = screen.getByRole("button", { name: "계좌번호 복사: 00000000000" });
+    fireEvent.click(copy);
+    await waitFor(() => expect(copy).toHaveTextContent("복사됨"));
+    expect(writeText).toHaveBeenCalledWith("00000000000");
+
+    const [rec] = server.db.listOrders();
+    expect(rec).toMatchObject({ status: "입금 대기", payment: "계좌이체" });
   });
 
-  it("결제 동의를 끄면 결제 버튼이 비활성화된다", () => {
+  it("그 매장에 입금 계좌가 없으면 주문을 받지 않고 이유를 알린다", async () => {
+    server.db.setBankAccount("h3", null);
     renderChat();
     orderAndConfirm();
-    fireEvent.click(screen.getByRole("button", { name: /신용카드/ }));
-    wait(300);
-
-    const dialog = screen.getByRole("dialog", { name: "신용카드" });
-    fireEvent.click(within(dialog).getByRole("checkbox"));
-    expect(within(dialog).getByRole("button", { name: "20,000원 결제하기" })).toBeDisabled();
-  });
-
-  it("결제 팝업의 카드 드롭다운: 목록을 펼쳐 고르고, Esc 는 목록만 닫는다", () => {
-    renderChat();
-    orderAndConfirm();
-    fireEvent.click(screen.getByRole("button", { name: /신용카드/ }));
-    wait(300);
-    const dialog = screen.getByRole("dialog", { name: "신용카드" });
-
-    const cardButton = within(dialog).getByRole("button", { name: /카드 선택/ });
-    expect(cardButton).toHaveTextContent("신한카드");
-    fireEvent.click(cardButton);
-    const list = within(dialog).getByRole("listbox", { name: "카드 선택" });
-    expect(within(list).getByRole("option", { name: /신한카드/ })).toHaveAttribute("aria-selected", "true");
-
-    fireEvent.click(within(list).getByRole("option", { name: /KB국민카드/ }));
-    expect(within(dialog).queryByRole("listbox")).not.toBeInTheDocument();
-    expect(cardButton).toHaveTextContent("KB국민카드");
-
-    // 키보드: 할부 목록을 열어 ↓ 두 번 → Enter
-    const installment = within(dialog).getByRole("button", { name: /할부/ });
-    fireEvent.keyDown(installment, { key: "ArrowDown" });
-    const installmentList = within(dialog).getByRole("listbox", { name: "할부" });
-    fireEvent.keyDown(installmentList, { key: "ArrowDown" });
-    fireEvent.keyDown(installmentList, { key: "ArrowDown" });
-    fireEvent.keyDown(installmentList, { key: "Enter" });
-    expect(installment).toHaveTextContent("3개월");
-
-    // Esc 는 열린 목록만 닫고 결제 팝업은 그대로
-    fireEvent.click(cardButton);
-    fireEvent.keyDown(within(dialog).getByRole("listbox"), { key: "Escape" });
-    wait(300);
-    expect(within(dialog).queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "신용카드" })).toBeInTheDocument();
-  });
-
-  it("팝업을 닫으면 결제가 취소되고 다시 결제수단을 고를 수 있다", () => {
-    renderChat();
-    orderAndConfirm();
-
-    fireEvent.click(screen.getByRole("button", { name: /카카오페이/ }));
-    wait(300);
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "닫기" }));
-    wait(250);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-
-    wait(400);
-    expect(screen.getByText(/결제를 취소했어요/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /신용카드/ })).toBeEnabled();
+    vi.useRealTimers();
+    expect(await screen.findByText(/아직 입금 계좌를 등록하지 않아 주문을 받을 수 없어요/, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByText(/주문이 접수되지 않았어요/)).toBeInTheDocument();
   });
 
   it("+ 를 누르면 빠른 메뉴가 열리고, 메뉴를 고르면 닫히면서 답한다", () => {
@@ -255,10 +208,12 @@ describe("OrderChatbot", () => {
     send("짬뽕");
     wait(900);
     expect(screen.getByText(/근처 중식 맛집을 추천해요!/)).toBeInTheDocument();
-    const other = screen.getByRole("button", { name: /하소 만리향/ });
+    // 처음에 보여 준 시간대 추천 카드에도 같은 식당이 있을 수 있어(지금 시각에 따라 다르다) 마지막(중식) 목록의 것을 쓴다
+    const inLastList = (name: RegExp) => screen.getAllByRole("button", { name }).at(-1)!;
+    const other = inLastList(/하소 만리향/);
     expect(other).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /장락반점/ }));
+    fireEvent.click(inLastList(/장락반점/));
     wait(700);
     expect(screen.getByText(/장락반점을 선택했어요./)).toBeInTheDocument();
     expect(screen.getByText("삼선짬뽕")).toBeInTheDocument();
@@ -728,25 +683,6 @@ describe("음성", () => {
     speakInto("장락 할매국밥");
     wait(700);
     expect(screen.getByText(/장락 할매국밥을 선택했어요/)).toBeInTheDocument();
-  });
-
-  it("결제 화면이 떠 있을 때 '결제'라고 말하면 결제가 진행되고, '취소'는 닫는다", () => {
-    renderChat();
-    orderAndConfirm();
-    fireEvent.click(screen.getByRole("button", { name: /카카오페이/ }));
-    wait(300);
-    const dialog = screen.getByRole("dialog", { name: "카카오페이" });
-
-    speakInto("아니 취소");
-    wait(250 + 400);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText(/결제를 취소했어요/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /토스페이/ }));
-    wait(300);
-    speakInto("결제해줘");
-    expect(within(screen.getByRole("dialog", { name: "토스페이" })).getByText("결제 진행 중…")).toBeInTheDocument();
-    expect(dialog).not.toBeInTheDocument();
   });
 
   it("봇이 답하는 중에 말하면 안내만 하고 버린다", () => {

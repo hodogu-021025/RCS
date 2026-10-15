@@ -5,9 +5,9 @@ import {
   RESTAURANTS,
   bookableTimes,
   checkVisitTime,
-  completionCard,
   findDeliveryItems,
-  findPayment,
+  orderCardRows,
+  accountDigits,
   findRestaurant,
   formatDate,
   datePrompt,
@@ -93,12 +93,11 @@ describe("배달 메뉴", () => {
   });
 });
 
-describe("findPayment", () => {
-  it("줄여 말해도 결제수단을 찾는다", () => {
-    expect(findPayment("카카오로 할게")?.id).toBe("kakao");
-    expect(findPayment("토스페이")?.id).toBe("toss");
-    expect(findPayment("카드로 해줘")?.id).toBe("card");
-    expect(findPayment("현금")).toBeUndefined();
+describe("계좌이체", () => {
+  it("주문서에 결제 방법(계좌이체)과 입금 기한을 알리고, 계좌번호는 숫자만 복사한다", () => {
+    const rows = orderCardRows(makeOrder(item("간장치킨"), 1));
+    expect(rows.find((r) => r.label === "결제")?.value).toBe("계좌이체 (주문 후 30분 안에 입금)");
+    expect(accountDigits("123456-01-234567")).toBe("12345601234567");
   });
 });
 
@@ -231,15 +230,6 @@ describe("makeOrder / completionText", () => {
     expect(won(40000)).toBe("40,000원");
   });
 
-  it("결제 완료 표에 결제수단·금액·주문번호·음식·도착 예정 시각을 넣는다", () => {
-    const card = completionCard(makeOrder(item("마르게리따 피자"), 1), findPayment("토스페이")!, new Date(2026, 9, 1, 10, 0));
-    expect(card.title).toBe("토스페이로 19,000원 결제가 완료되었어요!");
-    const row = (label: string) => card.rows.find((r) => r.label === label)?.value;
-    expect(row("주문번호")).toMatch(/^ON\d{6}$/);
-    expect(row("음식")).toBe("마르게리따 피자 1판");
-    expect(row("도착 예정")).toBe("약 40분 후 (10:40)");
-    expect(card.note).toBe("장락 화덕피자에서 마르게리따 피자 1판을 준비 중이에요.");
-  });
 });
 
 describe("추천하는 말투 (읽어 주기·자막)", () => {

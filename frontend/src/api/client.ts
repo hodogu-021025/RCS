@@ -45,7 +45,7 @@ export const onUnauthorized = (fn: () => void) => {
 
 // opts.token: 저장된 토큰 대신 이 토큰으로 보낸다 (로그아웃처럼 화면에서 먼저 토큰을 지운 뒤 서버에 알릴 때)
 export async function api<T>(
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
   opts: { token?: string } = {},

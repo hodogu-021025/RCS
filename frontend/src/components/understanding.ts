@@ -20,7 +20,10 @@ import {
   squash,
   toMinutes,
   withStoreSettings,
+  accountDigits,
+  won,
   type DeliveryItem,
+  type Order,
   type FoodCategory,
   type Meal,
   type Restaurant,
@@ -292,17 +295,44 @@ export const ETA_MINUTES = 40;
 export const orderLabel = (o: OrderRecord) => `${o.order.store.name} ${o.order.item} ${o.order.qty}${o.order.unit}`;
 
 const STATUS_TITLE: Record<OrderRecord["status"], string> = {
-  접수: "주문이 접수됐어요.",
+  "입금 대기": "입금을 기다리고 있어요.",
+  접수: "입금이 확인돼 주문이 접수됐어요.",
   "준비 중": "가게에서 준비 중이에요.",
   완료: "배달이 완료됐어요.",
   취소: "취소된 주문이에요.",
 };
 const STATUS_NOTE: Partial<Record<OrderRecord["status"], string>> = {
+  "입금 대기": "사장님이 입금을 확인하면 준비를 시작해요.",
   접수: "가게에서 곧 준비를 시작해요.",
   완료: "맛있게 드세요!",
 };
 
-// 내 주문 상태를 표로: 주문 내용, 상태, (아직 오는 중이면) 도착 예정
+// 계좌이체 안내 줄: 은행·계좌번호(복사)·예금주·금액·입금자명·기한
+function transferRows(order: Order) {
+  if (!order.bank) return [];
+  return [
+    { label: "입금 계좌", value: `${order.bank.bank} ${order.bank.account}`, copy: accountDigits(order.bank.account) },
+    { label: "예금주", value: order.bank.holder },
+    { label: "입금 금액", value: won(order.price), emphasis: true },
+    ...(order.depositor ? [{ label: "입금자명", value: order.depositor }] : []),
+    ...(order.payBy ? [{ label: "입금 기한", value: `${untilText(order.payBy)}까지` }] : []),
+  ];
+}
+
+// 주문을 넣은 직후: 어디로 얼마를 언제까지 보내면 되는지
+export function transferCard(o: OrderRecord): InfoCard {
+  const { order } = o;
+  return {
+    title: `주문을 받았어요! 아래 계좌로 입금해 주세요.`,
+    rows: [{ label: "주문", value: orderLabel(o) }, ...transferRows(order)],
+    note: "사장님이 입금을 확인하면 준비를 시작해요. 기한까지 입금이 확인되지 않으면 주문이 자동으로 취소돼요.",
+    say: order.bank
+      ? `주문을 받았어요. ${order.bank.bank} ${order.bank.account}, 예금주 ${order.bank.holder}에게 ${won(order.price)}을 ${order.payBy ? `${untilText(order.payBy)}까지 ` : ""}입금해 주세요. 사장님이 입금을 확인하면 준비를 시작해요.`
+      : undefined,
+  };
+}
+
+// 내 주문 상태를 표로: 주문 내용, 상태, (입금 전이면) 입금 안내, (오는 중이면) 도착 예정
 export function orderStatusCard(o: OrderRecord): InfoCard {
   const coming = o.status === "접수" || o.status === "준비 중";
   return {
@@ -310,9 +340,10 @@ export function orderStatusCard(o: OrderRecord): InfoCard {
     rows: [
       { label: "주문", value: orderLabel(o) },
       { label: "상태", value: o.status },
+      ...(o.status === "입금 대기" ? transferRows(o.order) : []),
       ...(coming ? [{ label: "도착 예정", value: `약 ${hhmm(o.createdAt + ETA_MINUTES * 60_000)}`, emphasis: true }] : []),
     ],
-    note: STATUS_NOTE[o.status],
+    note: (o.status === "취소" && o.order.cancelNote) || STATUS_NOTE[o.status],
   };
 }
 

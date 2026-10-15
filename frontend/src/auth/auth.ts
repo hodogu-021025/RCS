@@ -149,8 +149,8 @@ export async function updateContact(patch: { phone?: string; address?: string })
   }
 }
 
+// 회원가입은 고객님만 (사장님 계정은 관리자가 만든다)
 export interface SignupInput {
-  role: "user" | "owner"; // 고객님 · 사장님
   username: string;
   password: string;
   passwordConfirm: string;
@@ -158,7 +158,6 @@ export interface SignupInput {
   email: string;
   phone: string; // 연락처 (010-1234-5678 모양으로 바꿔 보낸다)
   proof: string | null; // 이메일 인증을 마치면 받은 증표
-  storeId?: string; // 사장님만: 내 매장
   agreePrivacy: boolean; // 개인정보 수집·이용 동의 (필수)
 }
 
@@ -166,12 +165,11 @@ export interface SignupInput {
 export async function signup(input: SignupInput): Promise<{ error: string } | { session: Session }> {
   const username = input.username.trim();
   const name = input.name.trim();
-  const { password, role, storeId } = input;
+  const { password } = input;
   const phone = normalizePhone(input.phone);
   const error =
     usernameError(username) ??
     (!name ? "이름을 적어 주세요." : null) ??
-    (role === "owner" && !storeId ? "매장을 골라 주세요." : null) ??
     (!phone ? PHONE_ERROR : null) ??
     (!input.proof ? "이메일 인증을 마쳐 주세요." : null) ??
     passwordError(password) ??
@@ -179,7 +177,7 @@ export async function signup(input: SignupInput): Promise<{ error: string } | { 
     (!input.agreePrivacy ? "개인정보 수집·이용에 동의해 주세요." : null);
   if (error) return { error };
   try {
-    const body = { role, username, password, passwordConfirm: input.passwordConfirm, name, email: normalizeEmail(input.email), proof: input.proof, phone, storeId, agreePrivacy: true };
+    const body = { role: "user", username, password, passwordConfirm: input.passwordConfirm, name, email: normalizeEmail(input.email), proof: input.proof, phone, agreePrivacy: true };
     return { session: start(await api("POST", "/api/auth/signup", body)) };
   } catch (e) {
     return { error: (e as ApiError).message };

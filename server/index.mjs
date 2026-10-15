@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app.mjs";
 import { hashPassword, passwordError, usernameError } from "./auth.mjs";
 import { openDb } from "./db.mjs";
+import { PAY_WINDOW_MS } from "./stores.mjs";
 import { createMailer } from "./mail.mjs";
 import { createVerifier } from "./verification.mjs";
 
@@ -47,7 +48,16 @@ ensureAdmin();
 setInterval(() => {
   verifier.sweep();
   db.sweepSessions();
+  db.expireUnpaidOrders(Date.now() - PAY_WINDOW_MS); // 입금 기한(30분)이 지난 계좌이체 주문은 자동 취소
 }, 60_000).unref();
+
+// 법정 보관 기간이 지난 주문 기록은 지운다: 시작할 때 한 번, 그 뒤로 하루에 한 번
+function purgeExpiredOrders() {
+  const n = db.purgeExpiredOrders();
+  if (n > 0) console.log(`[retention] 보관 기간이 지난 주문 ${n}건을 지웠습니다`);
+}
+purgeExpiredOrders();
+setInterval(purgeExpiredOrders, 24 * 60 * 60_000).unref();
 
 const server = http.createServer(createApp({ db, verifier, mailer }));
 server.listen(PORT, () => {

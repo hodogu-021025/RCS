@@ -14,10 +14,29 @@ export const foodLabelOf = (storeId) => {
   return catalog.foods.find((f) => f.key === food)?.label;
 };
 
-export const ORDER_STATUSES = new Set(["접수", "준비 중", "완료", "취소"]);
+// 결제는 계좌이체 하나. 주문하면 "입금 대기"로 들어오고, 사장님이 통장을 보고 입금을 확인하면 "접수"가 돼 준비를 시작한다.
+// 입금 기한(PAY_WINDOW_MS) 안에 확인되지 않으면 서버가 자동으로 취소한다
+export const PAYMENT_METHOD = "계좌이체";
+export const PAY_WINDOW_MS = 30 * 60_000;
+export const ORDER_STATUSES = new Set(["입금 대기", "접수", "준비 중", "완료", "취소"]);
 export const RESERVATION_STATUSES = new Set(["예약 확정", "방문 완료", "취소"]);
 // 사장님이 바꿀 수 있는 다음 상태 (끝난 주문·예약은 되돌리지 못한다)
-export const ORDER_NEXT = { 접수: ["준비 중", "취소"], "준비 중": ["완료", "취소"], 완료: [], 취소: [] };
+export const ORDER_NEXT = { "입금 대기": ["접수", "취소"], 접수: ["준비 중", "취소"], "준비 중": ["완료", "취소"], 완료: [], 취소: [] };
+// 고객님이 직접 취소할 수 있는 상태 (가게가 준비를 시작하기 전)
+export const CUSTOMER_CANCELABLE = new Set(["입금 대기", "접수"]);
+
+// 입금 계좌 { bank, account, holder } 를 검사해 정리한 값을 돌려준다. 문제가 있으면 { error }
+// 계좌번호는 숫자와 '-'만, 숫자 8~16자리 (은행마다 자릿수가 달라 넉넉히 받는다)
+export function cleanBankAccount(input) {
+  const bank = String(input?.bank ?? "").trim();
+  const account = String(input?.account ?? "").replace(/\s+/g, "");
+  const holder = String(input?.holder ?? "").trim().replace(/\s+/g, " ");
+  if (bank.length < 2 || bank.length > 20) return { error: "은행을 골라 주세요." };
+  const digits = account.replace(/-/g, "");
+  if (!/^[0-9-]+$/.test(account) || digits.length < 8 || digits.length > 16) return { error: "계좌번호는 숫자 8~16자리로 적어 주세요. ('-'는 넣어도 돼요)" };
+  if (!holder || holder.length > 20) return { error: "예금주를 1~20자로 적어 주세요." };
+  return { bank, account, holder };
+}
 export const RESERVATION_NEXT = { "예약 확정": ["방문 완료", "취소"], "방문 완료": [], 취소: [] };
 
 // 영업시간 "HH:MM - HH:MM": 시는 00~23 (닫는 시간은 24:00 가능), 분은 00~59, 여는 시간과 닫는 시간이 같으면 안 된다

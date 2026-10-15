@@ -5,7 +5,8 @@ import { login, logout } from "../auth/auth";
 import { getToken } from "../api/client";
 import { deliveryMenu, makeOrder } from "../components/orderChatKnowledge";
 import { getDb, refresh } from "../data/db";
-import { server, TEST_CODE } from "../test/setup";
+import { server, TEST_BANK, TEST_CODE } from "../test/setup";
+import { formatDateTime } from "./format";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
@@ -44,8 +45,9 @@ const loginAs = async (username: string) => {
   if ("error" in r) throw new Error(r.error);
 };
 // 테스트 서버의 DB 에 기록을 바로 넣는다
-const seedOrder = (customer: { username: string; name: string }, item = chicken, qty = 1, payment = "토스페이") =>
-  server.db.addOrder({ customer: customer.username, customerName: customer.name, payment, storeId: item.restaurantId, order: makeOrder(item, qty, TEST_DELIVERY) });
+// status: 실제 주문은 "입금 대기"로 들어온다. 입금 확인 뒤의 화면을 보는 테스트가 많아 기본은 "접수"
+const seedOrder = (customer: { username: string; name: string }, item = chicken, qty = 1, status = "접수") =>
+  server.db.addOrder({ customer: customer.username, customerName: customer.name, payment: "계좌이체", storeId: item.restaurantId, order: makeOrder(item, qty, TEST_DELIVERY), status });
 const TEST_DELIVERY = { address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" };
 const GUEST = { username: "guest", name: "비회원" };
 const KIM = { username: "customer01", name: "김소비" };
@@ -149,12 +151,11 @@ describe("회원가입", () => {
 
   it("고객님으로 가입하면 서버에 계정이 생기고 바로 로그인돼 챗봇으로 간다", async () => {
     open("#/signup");
-    expect(screen.getByRole("radio", { name: "고객님" })).toBeChecked();
     expect(screen.queryByLabelText("매장")).not.toBeInTheDocument();
     fill({ 아이디: "hongildong", 이름: "홍길동", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     agree();
     await verifyEmail("Hong@Example.com");
-    await click("고객님으로 가입하기");
+    await click("가입하기");
 
     await waitFor(() => expect(window.location.hash).toBe("#/chat"));
     // 숫자만 적어도 하이픈을 넣은 모양으로 저장된다
@@ -177,26 +178,24 @@ describe("회원가입", () => {
     expect(phone).toHaveAttribute("aria-invalid", "true");
     agree();
     await verifyEmail("hong@example.com");
-    await click("고객님으로 가입하기");
+    await click("가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("010-1234-5678 형식");
     expect(server.db.findUser("hongildong")).toBeNull();
   });
 
-  it("사장님으로 가입하면 매장을 골라야 하고, 가입 후 내 매장의 사장님 페이지로 간다", async () => {
+  it("회원가입은 고객님만 하고, 사장님 계정은 관리자가 만든다고 안내한다", () => {
     open("#/signup");
-    fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
-    fill({ 아이디: "banjeom01", "대표자 이름": "김사장", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
-    agree();
-    await verifyEmail("boss@example.com");
-    await click("사장님으로 가입하기");
-    expect(await screen.findByRole("alert")).toHaveTextContent("매장을 골라 주세요");
+    expect(screen.getByText(/사장님 계정은 관리자가 만들어 드려요/)).toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(screen.queryByText("매장")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "가입하기" })).toBeInTheDocument();
+  });
 
-    choose("매장", "장락반점");
-    await click("사장님으로 가입하기");
-    await waitFor(() => expect(window.location.hash).toBe("#/owner"));
+  it("예전에 직접 가입해 승인을 기다리는 사장님은 대기 안내를 보다가, 승인되면 매장 화면이 열린다", async () => {
+    server.createAccount({ username: "banjeom01", name: "김사장", role: "owner", storeId: "c1", approved: false });
+    await loginAs("banjeom01");
+    open("#/owner");
     expect(await screen.findByText("장락반점 · 사장님")).toBeInTheDocument();
-    expect(server.db.findUser("banjeom01")).toMatchObject({ role: "owner", storeId: "c1" });
-    // 스스로 가입한 사장님은 관리자 승인 전이라 매장 화면 대신 대기 안내가 보인다
     expect(screen.getByText("관리자 승인을 기다리고 있어요")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /주문·예약/ })).not.toBeInTheDocument();
 
@@ -210,7 +209,7 @@ describe("회원가입", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     open("#/signup");
     fill({ 아이디: "hongildong", 이름: "홍길동", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
-    await click("고객님으로 가입하기");
+    await click("가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("이메일 인증을 마쳐 주세요");
 
     fill({ 이메일: "hong@example.com" });
@@ -249,10 +248,10 @@ describe("회원가입", () => {
     fill({ 아이디: "short1", 이름: "누구", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     agree();
     await verifyEmail("new@example.com");
-    await click("고객님으로 가입하기");
+    await click("가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("영문·숫자 8~20자");
     fill({ 아이디: "takenuser" });
-    await click("고객님으로 가입하기"); // 이번엔 서버가 거른다 (안내가 바뀔 때까지 기다린다)
+    await click("가입하기"); // 이번엔 서버가 거른다 (안내가 바뀔 때까지 기다린다)
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("이미 있는 아이디예요"));
     expect(server.db.findUser("short1")).toBeNull();
   });
@@ -262,7 +261,7 @@ describe("회원가입", () => {
     expect(consentBox()).not.toBeChecked();
     fill({ 아이디: "hongildong", 이름: "홍길동", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     await verifyEmail("hong@example.com");
-    await click("고객님으로 가입하기");
+    await click("가입하기");
     expect(await screen.findByRole("alert")).toHaveTextContent("개인정보 수집·이용에 동의해 주세요");
     expect(server.db.findUser("hongildong")).toBeNull();
 
@@ -274,22 +273,17 @@ describe("회원가입", () => {
     expect(full).toHaveAttribute("target", "_blank");
 
     agree();
-    await click("고객님으로 가입하기");
+    await click("가입하기");
     await waitFor(() => expect(window.location.hash).toBe("#/chat"));
   });
 
-  it("비밀번호 눈 버튼과 고객님·사장님 토글", () => {
+  it("비밀번호 눈 버튼", () => {
     open("#/signup");
     const pw = screen.getByLabelText("비밀번호");
     expect(pw).toHaveAttribute("type", "password");
     fireEvent.click(screen.getByRole("button", { name: "비밀번호 보기" }));
     expect(pw).toHaveAttribute("type", "text");
     expect(screen.getByLabelText("비밀번호 확인")).toHaveAttribute("type", "password"); // 칸마다 따로
-
-    const group = screen.getByRole("radiogroup", { name: "가입 유형" });
-    expect(group).toHaveAttribute("data-active", "user");
-    fireEvent.click(screen.getByRole("radio", { name: "사장님" }));
-    expect(group).toHaveAttribute("data-active", "owner");
   });
 });
 
@@ -325,10 +319,10 @@ describe("로고와 첫 화면", () => {
 describe("사장님 페이지", () => {
   const boss = { username: "chickenboss", name: "치킨 사장", role: "owner" as const, storeId: "h3" };
 
-  it("내 매장 주문만 보이고, 접수 → 준비 중 → 완료로 바꾸면 서버에 저장된다", async () => {
+  it("내 매장 주문만 보이고, 입금 확인 → 준비 중 → 완료로 바꾸면 서버에 저장된다", async () => {
     server.createAccount(boss);
     server.createAccount({ ...KIM });
-    const mine = seedOrder(KIM, chicken, 2, "카카오페이");
+    const mine = seedOrder(KIM, chicken, 2, "입금 대기");
     seedOrder(GUEST, tongdak, 1); // 다른 매장(h1)
     await loginAs("chickenboss");
     open("#/owner");
@@ -337,8 +331,12 @@ describe("사장님 페이지", () => {
     // 손님 연락처가 보이고, 누르면 전화를 건다
     expect(screen.getByRole("link", { name: "010-1234-5678" })).toHaveAttribute("href", "tel:01012345678");
     expect(screen.queryByText(/옛날통닭/)).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /주문·예약/ })).toHaveTextContent("1"); // 접수 배지
+    expect(screen.getByRole("tab", { name: /주문·예약/ })).toHaveTextContent("1"); // 손쓸 주문 배지
+    expect(screen.getByText("입금 대기", { selector: ".status" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "준비 시작" })).not.toBeInTheDocument(); // 입금 확인 전에는 준비를 시작하지 않는다
 
+    await click("입금 확인");
+    await waitFor(() => expect(server.db.orderById(mine.id)?.status).toBe("접수"));
     await click("준비 시작");
     await waitFor(() => expect(server.db.orderById(mine.id)?.status).toBe("준비 중"));
     await click("배달 완료");
@@ -355,9 +353,10 @@ describe("사장님 페이지", () => {
     expect(await screen.findByText("간장치킨 3마리")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
-    seedOrder(GUEST, chicken, 1, "신용카드"); // 손님 폰에서 주문이 들어온 것과 같다
+    seedOrder(GUEST, chicken, 1, "입금 대기"); // 손님 폰에서 주문이 들어온 것과 같다
     act(() => void vi.advanceTimersByTime(5000)); // 화면이 몇 초마다 새로 받는다
     expect(await screen.findByRole("status")).toHaveTextContent("새 주문: 간장치킨 1마리");
+    expect(screen.getByRole("status")).toHaveTextContent("입금을 확인해 주세요");
   });
 
   it("메뉴 탭에서 품절·가격을, 매장 탭에서 영업시간을 바꾸면 서버에 저장된다", async () => {
@@ -520,6 +519,96 @@ describe("관리자 페이지", () => {
   });
 });
 
+describe("계좌이체 (사장님·관리자·내 주문)", () => {
+  const boss = { username: "chickenboss", name: "치킨 사장", role: "owner" as const, storeId: "h3" };
+
+  it("사장님은 매장 탭에서 입금 계좌를 바꾸고, 지우면 배달 주문을 받지 못한다는 띠가 뜬다", async () => {
+    server.createAccount(boss);
+    await loginAs("chickenboss");
+    open("#/owner");
+    fireEvent.click(await screen.findByRole("tab", { name: "매장" }));
+    expect(await screen.findByText(TEST_BANK.account)).toBeInTheDocument();
+    expect(screen.getByText(/고객님이 주문하면 이 계좌로 입금 안내를 받아요/)).toBeInTheDocument();
+
+    await click("계좌 바꾸기");
+    choose("은행", "신한은행");
+    fill({ 계좌번호: "110-12", 예금주: "치킨 사장" });
+    await click("바꾼 계좌 저장");
+    expect(await screen.findByRole("alert")).toHaveTextContent("숫자 8~16자리");
+    fill({ 계좌번호: "110-123-456789" });
+    await click("바꾼 계좌 저장");
+    expect(await screen.findByText("110-123-456789")).toBeInTheDocument();
+    expect(server.db.bankAccount("h3")).toMatchObject({ bank: "신한은행", account: "110-123-456789", holder: "치킨 사장" });
+
+    await click("지우기 (배달 주문 중지)");
+    expect(await screen.findByText(/계좌를 등록해야 배달 주문을 받을 수 있어요/)).toBeInTheDocument();
+    expect(server.db.bankAccount("h3")).toBeNull();
+    // 다른 탭에서는 위에 띠로 알리고, 띠의 버튼이 매장 탭으로 데려간다
+    fireEvent.click(screen.getByRole("tab", { name: /주문·예약/ }));
+    expect(await screen.findByText(/입금 계좌가 없어 배달 주문을 받지 못하고 있어요/)).toBeInTheDocument();
+    await click("계좌 등록");
+    expect(await screen.findByRole("tab", { name: "매장" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "계좌 등록" })).toBeInTheDocument(); // 등록 폼
+  });
+
+  it("관리자는 매장 목록에서 계좌 등록 여부를, 전체 현황 → 거래 내역에서 입금 상태를 본다", async () => {
+    server.createAccount({ username: "adminuser", name: "관리자", role: "admin" });
+    server.createAccount({ ...KIM });
+    server.db.setBankAccount("h3", { bank: "우리은행", account: "1002-123-456789", holder: "치킨 사장" });
+    server.db.setBankAccount("h1", null);
+    const paidAt = Date.now() - 60_000;
+    const base = { customer: KIM.username, customerName: KIM.name, payment: "계좌이체", storeId: "h3" };
+    server.db.addOrder({ ...base, order: { ...makeOrder(chicken, 1, TEST_DELIVERY), bank: TEST_BANK, depositor: KIM.name, payBy: Date.now() + 30 * 60_000 }, status: "입금 대기" });
+    server.db.addOrder({ ...base, order: { ...makeOrder(chicken, 2, TEST_DELIVERY), bank: TEST_BANK, depositor: KIM.name, paidAt }, status: "준비 중" });
+    await loginAs("adminuser");
+    open("#/admin");
+
+    fireEvent.click(await screen.findByRole("tab", { name: "거래 내역" }));
+    expect(await screen.findByText("확인된 입금액")).toBeInTheDocument();
+    expect(await screen.findByText("40,000원", { selector: ".tile b" })).toBeInTheDocument(); // 입금 확인된 2마리만 (주문 목록은 한 박자 뒤에 온다)
+    expect(screen.getByText(formatDateTime(paidAt))).toBeInTheDocument(); // 입금 확인 시각
+    expect(screen.getAllByText(`${TEST_BANK.bank} ${TEST_BANK.account} · ${TEST_BANK.holder}`)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "입금 대기" }));
+    expect(document.querySelectorAll(".record-list .record")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("tab", { name: /매장·사장님/ }));
+    expect(await screen.findByText("우리은행 1002-123-456789 · 치킨 사장")).toBeInTheDocument();
+    expect(screen.getAllByText("없음 · 배달 주문 못 받음").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("tab", { name: "입금 계좌" })).not.toBeInTheDocument(); // 관리자 기본 계좌는 없다
+  });
+
+  it("내 주문: 입금 대기 주문에 입금 계좌·기한을 보여 주고 취소할 수 있으며, 자동 취소되면 이유를 보여 준다", async () => {
+    server.createAccount({ ...KIM });
+    const payBy = Date.now() + 30 * 60_000;
+    const waiting = server.db.addOrder({
+      customer: KIM.username,
+      customerName: KIM.name,
+      payment: "계좌이체",
+      storeId: "h3",
+      order: { ...makeOrder(chicken, 1, TEST_DELIVERY), bank: TEST_BANK, depositor: KIM.name, payBy },
+      status: "입금 대기",
+    });
+    const expired = server.db.addOrder({
+      customer: KIM.username,
+      customerName: KIM.name,
+      payment: "계좌이체",
+      storeId: "h3",
+      order: { ...makeOrder(chicken, 2, TEST_DELIVERY), cancelNote: "입금 기한이 지나 자동으로 취소됐어요." },
+      status: "취소",
+    });
+    void expired;
+    await loginAs(KIM.username);
+    open("#/me");
+    expect(await screen.findByText(`${TEST_BANK.bank} ${TEST_BANK.account}`, { exact: false })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "계좌번호 복사: 00000000000" })).toBeInTheDocument();
+    expect(screen.getByText(/까지 \(지나면 자동 취소\)/)).toBeInTheDocument();
+    expect(screen.getByText("입금 기한이 지나 자동으로 취소됐어요.")).toBeInTheDocument();
+
+    await click("주문 취소");
+    await waitFor(() => expect(server.db.orderById(waiting.id)?.status).toBe("취소"));
+  });
+});
+
 describe("내 주문 페이지", () => {
   it("로그인한 사람의 주문만 보인다", async () => {
     server.createAccount({ ...KIM });
@@ -556,7 +645,7 @@ describe("개인정보 처리방침", () => {
     open("#/privacy");
     expect(await screen.findByRole("heading", { name: "1. 수집하는 개인정보" })).toBeInTheDocument();
     expect(screen.getByText("Resend, Inc. (미국)")).toBeInTheDocument();
-    expect(screen.getByText(/2026년 10월 12일부터 적용돼요/)).toBeInTheDocument();
+    expect(screen.getByText(/2026년 10월 15일부터 적용돼요/)).toBeInTheDocument();
   });
 });
 
@@ -622,8 +711,8 @@ describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
   it("사장님이 추가한 메뉴(긴 id)의 가격·품절이 저장되고, 할인된 주문은 금액 옆에 할인율이 보인다", async () => {
     server.createAccount(boss);
     const added = (server.db as unknown as MenuDb).addMenuItem({ restaurantId: "h3", name: "마늘치킨", price: 22000, unit: "마리", keywords: [] });
-    seedOrder(GUEST, chicken, 2, "카카오페이");
-    server.db.addOrder({ customer: "guest", customerName: "비회원", payment: "카드", storeId: "h3", order: { ...makeOrder(chicken, 1, TEST_DELIVERY), price: 16000, discountPct: 20, listPrice: 20000 } });
+    seedOrder(GUEST, chicken, 2);
+    server.db.addOrder({ customer: "guest", customerName: "비회원", payment: "계좌이체", storeId: "h3", order: { ...makeOrder(chicken, 1, TEST_DELIVERY), price: 16000, discountPct: 20, listPrice: 20000 } });
     await loginAs("chickenboss");
     open("#/owner");
     expect(await screen.findByText("16,000원 (20% 할인)")).toBeInTheDocument();
@@ -706,8 +795,9 @@ describe("사장님 승인 (관리자)", () => {
     expect(screen.getByText("wait@example.com")).toBeInTheDocument();
     await click("승인");
     await waitFor(() => expect(db.findUser("waitboss1")?.approved).toBe(true));
-    expect(await screen.findByText("승인을 기다리는 사장님이 없어요.")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "승인 대기" })).toBeInTheDocument(); // 배지도 사라진다
+    // 다 처리하면 "승인 대기" 세부 메뉴가 사라지고 매장 목록으로 돌아간다
+    expect(await screen.findByText("매장과 사장님 계정")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /승인 대기/ })).not.toBeInTheDocument();
   });
 });
 
@@ -781,7 +871,7 @@ describe("로그인한 고객님의 연락처·배달지", () => {
     expect(await findBot(/김소비님, 고르시던 배달 주문을 이어서 도와드릴게요/)).toBeTruthy();
     await waitFor(() => expect(inCard(TEST_DELIVERY.address)).toBe(true), { timeout: 3000 });
     expect(inCard("간장치킨 2마리")).toBe(true);
-  });
+  }, 15_000); // 로그인 화면으로 넘어가기 전 3초를 실제로 기다린다
 
   it("배달지가 없으면 계정 관리로 보내고, 등록하고 돌아오면 고르던 메뉴·수량으로 주문서를 만든다", async () => {
     server.createAccount({ ...KIM, phone: "010-1234-5678" });

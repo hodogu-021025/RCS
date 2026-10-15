@@ -4,12 +4,13 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../api/client";
 import { getSession } from "../auth/auth";
 import catalog from "../../../server/catalog.json";
-import type { DeliveryItem, Order } from "../components/orderChatKnowledge";
+import type { BankAccount, DeliveryItem, Order } from "../components/orderChatKnowledge";
 
 // 서버에서 메뉴 목록을 받기 전에 쓰는 처음 목록 (서버도 이 파일로 시작한다)
 const CATALOG_MENU = catalog.deliveryMenu as DeliveryItem[];
 
-export type OrderStatus = "접수" | "준비 중" | "완료" | "취소";
+// 계좌이체: 주문하면 "입금 대기", 사장님이 입금을 확인하면 "접수"
+export type OrderStatus = "입금 대기" | "접수" | "준비 중" | "완료" | "취소";
 export type ReservationStatus = "예약 확정" | "방문 완료" | "취소";
 
 export interface OrderRecord {
@@ -21,7 +22,6 @@ export interface OrderRecord {
   payment: string; // 결제수단 이름
   storeId: string; // 식당 id
   order: Order;
-  receipt?: string; // 주문한 직후 응답에만 실린다 (비회원이 나중에 조회·취소할 때 쓰는 번호)
 }
 
 export interface ReservationRecord {
@@ -127,59 +127,44 @@ export const toDateKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 // ---- 바꾸는 요청들. 성공하면 관련된 것을 다시 받아 온다 ----
-export async function addOrder(order: Order, payment: string): Promise<OrderRecord> {
-  const rec = await api<OrderRecord>("POST", "/api/orders", { order, payment });
-  // 영수증 번호는 비회원 주문만 이 브라우저에 남긴다. 회원 주문까지 남기면 같은 기기에서 로그아웃한 뒤
-  // 다른 사람이 "내 주문"으로 그 주문(주소·연락처)을 보고 취소할 수 있다. 회원은 계정으로 조회한다
-  if (rec.receipt && !getSession()) rememberReceipt(rec.receipt);
+// 결제는 계좌이체 하나라 결제수단은 보내지 않는다. 돌려받은 주문에 입금 계좌·기한이 들어 있다
+export async function addOrder(order: Order): Promise<OrderRecord> {
+  const rec = await api<OrderRecord>("POST", "/api/orders", { order });
   if (getSession()) await refresh(["records"]);
   return rec;
 }
 
 // ---- 손님의 내 주문 (챗봇의 "내 주문 어디쯤 왔어", "주문 취소할래") ----
-// 비회원은 주문할 때 받은 영수증 번호를 이 브라우저에 모아 두고 그 번호로 조회·취소한다
-const RECEIPTS_KEY = "saylo.receipts";
-const MAX_RECEIPTS = 20;
-export function getReceipts(): string[] {
-  try {
-    const list: unknown = JSON.parse(localStorage.getItem(RECEIPTS_KEY) ?? "[]");
-    return Array.isArray(list) ? list.filter((r): r is string => typeof r === "string") : [];
-  } catch {
-    return [];
-  }
+// 예전에 비회원 주문 조회용으로 이 브라우저에 남기던 영수증 번호는 더 쓰지 않으므로 지운다
+try {
+  localStorage.removeItem("saylo.receipts");
+} catch {
+  // 저장소가 막힌 브라우저면 남은 것도 없다
 }
-function rememberReceipt(receipt: string) {
-  try {
-    localStorage.setItem(RECEIPTS_KEY, JSON.stringify([receipt, ...getReceipts()].slice(0, MAX_RECEIPTS)));
-  } catch {
-    // 저장이 막힌 브라우저면 이번 화면 동안의 주문만 조회할 수 없다
-  }
-}
-// 주문 id → 영수증 번호 (취소할 때 같이 보낸다). 이번 화면에서 조회한 것만 안다
-const receiptById = new Map<string, string>();
 
-// 내 주문, 최근 것부터. 로그인한 고객님은 계정으로, 아니면 영수증 번호로 찾는다 (사장님·관리자는 손님 주문이 없다)
+// 내 주문, 최근 것부터. 배달 주문은 로그인한 고객님만 하므로 고객님 계정으로만 찾는다 (사장님·관리자·비회원은 없다)
 export async function fetchMyOrders(): Promise<OrderRecord[]> {
-  const session = getSession();
-  let list: OrderRecord[];
-  if (session?.role === "user") {
-    list = await api<OrderRecord[]>("GET", "/api/orders");
-  } else if (session) {
-    list = [];
-  } else {
-    const receipts = getReceipts();
-    if (receipts.length === 0) return [];
-    list = await api<OrderRecord[]>("POST", "/api/orders/lookup", { receipts });
-    for (const o of list) if (o.receipt) receiptById.set(o.id, o.receipt);
-  }
+  if (getSession()?.role !== "user") return [];
+  const list = await api<OrderRecord[]>("GET", "/api/orders");
   return [...list].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function cancelMyOrder(id: string): Promise<OrderRecord> {
-  const rec = await api<OrderRecord>("POST", `/api/orders/${id}/cancel`, { receipt: receiptById.get(id) });
+  const rec = await api<OrderRecord>("POST", `/api/orders/${id}/cancel`, {});
   if (getSession()) await refresh(["records"]);
   return rec;
 }
+
+// ---- 입금 계좌 (사장님·관리자) ----
+// 매장 계좌. 없으면 그 매장은 배달 주문을 받지 않는다
+export interface StoreBank {
+  account: BankAccount | null;
+}
+export const fetchStoreBank = (storeId: string) => api<StoreBank>("GET", `/api/stores/${storeId}/bank`);
+export const saveStoreBank = (storeId: string, account: BankAccount) => api<StoreBank>("PUT", `/api/stores/${storeId}/bank`, account);
+export const deleteStoreBank = (storeId: string) => api<StoreBank>("DELETE", `/api/stores/${storeId}/bank`);
+// 관리자: 등록된 매장 계좌 전체 { 매장 id: 계좌 }
+export const fetchAllBanks = () => api<Record<string, BankAccount>>("GET", "/api/bank");
 
 export const getPopularity = (): Popularity => db.popular;
 export const getMenu = (): DeliveryItem[] => db.menu;
@@ -276,5 +261,4 @@ export function clearRecords() {
 // 테스트용: 들고 있던 값을 비운다
 export function resetDb() {
   patch({ popular: { items: {}, restaurants: {} }, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false });
-  receiptById.clear();
 }

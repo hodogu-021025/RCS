@@ -63,7 +63,16 @@ const SCHEMA = `
     created_at    INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS menu_store ON menu_items(restaurant_id);
+  -- 매장 입금 계좌 (결제는 계좌이체만). 사장님이 등록해야 그 매장이 배달 주문을 받는다
+  CREATE TABLE IF NOT EXISTS bank_accounts (
+    store_id   TEXT PRIMARY KEY,
+    bank       TEXT NOT NULL,
+    account    TEXT NOT NULL,
+    holder     TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `;
+
 
 const toSettings = (r) => ({
   ...(r.hours ? { hours: r.hours } : {}),
@@ -128,13 +137,19 @@ const toReservation = (r) => ({
 // 탈퇴한 회원의 주문·예약에 남는 주문자
 export const WITHDRAWN = { customer: "~withdrawn", name: "탈퇴한 회원" };
 
+// 주문(대금결제·재화 공급) 기록의 법정 보관 기간. 지나면 지운다 (개인정보 처리방침 3번)
+export const ORDER_KEEP_YEARS = 5;
+
 export function openDb(path) {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
-  // 나중에 생긴 칸: 비회원이 자기 주문을 조회·취소할 때 쓰는 영수증 번호
+  // 예전에 비회원 주문 조회·취소에 쓰던 영수증 번호 칸. 배달 주문이 회원 전용이 되면서 더 쓰지 않아 비워 둔다
+  // (칸은 예전 DB와 모양을 맞추려고 남긴다)
   if (!db.prepare("PRAGMA table_info(orders)").all().some((c) => c.name === "receipt")) db.exec("ALTER TABLE orders ADD COLUMN receipt TEXT");
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_receipt ON orders(receipt)");
+  db.exec("UPDATE orders SET receipt = NULL WHERE receipt IS NOT NULL");
+  // 예전에 잠깐 있던 관리자 기본 계좌(store_id 'default')는 쓰지 않는다. 남아 있으면 지운다
+  db.exec("DELETE FROM bank_accounts WHERE store_id = 'default'");
   // 회원가입 때 동의한 개인정보 처리방침 버전(시행일)과 동의 시각. 관리자가 만든 계정은 비어 있다
   const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
   if (!userCols.includes("privacy_version")) db.exec("ALTER TABLE users ADD COLUMN privacy_version TEXT");
@@ -181,15 +196,25 @@ export function openDb(path) {
     deleteSession: q("DELETE FROM sessions WHERE token = ?"),
     sweepSessions: q("DELETE FROM sessions WHERE expires_at <= ?"),
 
-    insertOrder: q("INSERT INTO orders (id, created_at, status, customer, customer_name, payment, store_id, order_json, receipt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+    insertOrder: q("INSERT INTO orders (id, created_at, status, customer, customer_name, payment, store_id, order_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
     orderById: q("SELECT * FROM orders WHERE id = ?"),
-    orderByReceipt: q("SELECT * FROM orders WHERE receipt = ?"),
+    purgeOrders: q("DELETE FROM orders WHERE created_at < ?"),
     ordersSince: q("SELECT store_id, order_json, status FROM orders WHERE created_at >= ?"),
     reservationsSince: q("SELECT restaurant_id, status FROM reservations WHERE created_at >= ?"),
     allOrders: q("SELECT * FROM orders ORDER BY created_at DESC"),
     ordersByStore: q("SELECT * FROM orders WHERE store_id = ? ORDER BY created_at DESC"),
     ordersByCustomer: q("SELECT * FROM orders WHERE customer = ? ORDER BY created_at DESC"),
     setOrderStatus: q("UPDATE orders SET status = ? WHERE id = ?"),
+    confirmPayment: q("UPDATE orders SET status = '접수', order_json = ? WHERE id = ? AND status = '입금 대기'"),
+    unpaidBefore: q("SELECT id, order_json FROM orders WHERE status = '입금 대기' AND created_at < ?"),
+    expireOrder: q("UPDATE orders SET status = '취소', order_json = ? WHERE id = ? AND status = '입금 대기'"),
+
+    bankById: q("SELECT bank, account, holder FROM bank_accounts WHERE store_id = ?"),
+    allBanks: q("SELECT store_id, bank, account, holder FROM bank_accounts"),
+    upsertBank: q(
+      "INSERT INTO bank_accounts (store_id, bank, account, holder, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(store_id) DO UPDATE SET bank = excluded.bank, account = excluded.account, holder = excluded.holder, updated_at = excluded.updated_at",
+    ),
+    deleteBank: q("DELETE FROM bank_accounts WHERE store_id = ?"),
 
     insertReservation: q(
       "INSERT INTO reservations (id, created_at, status, customer, customer_name, restaurant_id, restaurant_name, date, time, people) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -269,10 +294,10 @@ export function openDb(path) {
     withdrawUser(username) {
       db.exec("BEGIN");
       try {
-        // 주문 내용 속 배달지·연락처도 지운다 (메뉴·금액 같은 거래 기록만 남긴다)
+        // 주문 내용 속 배달지·연락처·입금자명(이름)도 지운다 (메뉴·금액 같은 거래 기록만 남긴다)
         for (const r of stmts.ordersOf.all(username)) {
-          const { address, phone, ...rest } = JSON.parse(r.order_json);
-          if (address !== undefined || phone !== undefined) stmts.setOrderJson.run(JSON.stringify(rest), r.id);
+          const { address, phone, depositor, ...rest } = JSON.parse(r.order_json);
+          if (address !== undefined || phone !== undefined || depositor !== undefined) stmts.setOrderJson.run(JSON.stringify(rest), r.id);
         }
         stmts.anonymizeOrders.run(WITHDRAWN.customer, WITHDRAWN.name, username);
         stmts.anonymizeReservations.run(WITHDRAWN.customer, WITHDRAWN.name, username);
@@ -295,15 +320,27 @@ export function openDb(path) {
     sweepSessions: () => stmts.sweepSessions.run(Date.now()),
 
     // ---- 주문 ----
-    // receipt: 주문한 사람에게만 주는 번호 (비회원이 나중에 조회·취소할 때)
-    addOrder({ customer, customerName, payment, storeId, order, receipt = null }) {
+    addOrder({ customer, customerName, payment, storeId, order, status = "접수", createdAt = Date.now() }) {
       const id = newId("o");
-      stmts.insertOrder.run(id, Date.now(), "접수", customer, customerName, payment, storeId, JSON.stringify(order), receipt);
+      stmts.insertOrder.run(id, createdAt, status, customer, customerName, payment, storeId, JSON.stringify(order));
       return toOrder(stmts.orderById.get(id));
     },
     orderById: (id) => (stmts.orderById.get(id) ? toOrder(stmts.orderById.get(id)) : null),
-    orderByReceipt: (receipt) => (stmts.orderByReceipt.get(receipt) ? toOrder(stmts.orderByReceipt.get(receipt)) : null),
-    receiptOf: (id) => stmts.orderById.get(id)?.receipt ?? null,
+    // cutoff 전에 들어와 아직 "입금 대기"인 주문을 취소하고(이유를 주문에 적는다) 취소한 건수를 돌려준다
+    expireUnpaidOrders(cutoff) {
+      let n = 0;
+      for (const r of stmts.unpaidBefore.all(cutoff)) {
+        const order = { ...JSON.parse(r.order_json), cancelNote: "입금 기한이 지나 자동으로 취소됐어요." };
+        n += Number(stmts.expireOrder.run(JSON.stringify(order), r.id).changes);
+      }
+      return n;
+    },
+    // 보관 기간(ORDER_KEEP_YEARS)이 지난 주문을 지우고 지운 건수를 돌려준다
+    purgeExpiredOrders(now = Date.now()) {
+      const cutoff = new Date(now);
+      cutoff.setFullYear(cutoff.getFullYear() - ORDER_KEEP_YEARS);
+      return Number(stmts.purgeOrders.run(cutoff.getTime()).changes);
+    },
     // since 이후 취소되지 않은 주문(메뉴 이름·매장별)과 예약(식당별) 수
     popularity(since) {
       const items = {};
@@ -322,6 +359,12 @@ export function openDb(path) {
     listOrders: ({ storeId, customer } = {}) =>
       (storeId ? stmts.ordersByStore.all(storeId) : customer ? stmts.ordersByCustomer.all(customer) : stmts.allOrders.all()).map(toOrder),
     setOrderStatus: (id, status) => stmts.setOrderStatus.run(status, id).changes > 0,
+    // 사장님이 입금을 확인: 접수로 바꾸고 확인 시각(paidAt)을 주문에 남긴다 (관리자 거래 내역)
+    confirmPayment(id, at) {
+      const r = stmts.orderById.get(id);
+      if (!r) return false;
+      return stmts.confirmPayment.run(JSON.stringify({ ...JSON.parse(r.order_json), paidAt: at }), id).changes > 0;
+    },
 
     // ---- 예약 ----
     addReservation({ customer, customerName, restaurantId, restaurantName, date, time, people }) {
@@ -338,6 +381,24 @@ export function openDb(path) {
           : stmts.allReservations.all()
       ).map(toReservation),
     setReservationStatus: (id, status) => stmts.setReservationStatus.run(status, id).changes > 0,
+
+    // ---- 입금 계좌 ----
+    bankAccount: (storeId) => {
+      const r = stmts.bankById.get(storeId);
+      return r ? { bank: r.bank, account: r.account, holder: r.holder } : null;
+    },
+    // { 매장 id: 계좌 }
+    allBankAccounts() {
+      const out = {};
+      for (const r of stmts.allBanks.all()) out[r.store_id] = { bank: r.bank, account: r.account, holder: r.holder };
+      return out;
+    },
+    // account 가 null 이면 지운다
+    setBankAccount(storeId, account) {
+      if (account) stmts.upsertBank.run(storeId, account.bank, account.account, account.holder, Date.now());
+      else stmts.deleteBank.run(storeId);
+      return account;
+    },
 
     // ---- 매장 설정 (사장님이 바꾼 값만) ----
     allStoreSettings() {

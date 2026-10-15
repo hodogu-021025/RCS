@@ -81,32 +81,8 @@
 .dash-card.login > .dash-logo, .dash-card.login > h1 { text-align: center; }
 .dash-card.login > .dash-logo { font-size: 36px; line-height: 1.1; margin-bottom: 6px; }
 
-/* 회원가입: 고객님 / 사장님 고르기. 흰 바탕 칸(::before)이 고른 쪽으로 미끄러진다 */
-.role-switch {
-  position: relative;
-  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
-  border-radius: 14px; background: var(--surface);
-}
-.role-switch::before {
-  content: "";
-  position: absolute; top: 4px; bottom: 4px; left: 4px;
-  width: calc(50% - 6px); /* (전체 - 안쪽 여백 8px - 칸 사이 4px) / 2 */
-  border-radius: 10px; background: #fff;
-  transition: transform .3s cubic-bezier(.3, .8, .3, 1);
-}
-.role-switch[data-active="owner"]::before { transform: translateX(calc(100% + 4px)); }
-.role-switch button {
-  position: relative; z-index: 1;
-  height: 40px; border: none; border-radius: 10px; background: transparent;
-  color: var(--muted); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
-  transition: color .3s;
-}
-.role-switch button[aria-checked="true"] { color: var(--accent); }
-.role-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 회원가입·비밀번호 찾기: 제목 아래 한 줄 안내 */
 .dash-card .role-hint { margin: 8px 2px 16px; font-size: 13px; }
-@media (prefers-reduced-motion: reduce) {
-  .role-switch::before, .role-switch button { transition: none; }
-}
 
 /* 이메일 인증: 주소 + [인증번호 받기], 그 아래 번호 + 남은 시간 + [확인] */
 .email-field { margin-bottom: 12px; }
@@ -196,9 +172,11 @@
 
 /* 상태 표시: 글자와 같이 쓴다 (색만으로 구분하지 않는다) */
 .status { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.s-접수, .s-예약\ 확정 { background: var(--accent-weak); color: var(--accent); }
-.s-준비\ 중 { background: #fff4e5; color: #b45309; }
-.s-완료, .s-방문\ 완료 { background: #e8f7ee; color: #15803d; }
+/* 상태 색 (클래스는 format.ts 의 statusClass: 띄어쓰기는 '-') */
+.s-입금-대기 { background: #fff1e6; color: #c2410c; }
+.s-접수, .s-예약-확정 { background: var(--accent-weak); color: var(--accent); }
+.s-준비-중 { background: #fff4e5; color: #b45309; }
+.s-완료, .s-방문-완료 { background: #e8f7ee; color: #15803d; }
 .s-취소 { background: #f1f5f9; color: var(--muted); }
 
 /* 새 주문 알림 */
@@ -300,6 +278,10 @@
 
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; align-items: end; }
 .form-grid .form-error, .form-grid .btn { grid-column: 1 / -1; justify-self: start; }
+/* 입금 계좌 카드 (BankAccountForm.tsx): 안내 한 줄, 등록한 계좌 보기, 입력칸 */
+.bank-hint { margin: 0 0 12px; line-height: 1.5; word-break: keep-all; }
+.bank-view { margin-bottom: 4px; }
+.bank-form .record-actions { grid-column: 1 / -1; }
 
 @media (max-width: 520px) {
   .dash-head { padding: 0 14px; gap: 10px; }

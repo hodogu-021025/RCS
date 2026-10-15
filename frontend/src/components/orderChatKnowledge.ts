@@ -11,7 +11,7 @@ export interface Store {
 
 export type Unit = string; // 마리·판·인분 등 (catalog.json 의 deliveryMenu[].unit)
 
-// 결제까지 가는 배달 주문서 (확인 → 결제수단 → 결제 팝업)
+// 배달 주문서 (확인하면 계좌이체 주문으로 들어간다)
 
 export interface Order {
   store: Store; // 매장
@@ -24,23 +24,32 @@ export interface Order {
   address?: string; // 배달지
   phone?: string; // 가게가 연락할 전화번호
   storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
+  // 아래는 서버가 주문을 받을 때 채운다 (계좌이체)
+  bank?: BankAccount; // 입금할 계좌 (그 매장 계좌, 없으면 관리자 기본 계좌. 주문할 때의 것 그대로)
+  depositor?: string; // 입금자명 (주문한 회원 이름)
+  payBy?: number; // 입금 기한 (밀리초). 지나면 서버가 자동으로 취소한다
+  paidAt?: number; // 사장님이 입금을 확인한 시각
+  cancelNote?: string; // 자동 취소된 이유
 }
 
-export type PaymentId = "card" | "kakao" | "toss";
-
-export interface PaymentMethod {
-  id: PaymentId;
-  label: string;
-  icon: string;
-  theme: string;
-  themeText: string;
+// ---- 결제: 계좌이체 하나 ----
+// 결제 대행(PG)을 붙일 수 없어 계좌이체만 받는다. 주문하면 "입금 대기"로 들어오고,
+// 사장님이 통장을 보고 "입금 확인"을 누르면 접수돼 준비를 시작한다 (기한 안에 확인되지 않으면 자동 취소)
+export interface BankAccount {
+  bank: string; // 은행 이름
+  account: string; // 계좌번호 (숫자와 '-')
+  holder: string; // 예금주
 }
-
-export const PAYMENTS: PaymentMethod[] = [
-  { id: "card", label: "신용카드", icon: "카드", theme: "#1f2937", themeText: "#fff" },
-  { id: "kakao", label: "카카오페이", icon: "K", theme: "#fee500", themeText: "#3c1e1e" },
-  { id: "toss", label: "토스페이", icon: "T", theme: "#0064ff", themeText: "#fff" },
+export const PAYMENT_LABEL = "계좌이체";
+export const PAY_WINDOW_MIN = 30; // 입금 기한 (server/stores.mjs 의 PAY_WINDOW_MS 와 같게)
+// 입금 계좌를 등록할 때 고르는 은행
+export const BANKS = [
+  "KB국민은행", "신한은행", "우리은행", "하나은행", "NH농협은행", "IBK기업은행", "카카오뱅크", "토스뱅크", "케이뱅크",
+  "SC제일은행", "우체국", "새마을금고", "신협", "수협은행", "iM뱅크", "부산은행", "경남은행", "광주은행", "전북은행", "제주은행", "KDB산업은행",
 ];
+// 계좌번호를 은행 앱에 붙여 넣기 좋게 숫자만 남긴다
+export const accountDigits = (account: string) => account.replace(/[^0-9]/g, "");
+export const bankLine = (b: BankAccount) => `${b.bank} ${b.account}`;
 
 // ---- 식당 찾기 ----
 // 근처 식당 (catalog.json 의 restaurants). 지금은 화면 확인용 가상 식당이다.
@@ -547,32 +556,9 @@ export const isYes = (text: string) =>
 
 export const isNo = (text: string) => has(text, ["아니", "취소", "싫어", "안 해", "안해", "no"]);
 
-// "카카오로 할게", "카드로" 처럼 줄여 말해도 결제수단을 찾는다
-export function findPayment(text: string): PaymentMethod | undefined {
-  const low = text.toLowerCase();
-  return (
-    PAYMENTS.find((p) => low.includes(p.label) || low.includes(p.label.replace("페이", ""))) ??
-    (low.includes("카드") ? PAYMENTS[0] : undefined)
-  );
-}
-
 export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 // 주문 금액 표시. 할인된 주문이면 할인율도 같이 ("32,000원 (20% 할인)")
 export const orderPriceLabel = (order: Order) => (order.discountPct ? `${won(order.price)} (${order.discountPct}% 할인)` : won(order.price));
-
-export function completionCard(order: Order, method: PaymentMethod, now = new Date()): InfoCard {
-  const eta = new Date(now.getTime() + 40 * 60_000);
-  return {
-    title: `${method.label}로 ${won(order.price)} 결제가 완료되었어요!`,
-    rows: [
-      { label: "주문번호", value: "ON" + String(now.getTime()).slice(-6) },
-      { label: "매장", value: order.store.name },
-      { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
-      { label: "도착 예정", value: `약 40분 후 (${pad2(eta.getHours())}:${pad2(eta.getMinutes())})`, emphasis: true },
-    ],
-    note: `${order.store.name}에서 ${order.item} ${withObjectParticle(`${order.qty}${order.unit}`)} 준비 중이에요.`,
-  };
-}
 
 // 채팅의 주문서 카드에 들어갈 줄들. emphasis 는 파랗게 강조할 금액
 export interface OrderRow {
@@ -580,6 +566,7 @@ export interface OrderRow {
   value: string;
   emphasis?: boolean;
   badge?: string; // 이름 옆에 붙는 작은 태그 (오늘의 메뉴)
+  copy?: string; // 옆에 "복사" 버튼을 달고 누르면 이 글자를 복사한다 (계좌번호)
 }
 
 export function orderCardRows(order: Order): OrderRow[] {
@@ -587,16 +574,7 @@ export function orderCardRows(order: Order): OrderRow[] {
     { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
     { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
     { label: "가격", value: orderPriceLabel(order), emphasis: true },
-    { label: "배달지", value: order.address ?? "" },
-    ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
-  ];
-}
-
-// 결제 팝업 요약 칸
-export function orderSummaryRows(order: Order): OrderRow[] {
-  return [
-    { label: "상품", value: `${order.item} ${order.qty}${order.unit}` },
-    { label: "매장", value: order.store.name },
+    { label: "결제", value: `${PAYMENT_LABEL} (주문 후 ${PAY_WINDOW_MIN}분 안에 입금)` },
     { label: "배달지", value: order.address ?? "" },
     ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
   ];
