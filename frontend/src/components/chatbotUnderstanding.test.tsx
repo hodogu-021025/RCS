@@ -904,3 +904,70 @@ describe("세트 메뉴 맛 고르기", () => {
     expect(await find(/맛을 4가지 골라 주세요/)).toBeTruthy();
   });
 });
+
+describe("취소했던 주문서 다시", () => {
+  const SET_FLAVORS = [
+    { name: "간장 파닭", extra: 0 },
+    { name: "양념 파닭", extra: 0 },
+    { name: "블랙스완 파닭", extra: 1000 },
+  ];
+
+  it("취소한 뒤 '처음에 선택했던 메뉴로 주문할게'라고 하면 같은 메뉴·수량으로 주문서를 바로 다시 만든다", async () => {
+    await renderChat();
+    await say("간장치킨 3마리");
+    expect(inCard("간장치킨 3마리")).toBe(true);
+    await click("취소");
+    expect(await find(/주문을 취소했어요/)).toBeTruthy();
+    await say("다시 처음에 선택했던 메뉴로 주문할게");
+    expect(await find(/처음에 고르신 간장치킨 3마리로 주문서를 다시 만들었어요/)).toBeTruthy();
+    expect(inCard("60,000원")).toBe(true);
+    await click("응 해줘");
+    expect(await find(/주문을 받았어요/)).toBeTruthy();
+  });
+
+  it("여러 번 바꿨으면 '처음'은 맨 처음 주문서, '아까'는 바로 전 주문서로 되살리고, 새로 말한 수량은 그 수량으로 한다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리");
+    await say("옛날통닭 1마리"); // 주문서를 보다가 다른 메뉴로
+    await say("처음 거로 할게");
+    expect(await find(/처음에 고르신 간장치킨 2마리로 주문서를 다시 만들었어요/)).toBeTruthy();
+    await say("아까 거 3마리로 해줘");
+    expect(await find(/아까 고르신 옛날통닭 3마리로 주문서를 다시 만들었어요/)).toBeTruthy();
+  });
+
+  it("맛을 고른 세트는 고른 맛 그대로 되살리고, 세트 수가 바뀌면 맛만 다시 고른다", async () => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["두마리", "세트"], choice: { label: "맛", count: 2, options: SET_FLAVORS } });
+    await renderChat();
+    await say("2마리 치킨 세트 1세트");
+    await type("간장 파닭이랑 블랙스완 파닭");
+    await wait();
+    await click("취소");
+    await say("아까 취소한 거 다시 주문할게"); // "취소"가 들어 있어도 주문 취소로 보지 않는다
+    expect(await find(/아까 고르신 2마리 치킨 세트 1세트 \(간장 파닭, 블랙스완 파닭\(\+1,000원\)\)로 주문서를 다시 만들었어요/)).toBeTruthy();
+    expect(inCard("27,000원")).toBe(true);
+    await click("취소");
+    await say("처음 거 2세트로");
+    expect(await find(/맛을 4가지 골라 주세요/)).toBeTruthy();
+  });
+
+  it("되살릴 주문서가 없거나 '처음부터 다시'처럼 고른 것을 가리키지 않는 말이면 되살리지 않는다", async () => {
+    await renderChat();
+    await say("처음에 선택했던 메뉴로 주문할게");
+    expect(screen.queryByText(/주문서를 다시 만들었어요/)).not.toBeInTheDocument();
+    await say("간장치킨 2마리");
+    await click("취소");
+    await say("처음부터 다시 할게");
+    expect(screen.queryByText(/주문서를 다시 만들었어요/)).not.toBeInTheDocument();
+  });
+
+  it("그사이 품절된 메뉴는 이유를 말하고 다른 메뉴를 권한다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리");
+    await click("취소");
+    server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: true } } });
+    await act(() => refresh(["settings"]));
+    await say("처음에 골랐던 걸로 주문해줘");
+    expect(await find(/간장치킨은 지금 주문할 수 없어요/)).toBeTruthy();
+    expect(screen.getAllByText(/대신 이런 메뉴는 어떠세요/).length).toBeGreaterThan(0);
+  });
+});

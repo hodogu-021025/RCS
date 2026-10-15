@@ -67,6 +67,17 @@ export function detectIntent(text: string): Intent | undefined {
 // "그 식당", "거기", "아까 그 가게": 앞에서 말한 식당을 가리키는 말
 export const refersToPlace = (text: string) => /(그|저|아까\s?그)\s?(식당|가게|집|곳|매장)|거기/.test(text);
 // "아까 그거", "같은 걸로", "방금 그 메뉴": 앞에서 말한 메뉴를 가리키는 말
+// "처음에 선택했던 메뉴로 주문할게", "아까 취소한 거 다시", "처음 거로 할게": 이번 대화에서 보여 드린 주문서를 다시 쓰자는 말.
+// first: 맨 처음 주문서를 가리킨다 (아니면 바로 전 주문서). "처음부터 다시"처럼 고른 것을 가리키지 않는 말은 아니다
+const EARLIER = /(처음|첫\s?번째|아까|방금|원래)/;
+export function refersToEarlierOrder(text: string): { first: boolean } | undefined {
+  const picked = new RegExp(`${EARLIER.source}(에|엔)?\\s?(제가\\s?|내가\\s?)?(선택|골랐|고른|시키려|주문하려|담았|취소)`).test(text);
+  const thing = new RegExp(`${EARLIER.source}\\s?(거|걸|것|메뉴|주문서)`).test(text);
+  const cancelled = /취소(한|했던)\s?(거|걸|것|메뉴|주문)/.test(text);
+  if (!picked && !thing && !cancelled) return undefined;
+  return { first: /처음|첫\s?번째/.test(text) };
+}
+
 export const refersToItem = (text: string) => /아까\s?(그거|그\s?메뉴|거)|같은\s?(걸|거|메뉴)|방금\s?(그거|그\s?메뉴)|그\s?메뉴|그거\s?(로|하나|두|세|\d)/.test(text);
 
 // ---- 시간대 추천 ----

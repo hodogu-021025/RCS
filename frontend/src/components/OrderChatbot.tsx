@@ -22,6 +22,7 @@ import {
   deliveryMenu,
   pausedText,
   squash,
+  orderItemText,
   deliveryPrompt,
   popularFirst,
   priceText,
@@ -100,6 +101,7 @@ import {
   recommendItems,
   recommendRestaurants,
   refersToItem,
+  refersToEarlierOrder,
   refersToPlace,
   restaurantNamed,
   slotsText,
@@ -688,6 +690,36 @@ export function OrderChatbot() {
     botReply(() => push(botText("근처 매장을 찾았어요."), { role: "bot", kind: "order", order: next }), 1000);
   }
 
+  // 전에 보여 드린 주문서를 다시: 같은 메뉴·수량(새로 말한 수량이 있으면 그 수량)·고른 맛으로, 값과 배달지는 지금 것으로 만든다.
+  // 그사이 품절·일시 중지면 이유를 말하고 다른 메뉴를 권하고, 수량이 바뀌었거나 고른 맛이 메뉴에서 빠졌으면 맛만 다시 고른다
+  function restoreOrder(draft: Order, text: string, first: boolean) {
+    startFresh();
+    const known = deliveryMenu().find((d) => d.restaurantId === draft.storeId && d.name === draft.item);
+    const item = known && availableDeliveryMenu().find((d) => d.id === known.id);
+    if (!item) {
+      const paused = known && storePausedUntil(known.restaurantId);
+      offerInstead(
+        known && paused ? pausedText(restaurantById(known.restaurantId).name, paused) : `${withTopicParticle(draft.item)} 지금 주문할 수 없어요.`,
+        known ? alternativesFor(known) : availableDeliveryMenu(),
+      );
+      return;
+    }
+    const said = parseQuantity(text);
+    const qty = qtyInRange(said) ? said : draft.qty;
+    if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
+    const picked = (draft.choices ?? []).map((c) => item.choice?.options.find((o) => o.name === c.name));
+    const choices = item.choice && qty === draft.qty && picked.length === item.choice.count * qty && picked.every(Boolean) ? (picked as ChosenOption[]) : undefined;
+    if (item.choice && !choices) {
+      startOrder(item, qty);
+      return;
+    }
+    const next = makeOrder(item, qty, myDelivery, choices);
+    setLastItem(item);
+    setOrder(next);
+    setStage("confirm");
+    botReply(() => push(botText(`${first ? "처음에" : "아까"} 고르신 ${orderItemText(next)}로 주문서를 다시 만들었어요.`), { role: "bot", kind: "order", order: next }));
+  }
+
   // 배달 주문은 로그인한 고객님이 계정에 배달지·연락처를 적어 둬야 할 수 있다. 아니면 안내하고 멈춘다(true).
   // 고르던 메뉴·수량은 기억해 두었다가 로그인하거나 배달지를 등록하고 돌아오면 이어 간다
   function deliveryBlocked(resume: ResumeDelivery): boolean {
@@ -1146,6 +1178,18 @@ export function OrderChatbot() {
         return;
       }
       setStage("idle");
+    }
+
+    // "처음에 선택했던 메뉴로 주문할게", "아까 취소한 거 다시": 이번 대화에서 보여 드린 주문서를 메뉴·수량·고른 맛 그대로 다시 만든다.
+    // "처음"이면 맨 처음 주문서, 아니면 지금 보고 있는 것 바로 전 주문서
+    const earlier = refersToEarlierOrder(text);
+    if (earlier) {
+      const shown = messages.flatMap((m) => (m.role === "bot" && m.kind === "order" ? [m.order] : []));
+      const draft = earlier.first ? shown[0] : shown.filter((o) => o !== order).at(-1);
+      if (draft) {
+        restoreOrder(draft, text, earlier.first);
+        return;
+      }
     }
 
     if (stage === "confirm" && order && !switchingMenu) {
