@@ -205,6 +205,18 @@ describe("3. 안 되는 것 대신 할 수 있는 것", () => {
     expect(screen.getAllByRole("button", { name: "치킨" }).length).toBeGreaterThan(0);
   });
 
+  it("관리자가 직접 만든 매장도 추천하고, 거리·평점을 모르면 그 칸을 빼고 보여 준다", async () => {
+    server.db.addStore({ name: "하소 케이크하우스", food: "dessert", hours: "09:00 - 23:00" });
+    await renderChat();
+    await waitFor(() => expect(getDb().storesLoaded).toBe(true));
+    await say("케이크 먹고 싶어");
+    expect(await find(/근처 디저트 맛집을 추천해요/)).toBeTruthy();
+    const card = screen.getAllByRole("button").find((b) => b.textContent?.includes("하소 케이크하우스"))!;
+    expect(card.textContent).not.toMatch(/평점|km|undefined/);
+    await click(/하소 케이크하우스/);
+    expect(await find(/하소 케이크하우스를 선택했어요/)).toBeTruthy();
+  });
+
   it("배달도 가게도 없는 음식은 '대신 맛집에서' 권하지 않는다", async () => {
     await renderChat();
     await say("케이크 배달해줘");

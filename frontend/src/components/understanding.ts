@@ -2,7 +2,9 @@
 // 외부 AI 없이 규칙과 가게·메뉴 목록(catalog.json)만 쓴다. 가게·메뉴 이름을 코드에 직접 적지 않는다
 import {
   deliveryMenu,
-  FOODS_ON_OFFER,
+  foodsOnOffer,
+  filledRows,
+  byDistance,
   MAX_PEOPLE,
   RESTAURANTS,
   availableDeliveryMenu,
@@ -77,7 +79,7 @@ export function mealOf(now: Date): Meal {
 export const MEAL_WORD: Record<Meal, string> = { breakfast: "아침", lunch: "점심", afternoon: "오후 간식", dinner: "저녁", late: "야식" };
 
 // 지금 시간대에 어울리는 음식 종류 (catalog.json 의 foods[].meals). 근처에 가게가 있는 종류만
-export const foodsForMeal = (meal: Meal): FoodCategory[] => FOODS_ON_OFFER.filter((f) => f.meals?.includes(meal));
+export const foodsForMeal = (meal: Meal): FoodCategory[] => foodsOnOffer().filter((f) => f.meals?.includes(meal));
 
 const foodOfItem = (d: DeliveryItem) => RESTAURANTS.find((r) => r.id === d.restaurantId)?.food;
 
@@ -97,7 +99,7 @@ export function recommendRestaurants(now: Date, n = 4): Restaurant[] {
     .filter((r) => !storePausedUntil(r.id, now.getTime()))
     .sort(
       (a, b) =>
-        Number(fits.has(b.food)) - Number(fits.has(a.food)) || (booked[b.id] ?? 0) - (booked[a.id] ?? 0) || a.distanceKm - b.distanceKm,
+        Number(fits.has(b.food)) - Number(fits.has(a.food)) || (booked[b.id] ?? 0) - (booked[a.id] ?? 0) || byDistance(a, b),
     )
     .slice(0, n);
 }
@@ -127,7 +129,7 @@ export const allRestaurants = () => RESTAURANTS.map(withStoreSettings);
 export const nearestRestaurants = (n = 3) =>
   allRestaurants()
     .filter((r) => !storePausedUntil(r.id))
-    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .sort(byDistance)
     .slice(0, n);
 
 // 문장에 들어 있는 식당 이름 (띄어쓰기 무시)
@@ -359,12 +361,12 @@ export function storeInfoCard(r: Restaurant, now: Date): InfoCard {
   const tag = paused ? `잠시 쉬는 중 (${untilText(paused, now.getTime())}까지)` : openStateText(r, now);
   return {
     title: `${r.name} 정보예요.`,
-    rows: [
+    rows: filledRows([
       { label: "영업시간", value: `${r.hours} · ${tag}`, emphasis: true },
       { label: "주소", value: r.address },
       { label: "대표 메뉴", value: r.signature },
       { label: "거리", value: km(r.distanceKm) },
-    ],
-    say: `${withTopicParticle(r.name)} ${r.hours.replace("-", "부터")}까지 영업해요. ${state} 주소는 ${r.address}예요.`,
+    ]),
+    say: `${withTopicParticle(r.name)} ${r.hours.replace("-", "부터")}까지 영업해요. ${state}${r.address ? ` 주소는 ${r.address}예요.` : ""}`,
   };
 }

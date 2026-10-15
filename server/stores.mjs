@@ -15,11 +15,36 @@ export const DELIVERY_MENU = catalog.deliveryMenu; // 처음 목록 (DB 에 없�
 // 사장님 계정·주문·예약에 쓸 수 있는 매장 id
 export const STORE_IDS = new Set(RESTAURANTS.map((r) => r.id));
 export const restaurantName = (id) => RESTAURANTS.find((r) => r.id === id)?.name;
-// 매장의 음식 종류 이름 ("치킨", "피자"). 사장님이 추가한 메뉴도 이 말로 찾을 수 있게 키워드에 넣는다
-export const foodLabelOf = (storeId) => {
-  const food = RESTAURANTS.find((r) => r.id === storeId)?.food;
-  return catalog.foods.find((f) => f.key === food)?.label;
-};
+export const FOOD_KEYS = new Set(catalog.foods.map((f) => f.key));
+export const foodLabel = (food) => catalog.foods.find((f) => f.key === food)?.label;
+
+// ---- 목록 파일의 매장 + 관리자가 직접 만든 매장(DB stores) ----
+// 목록 파일에 같은 id 가 있으면 목록 파일 것을 쓴다 (내보낸 목록을 catalog.json 으로 다시 커밋해도 두 번 나오지 않게)
+export const allStores = (db) => [...RESTAURANTS, ...db.listStores().filter((s) => !STORE_IDS.has(s.id))];
+export const findStore = (db, id) => RESTAURANTS.find((r) => r.id === id) ?? db.storeById(String(id ?? "")) ?? undefined;
+export const hasStore = (db, id) => findStore(db, id) !== undefined;
+
+// 관리자가 새로 만드는 매장 { name, food, hours?, address?, signature? } 를 검사해 정리한 값을 돌려준다. 문제가 있으면 { error }
+// 거리·평점은 받지 않는다 (모르는 값을 지어내지 않는다). 영업시간을 비우면 11:00 - 21:00 으로 시작하고, 사장님이 사장님 화면에서 바꾼다
+export const STORE_NAME_MAX = 30;
+export const STORE_ADDRESS_MAX = 100;
+export const DEFAULT_HOURS = "11:00 - 21:00";
+export function cleanNewStore(input) {
+  const name = String(input?.name ?? "").trim().replace(/\s+/g, " ");
+  if (!name || name.length > STORE_NAME_MAX) return { error: `매장 이름을 1~${STORE_NAME_MAX}자로 적어 주세요.` };
+  const food = String(input?.food ?? "");
+  if (!FOOD_KEYS.has(food)) return { error: "음식 종류를 골라 주세요." };
+  const hours = String(input?.hours ?? "").trim() || DEFAULT_HOURS;
+  const hoursProblem = hoursError(hours);
+  if (hoursProblem) return { error: hoursProblem };
+  const address = String(input?.address ?? "").trim().replace(/\s+/g, " ");
+  if (address.length > STORE_ADDRESS_MAX) return { error: `주소는 ${STORE_ADDRESS_MAX}자까지 적을 수 있어요.` };
+  const signature = String(input?.signature ?? "").trim().replace(/\s+/g, " ");
+  if (signature.length > STORE_NAME_MAX) return { error: `대표 메뉴는 ${STORE_NAME_MAX}자까지 적을 수 있어요.` };
+  return { name, food, hours, ...(address ? { address } : {}), ...(signature ? { signature } : {}) };
+}
+// 이름 비교용 (띄어쓰기·대소문자 차이는 같은 이름으로 본다)
+export const sameStoreName = (a, b) => a.replace(/\s+/g, "").toLowerCase() === b.replace(/\s+/g, "").toLowerCase();
 
 // 결제는 계좌이체 하나. 주문하면 "입금 대기"로 들어오고, 사장님이 통장을 보고 입금을 확인하면 "접수"가 돼 준비를 시작한다.
 // 입금 기한(PAY_WINDOW_MS) 안에 확인되지 않으면 서버가 자동으로 취소한다
@@ -87,11 +112,15 @@ export const MENU_PRICE_MAX = 1_000_000;
 export const MENU_UNIT_MAX = 6;
 export const MENU_KEYWORDS_MAX = 10;
 
-// DB 의 배달 메뉴 중 지금 목록(catalog.json)에 있는 가게의 것만. 목록에서 빠진 가게의 메뉴는 DB 에 남아 있어도 보이지 않는다
-export const listedMenu = (db) => db.listMenu().filter((d) => STORE_IDS.has(d.restaurantId));
+// DB 의 배달 메뉴 중 지금 있는 매장(목록 파일 + 관리자가 만든 매장)의 것만. 목록 파일에서 빠진 가게의 메뉴는 DB 에 남아 있어도 보이지 않는다
+export const listedMenu = (db) => {
+  const ids = new Set(allStores(db).map((s) => s.id));
+  return db.listMenu().filter((d) => ids.has(d.restaurantId));
+};
 
-// DB 의 메뉴 목록을 catalog.json 모양으로 (사장님이 바꾼 가격은 그 가격으로, 판매 중지한 메뉴는 active: false)
+// DB 의 매장·메뉴 목록을 catalog.json 모양으로 (관리자가 만든 매장 포함, 사장님이 바꾼 가격은 그 가격으로, 판매 중지한 메뉴는 active: false)
 export function catalogWithMenu(db) {
+  const restaurants = allStores(db).map(({ source: _source, ...s }) => s);
   const settings = db.allStoreSettings();
   const deliveryMenu = listedMenu(db).map((d) => ({
     id: d.id,
@@ -102,5 +131,5 @@ export function catalogWithMenu(db) {
     keywords: d.keywords,
     ...(d.active ? {} : { active: false }),
   }));
-  return { ...catalog, deliveryMenu };
+  return { ...catalog, restaurants, deliveryMenu };
 }

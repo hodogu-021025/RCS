@@ -31,7 +31,11 @@ export interface TestDb {
     patch: { hours?: string; item?: { id: string; patch: { price?: number; soldOut?: boolean; discountPct?: number } }; special?: { itemId: string; date: string } | null },
   ): object;
   deleteUser(username: string): boolean;
-  findUser(username: string): { username: string; role: string; storeId?: string; phone?: string; address?: string } | null;
+  findUser(username: string): { username: string; name: string; role: string; storeId?: string; phone?: string; address?: string } | null;
+  // 관리자가 직접 만든 매장
+  addStore(store: { name: string; food: string; hours: string; address?: string; signature?: string }): { id: string; name: string };
+  storeById(id: string): { id: string; name: string; food: string; hours: string; address?: string; signature?: string; source: "admin" } | null;
+  addMenuItem(item: { restaurantId: string; name: string; price: number; unit: string; keywords: string[] }): { id: string };
 }
 
 export interface TestServer {

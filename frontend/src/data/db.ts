@@ -4,10 +4,19 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../api/client";
 import { getSession } from "../auth/auth";
 import catalog from "../../../server/catalog.json";
-import type { BankAccount, DeliveryItem, Order } from "../components/orderChatKnowledge";
+import type { BankAccount, DeliveryItem, Order, Restaurant } from "../components/orderChatKnowledge";
 
 // 서버에서 메뉴 목록을 받기 전에 쓰는 처음 목록 (서버도 이 파일로 시작한다)
 const CATALOG_MENU = catalog.deliveryMenu as DeliveryItem[];
+const CATALOG_STORES = catalog.restaurants as Restaurant[];
+
+// 매장 목록 (목록 파일의 매장 + 관리자가 사장님 계정을 만들며 직접 입력한 매장). 서버에서 받기 전에는 목록 파일의 매장.
+// 챗봇·화면 코드가 RESTAURANTS 로 같은 배열을 쓰므로, 새 목록을 받으면 배열을 바꿔 끼우지 않고 안의 내용만 바꾼다
+export const STORES: Restaurant[] = [...CATALOG_STORES];
+function setStores(list: Restaurant[]) {
+  STORES.splice(0, STORES.length, ...list);
+  patch({ stores: [...list], storesLoaded: true });
+}
 
 // 계좌이체: 주문하면 "입금 대기", 사장님이 입금을 확인하면 "접수"
 export type OrderStatus = "입금 대기" | "접수" | "준비 중" | "완료" | "취소";
@@ -63,6 +72,8 @@ export interface Popularity {
 
 interface Db {
   popular: Popularity;
+  stores: Restaurant[]; // 매장 목록 (STORES 와 같은 내용. 바뀌면 화면을 다시 그리려고 둔다)
+  storesLoaded: boolean; // 서버에서 매장 목록을 한 번이라도 받아 왔는지 (그 전에는 관리자가 만든 매장을 모른다)
   menu: DeliveryItem[]; // 배달 메뉴 전체 (판매 중지는 active: false). 사장님이 추가한 메뉴도 들어 있다
   orders: OrderRecord[];
   reservations: ReservationRecord[];
@@ -76,7 +87,7 @@ interface Db {
 export type DbPart = "settings" | "popular" | "menu" | "records" | "accounts";
 export const POLL_MS = 5000;
 
-let db: Db = { popular: { items: {}, restaurants: {} }, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false };
+let db: Db = { popular: { items: {}, restaurants: {} }, stores: CATALOG_STORES, storesLoaded: false, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false };
 const listeners = new Set<() => void>();
 function patch(next: Partial<Db>) {
   db = { ...db, ...next };
@@ -92,7 +103,11 @@ export const getDb = () => db;
 export async function refresh(parts: DbPart[]) {
   const session = getSession();
   const jobs: Promise<void>[] = [];
-  if (parts.includes("settings")) jobs.push(api<Db["storeSettings"]>("GET", "/api/stores/settings").then((storeSettings) => patch({ storeSettings })));
+  if (parts.includes("settings")) {
+    // 매장 설정(영업시간·품절)을 보는 화면은 매장 목록도 같이 본다
+    jobs.push(api<Db["storeSettings"]>("GET", "/api/stores/settings").then((storeSettings) => patch({ storeSettings })));
+    jobs.push(api<Restaurant[]>("GET", "/api/stores").then(setStores));
+  }
   if (parts.includes("menu")) jobs.push(api<DeliveryItem[]>("GET", "/api/menu").then((menu) => patch({ menu })));
   if (parts.includes("popular")) jobs.push(api<Popularity>("GET", "/api/stats/popular").then((popular) => patch({ popular })));
   if (parts.includes("records") && session) {
@@ -237,9 +252,17 @@ export async function setSpecialMenu(storeId: string, itemId: string | null) {
   await refresh(["settings"]);
 }
 
-export async function addOwner(account: { username: string; password: string; name: string; storeId: string }) {
+// 매장은 있는 매장(storeId)을 고르거나 새 매장(newStore)을 직접 입력한다. 새 매장은 매장 목록에 바로 들어간다
+export interface NewStore {
+  name: string;
+  food: string;
+  hours?: string;
+  address?: string;
+  signature?: string;
+}
+export async function addOwner(account: { username: string; password: string; name: string } & ({ storeId: string } | { newStore: NewStore })) {
   await api("POST", "/api/owners", account);
-  await refresh(["accounts"]);
+  await refresh(["accounts", "settings"]);
 }
 
 // 스스로 가입한 사장님을 승인한다 (거절은 removeOwner)
@@ -260,5 +283,6 @@ export function clearRecords() {
 
 // 테스트용: 들고 있던 값을 비운다
 export function resetDb() {
-  patch({ popular: { items: {}, restaurants: {} }, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false });
+  STORES.splice(0, STORES.length, ...CATALOG_STORES);
+  patch({ popular: { items: {}, restaurants: {} }, stores: CATALOG_STORES, storesLoaded: false, menu: CATALOG_MENU, orders: [], reservations: [], storeSettings: {}, owners: [], users: [], recordsLoaded: false });
 }

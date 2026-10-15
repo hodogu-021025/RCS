@@ -60,7 +60,7 @@ describe("배달 메뉴", () => {
   it("배달·식당 어디에도 황금올리브는 없고, 배달 예시는 다른 메뉴들이다", () => {
     expect(deliveryPrompt().choices?.map((c) => c.label)).toEqual(["옛날통닭", "간장치킨", "마르게리따 피자", "국물떡볶이"]);
     expect(deliveryMenu().some((d) => d.name.includes("황금올리브"))).toBe(false);
-    expect(RESTAURANTS.some((r) => r.signature.includes("황금올리브") || r.name.includes("BBQ"))).toBe(false);
+    expect(RESTAURANTS.some((r) => r.signature?.includes("황금올리브") || r.name.includes("BBQ"))).toBe(false);
   });
 
   it("메뉴 이름이 있으면 그 메뉴 하나, 종류만 말하면 해당 메뉴 전부를 찾는다", () => {
@@ -113,7 +113,7 @@ describe("식당 찾기", () => {
     const list = nearbyRestaurants("chinese");
     expect(list.length).toBeGreaterThan(0);
     expect(list.every((r) => r.food === "chinese")).toBe(true);
-    expect(list.map((r) => r.distanceKm)).toEqual([...list.map((r) => r.distanceKm)].sort((a, b) => a - b));
+    expect(list.map((r) => r.distanceKm)).toEqual([...list.map((r) => r.distanceKm)].sort((a, b) => a! - b!));
   });
 
   it("띄어쓰기가 달라도 목록에서 식당 이름을 찾는다", () => {

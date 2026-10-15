@@ -1,7 +1,7 @@
 // 주문 챗봇의 문장 해석 규칙과 주문서 모델. 가게·메뉴 목록은 서버와 같이 쓰는 server/catalog.json 에서 읽는다
 // (지금은 화면 확인용 가상 데이터이고, 실제 목록이 오면 그 파일만 바꾼다)
 import catalog from "../../../server/catalog.json";
-import { getMenu, getPopularity, getStoreSettings, storePausedUntil } from "../data/db";
+import { getMenu, getPopularity, getStoreSettings, STORES, storePausedUntil } from "../data/db";
 import { discountedPrice, specialItemId } from "./deals";
 
 export interface Store {
@@ -66,25 +66,32 @@ export interface FoodCategory {
   meals?: Meal[];
 }
 
+// 관리자가 사장님 계정을 만들며 직접 입력한 매장(source: "admin")은 거리·평점이 없고, 주소·대표 메뉴도 비어 있을 수 있다
 export interface Restaurant {
   id: string;
   name: string;
   food: FoodKey;
-  distanceKm: number;
-  rating: number;
-  signature: string;
+  distanceKm?: number;
+  rating?: number;
+  signature?: string;
   hours: string;
-  address: string;
+  address?: string;
+  source?: "admin";
 }
 
 // 카테고리 이름뿐 아니라 "짬뽕", "삼겹살" 같은 메뉴 이름으로 말해도 찾도록 키워드를 둔다
 export const FOODS: FoodCategory[] = catalog.foods as FoodCategory[];
 
-export const RESTAURANTS: Restaurant[] = catalog.restaurants as Restaurant[];
+// 매장 목록. 서버에서 받은 목록으로 내용이 바뀌는 배열이다 (data/db.ts 의 STORES)
+export const RESTAURANTS: Restaurant[] = STORES;
 
 // 음식 종류 중 근처에 가게가 있는 것만 (고르는 버튼·추천에 쓴다). 말로 한 음식은 FOODS 전체로 알아듣는다
-export const FOODS_ON_OFFER: FoodCategory[] = FOODS.filter((f) => RESTAURANTS.some((r) => r.food === f.key));
+export const foodsOnOffer = (): FoodCategory[] => FOODS.filter((f) => RESTAURANTS.some((r) => r.food === f.key));
 export const hasStoresFor = (food: FoodKey) => RESTAURANTS.some((r) => r.food === food);
+
+// 거리를 모르는 매장(관리자가 직접 만든 매장)은 가까운 순으로 늘어놓을 때 맨 뒤로
+export const distanceOf = (r: Restaurant) => r.distanceKm ?? Number.POSITIVE_INFINITY;
+export const byDistance = (a: Restaurant, b: Restaurant) => distanceOf(a) - distanceOf(b) || 0;
 
 export function matchFood(text: string): FoodCategory | undefined {
   const low = text.toLowerCase();
@@ -94,7 +101,7 @@ export function matchFood(text: string): FoodCategory | undefined {
 // 해당 음식을 다루는 식당을 가까운 순으로 (일시 중지 중인 곳은 추천하지 않는다)
 export function nearbyRestaurants(food: FoodKey): Restaurant[] {
   return RESTAURANTS.filter((r) => r.food === food && !storePausedUntil(r.id))
-    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .sort(byDistance)
     .map(withStoreSettings);
 }
 
@@ -120,7 +127,12 @@ export const findRestaurantById = (id: string | undefined): Restaurant | undefin
   return r && withStoreSettings(r);
 };
 
-export const km = (distanceKm: number) => `${distanceKm.toFixed(1)}km`;
+// 거리를 모르면 undefined (화면은 그 칸을 빼고 보여 준다)
+export function km(distanceKm: number): string;
+export function km(distanceKm: number | undefined): string | undefined;
+export function km(distanceKm: number | undefined) {
+  return distanceKm === undefined ? undefined : `${distanceKm.toFixed(1)}km`;
+}
 
 // 숫자·영문으로 끝나면 읽는 소리로 받침을 정한다: 0 영, 1 일, 3 삼, 6 육, 7 칠, 8 팔 / L 엘, M 엠, N 엔, R 알
 const ENDS_WITH_BATCHIM = new Set(["0", "1", "3", "6", "7", "8", "L", "M", "N", "R"]);
@@ -164,7 +176,8 @@ export interface DeliveryItem {
 
 // 판매 중인 배달 메뉴. 서버의 메뉴 목록을 쓰므로 사장님이 추가하거나 판매 중지하면 바로 바뀐다
 // (서버에서 받기 전에는 catalog.json 의 메뉴)
-export const deliveryMenu = (): DeliveryItem[] => getMenu().filter((d) => d.active !== false);
+// 판매 중인 배달 메뉴. 매장 목록에 아직 없는 매장의 메뉴는 뺀다 (새로 만든 매장은 메뉴와 매장 목록이 따로 도착할 수 있다)
+export const deliveryMenu = (): DeliveryItem[] => getMenu().filter((d) => d.active !== false && RESTAURANTS.some((r) => r.id === d.restaurantId));
 
 export const MAX_QTY = 10;
 
@@ -461,7 +474,7 @@ export function reservationDoneCard(r: Reservation, now = new Date()): InfoCard 
       { label: "식당", value: r.restaurant.name },
       { label: "일시", value: `${formatDate(r.date)} ${r.time}`, emphasis: true },
       { label: "인원", value: `${r.people}명` },
-      { label: "주소", value: r.restaurant.address },
+      ...filledRows([{ label: "주소", value: r.restaurant.address }]),
     ],
     note: "방문 10분 전까지 도착해 주세요.",
   };
@@ -491,10 +504,15 @@ export interface BotPrompt {
   menu?: DeliveryItem[];
 }
 
+// 음식 고르기. 버튼과 소리 안내는 지금 매장 목록(서버에서 받은 것)에 가게가 있는 음식만 쓰므로 읽을 때마다 새로 만든다
 export const FOOD_PROMPT: BotPrompt = {
   text: "오늘은 어떤 음식이 당기세요?\n말씀해 주시면 근처 맛집을 추천해 드릴게요.",
-  say: `오늘은 어떤 음식이 당기세요? ${FOODS_ON_OFFER.map((f) => f.label).join(", ")} 뭐든 좋아요. 말씀해 주시면 근처 맛집을 추천해 드릴게요!`,
-  choices: FOODS_ON_OFFER.map((f) => ({ label: f.label, value: f.label })),
+  get say() {
+    return `오늘은 어떤 음식이 당기세요? ${foodsOnOffer().map((f) => f.label).join(", ")} 뭐든 좋아요. 말씀해 주시면 근처 맛집을 추천해 드릴게요!`;
+  },
+  get choices() {
+    return foodsOnOffer().map((f) => ({ label: f.label, value: f.label }));
+  },
   placeholder: "먹고 싶은 음식을 입력하세요",
 };
 
@@ -565,6 +583,10 @@ export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 export const orderPriceLabel = (order: Order) => (order.discountPct ? `${won(order.price)} (${order.discountPct}% 할인)` : won(order.price));
 
 // 채팅의 주문서 카드에 들어갈 줄들. emphasis 는 파랗게 강조할 금액
+// 값이 비어 있는 줄은 뺀다 (관리자가 직접 만든 매장은 주소·대표 메뉴·거리가 없을 수 있다)
+export const filledRows = (rows: (Omit<OrderRow, "value"> & { value?: string })[]): OrderRow[] =>
+  rows.filter((r): r is OrderRow => !!r.value);
+
 export interface OrderRow {
   label: string;
   value: string;

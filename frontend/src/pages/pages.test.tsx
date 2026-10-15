@@ -500,6 +500,54 @@ describe("관리자 페이지", () => {
     await waitFor(() => expect(server.db.findUser("jangrakboss")).toBeNull());
   });
 
+  it("목록에 없는 매장은 직접 입력해 새 매장과 그 사장님 계정을 함께 만든다", async () => {
+    server.createAccount(admin);
+    await loginAs("adminuser");
+    open("#/admin");
+    fireEvent.click(await screen.findByRole("tab", { name: "매장·사장님" }));
+    fireEvent.click(screen.getByRole("tab", { name: "계정 만들기" }));
+    fill({ 아이디: "newstoreboss", 비밀번호: "password1" });
+    choose("매장", "새 매장 직접 입력");
+    // 매장 이름·음식 종류가 비어 있으면 보내지 않는다
+    await click("계정 만들기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("매장 이름을 적어 주세요");
+    fill({ "매장 이름": "하소 닭강정", "주소 (선택)": "제천시 하소동 1-2" });
+    await click("계정 만들기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("음식 종류를 골라 주세요");
+    choose("음식 종류", "치킨");
+    await click("계정 만들기");
+    expect(await screen.findByRole("status")).toHaveTextContent("newstoreboss 계정과 하소 닭강정 매장을 만들었어요");
+    const owner = server.db.findUser("newstoreboss")!;
+    expect(owner.name).toBe("하소 닭강정 사장님");
+    expect(server.db.storeById(owner.storeId!)).toMatchObject({ name: "하소 닭강정", food: "chicken", hours: "11:00 - 21:00", address: "제천시 하소동 1-2" });
+
+    // 같은 이름으로 또 만들면 서버가 거절한다
+    fill({ 아이디: "newstoreboss2", 비밀번호: "password1", "매장 이름": "하소닭강정" });
+    choose("음식 종류", "치킨");
+    await click("계정 만들기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("같은 이름의 매장이 이미 있어요");
+
+    // 매장 목록과 매장 고르기에 새 매장이 들어간다
+    fireEvent.click(screen.getByRole("tab", { name: "매장 목록" }));
+    expect(await screen.findByText("newstoreboss (하소 닭강정 사장님)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "계정 만들기" }));
+    choose("매장", "하소 닭강정");
+    expect(screen.queryByLabelText("매장 이름")).not.toBeInTheDocument();
+  });
+
+  it("관리자가 만든 매장의 사장님은 사장님 화면에서 자기 매장을 본다 (주소·대표 메뉴가 없으면 그 줄을 뺀다)", async () => {
+    const store = server.db.addStore({ name: "하소 닭강정", food: "chicken", hours: "12:00 - 22:00" });
+    server.createAccount({ username: "newstoreboss", name: "닭강정 사장", role: "owner", storeId: store.id });
+    await loginAs("newstoreboss");
+    open("#/owner");
+    expect(await screen.findByText("하소 닭강정 · 사장님")).toBeInTheDocument();
+    expect(screen.queryByText("매장 정보를 찾을 수 없어요")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "매장" }));
+    expect(await screen.findByText("매장 이름")).toBeInTheDocument();
+    expect(screen.queryByText("대표 메뉴", { selector: "dt" })).not.toBeInTheDocument();
+    expect(screen.queryByText("주소", { selector: "dt" })).not.toBeInTheDocument();
+  });
+
   it("통계 탭은 건수와 매출을, 사용자 탭은 가입한 고객님을 보여 준다", async () => {
     server.createAccount(admin);
     server.createAccount({ ...KIM, email: "kim@example.com" });

@@ -950,3 +950,59 @@ describe("매장 일시 중지: 미리 정해 두기", () => {
     await call("PATCH", "/api/stores/h1/settings", { pause: null }, owner);
   });
 });
+describe("관리자가 새 매장을 직접 입력해 사장님 계정 만들기", () => {
+  let admin;
+  before(async () => {
+    db.createUser({ username: "storeadmin1", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
+    admin = (await call("POST", "/api/auth/login", { username: "storeadmin1", password: "password1" })).body.token;
+  });
+  const newOwner = (username, newStore, extra = {}) => call("POST", "/api/owners", { username, password: "password1", newStore, ...extra }, admin);
+
+  it("새 매장을 만들고 그 매장 사장님 계정을 만든다. 매장 목록과 메뉴·주문·계좌에 그대로 쓰인다", async () => {
+    const made = await newOwner("newstore01", { name: "  하소   닭강정  ", food: "chicken", address: "제천시 하소동 1-2" });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    assert.equal(made.body.name, "하소 닭강정 사장님"); // 이름을 비우면 "매장 이름 사장님"
+    const storeId = made.body.storeId;
+    assert.match(storeId, /^s/);
+
+    const store = (await call("GET", "/api/stores")).body.find((s) => s.id === storeId);
+    assert.deepEqual(store, { id: storeId, name: "하소 닭강정", food: "chicken", hours: "11:00 - 21:00", address: "제천시 하소동 1-2", source: "admin" });
+    // 목록 파일의 매장도 그대로 나온다
+    assert.ok((await call("GET", "/api/stores")).body.some((s) => s.id === "h3" && !s.source));
+
+    const owner = (await call("POST", "/api/auth/login", { username: "newstore01", password: "password1" })).body.token;
+    const item = await call("POST", `/api/stores/${storeId}/menu`, { name: "순살 닭강정", price: 18000, unit: "마리" }, owner);
+    assert.equal(item.status, 200, JSON.stringify(item.body));
+    assert.ok(item.body.keywords.includes("치킨")); // 음식 종류 이름이 키워드로 들어간다
+    assert.ok((await call("GET", "/api/menu")).body.some((d) => d.id === item.body.id));
+    assert.equal((await call("PUT", `/api/stores/${storeId}/bank`, { bank: "국민은행", account: "123456-01-234567", holder: "김사장" }, owner)).status, 200);
+    const order = await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "순살 닭강정", qty: 1 } }, buyer);
+    assert.equal(order.status, 200, JSON.stringify(order.body));
+    assert.equal(order.body.order.store.name, "하소 닭강정");
+    const rsv = await call("POST", "/api/reservations", { restaurantId: storeId, restaurantName: "가짜 이름", date: "2026-12-01", time: "18:00", people: 2 });
+    assert.equal(rsv.body.restaurantName, "하소 닭강정"); // 매장 이름은 서버가 정한다
+    // 내보낸 목록에도 관리자가 만든 매장이 들어간다 (source 는 빼고)
+    assert.deepEqual(catalogWithMenu(db).restaurants.find((r) => r.id === storeId), { id: storeId, name: "하소 닭강정", food: "chicken", hours: "11:00 - 21:00", address: "제천시 하소동 1-2" });
+  });
+
+  it("매장 입력이 맞지 않으면 거절하고, 매장도 계정도 만들지 않는다", async () => {
+    const before = (await call("GET", "/api/stores")).body.length;
+    assert.match((await newOwner("newstore02", { name: "", food: "chicken" })).body.error, /매장 이름/);
+    assert.match((await newOwner("newstore02", { name: "새 가게", food: "nope" })).body.error, /음식 종류/);
+    assert.match((await newOwner("newstore02", { name: "새 가게", food: "korean", hours: "10:00 - 10:00" })).body.error, /같을 수 없어요/);
+    // 이미 있는 이름 (띄어쓰기·대소문자 차이도 같은 이름)
+    assert.match((await newOwner("newstore02", { name: "청전치킨공방", food: "chicken" })).body.error, /같은 이름의 매장/);
+    // 아이디가 이미 있으면 매장을 만들지 않는다
+    assert.match((await newOwner("newstore01", { name: "새 가게", food: "korean" })).body.error, /이미 있는 아이디/);
+    assert.match((await newOwner("bad", { name: "새 가게", food: "korean" })).body.error, /8~20자/);
+    assert.equal((await call("GET", "/api/stores")).body.length, before);
+    assert.equal(db.findUser("newstore02"), null);
+  });
+
+  it("관리자만 새 매장을 만들 수 있다", async () => {
+    const owner = (await call("POST", "/api/auth/login", { username: "newstore01", password: "password1" })).body.token;
+    assert.equal((await call("POST", "/api/owners", { username: "newstore03", password: "password1", newStore: { name: "몰래 가게", food: "korean" } }, owner)).status, 403);
+    assert.equal((await call("POST", "/api/owners", { username: "newstore03", password: "password1", newStore: { name: "몰래 가게", food: "korean" } })).status, 401);
+    assert.ok(!(await call("GET", "/api/stores")).body.some((s) => s.name === "몰래 가게"));
+  });
+});

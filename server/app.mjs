@@ -19,6 +19,7 @@
 //   GET    /api/reservations           (주문과 같은 범위)
 //   POST   /api/reservations           { restaurantId, restaurantName, date, time, people }
 //   PATCH  /api/reservations/:id       { status }
+//   GET    /api/stores                 누구나: 매장 목록 (목록 파일 + 관리자가 만든 매장)
 //   GET    /api/stores/settings        누구나 (챗봇이 영업시간·품절을 본다)
 //   GET    /api/menu                   누구나: 배달 메뉴 전체 (판매 중지는 active: false)
 //   POST   /api/stores/:id/menu        { name, price, unit, keywords? }  그 매장 사장님(승인)·관리자: 메뉴 추가, 바로 판매
@@ -34,7 +35,8 @@
 //   DELETE /api/stores/:id/bank        (지우면 배달 주문을 받지 않는다)
 //   GET    /api/bank                   관리자 → { 매장 id: 계좌 }  등록된 매장 계좌 전체
 //   GET    /api/owners                 관리자
-//   POST   /api/owners                 { username, password, name?, storeId }   관리자
+//   POST   /api/owners                 { username, password, name?, storeId | newStore }   관리자
+//                                      newStore: { name, food, hours?, address?, signature? } 새 매장을 만들고 그 매장 사장님으로
 //   POST   /api/owners/:username/approve  관리자: 스스로 가입한 사장님 승인 (승인 전에는 매장 주문·예약·설정에 접근할 수 없다)
 //   DELETE /api/owners/:username       관리자 (승인 거절도 이것으로)
 //   GET    /api/users                  관리자 (가입한 고객님)
@@ -64,11 +66,14 @@ import {
   PAUSE_MAX_MS,
   pauseEndText,
   withTopic,
-  STORE_IDS,
+  allStores,
+  cleanNewStore,
+  findStore,
+  sameStoreName,
+  hasStore,
   discountedPrice,
-  foodLabelOf,
+  foodLabel,
   listedMenu,
-  restaurantName,
   todayKST,
 } from "./stores.mjs";
 import { isValidEmail, normalizeEmail } from "./verification.mjs";
@@ -152,6 +157,10 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     }
     return { customer: user.username };
   }
+  // 매장: 목록 파일(catalog.json)의 매장 + 관리자가 사장님 계정을 만들며 직접 입력한 매장(DB)
+  const hasStoreId = (id) => typeof id === "string" && hasStore(db, id);
+  const storeName = (id) => findStore(db, id)?.name;
+
   // 그 매장의 주문·예약·설정을 바꿀 수 있는지: 관리자, 또는 승인된 그 매장 사장님
   // 사장님 계정이 없어지면(탈퇴·관리자 삭제) 그 매장에 다른 사장님이 남지 않았을 때 매장 입금 계좌(예금주 이름이 든 사장님 정보)도 지운다.
   // 그 뒤 그 매장은 새 계좌가 등록될 때까지 배달 주문을 받지 않는다
@@ -199,7 +208,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     const error = usernameError(username) ?? passwordError(password) ?? (!name ? "이름을 적어 주세요." : null);
     if (error) throw bad(error);
     if (db.findUser(username)) throw bad("이미 있는 아이디예요.");
-    if (role === "owner" && !STORE_IDS.has(storeId)) throw bad("매장을 골라 주세요.");
+    if (role === "owner" && !hasStoreId(storeId)) throw bad("매장을 골라 주세요.");
     if (email && db.emailTaken(email)) throw bad("이미 가입된 이메일이에요.");
     return { role, username, password, name, email, storeId: role === "owner" ? storeId : undefined };
   }
@@ -338,9 +347,9 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       const o = body.order ?? {};
       const qty = Number(o.qty);
       if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) throw bad("주문 내용이 맞지 않아요.");
-      if (!STORE_IDS.has(o.storeId)) throw bad("매장을 알 수 없어요.");
+      if (!hasStoreId(o.storeId)) throw bad("매장을 알 수 없어요.");
       const pausedUntil = storePaused(o.storeId);
-      if (pausedUntil) throw bad(`${withTopic(restaurantName(o.storeId))} 지금 잠시 주문을 받지 않아요. ${pauseEndText(pausedUntil, now())}부터 다시 받아요.`);
+      if (pausedUntil) throw bad(`${withTopic(storeName(o.storeId))} 지금 잠시 주문을 받지 않아요. ${pauseEndText(pausedUntil, now())}부터 다시 받아요.`);
       // 메뉴·단위·금액은 화면이 보낸 값을 믿지 않고 목록(catalog.json)과 사장님 설정(가격·품절)으로 다시 정한다
       const item = activeMenuItem(o.storeId, str(o.item));
       if (!item) throw bad(db.menuItemByName(o.storeId, str(o.item)) ? `${str(o.item)}은(는) 지금 판매하지 않아요.` : "메뉴를 알 수 없어요.");
@@ -356,7 +365,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       const phone = normalizePhone(o.phone);
       if (!phone) throw bad("연락받을 전화번호를 다시 확인해 주세요.");
       const order = {
-        store: { name: restaurantName(o.storeId), ...(o.store?.distance ? { distance: str(o.store.distance, 20) } : {}) },
+        store: { name: storeName(o.storeId), ...(o.store?.distance ? { distance: str(o.store.distance, 20) } : {}) },
         storeId: o.storeId,
         item: item.name,
         qty,
@@ -369,7 +378,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       };
       // 결제는 계좌이체: 그 매장의 입금 계좌를 주문에 적어 두고, 사장님이 입금을 확인할 때까지 "입금 대기". 계좌가 없는 매장은 주문을 받지 않는다
       const bank = db.bankAccount(o.storeId);
-      if (!bank) throw bad(`${withTopic(restaurantName(o.storeId))} 아직 입금 계좌를 등록하지 않아 주문을 받을 수 없어요.`);
+      if (!bank) throw bad(`${withTopic(storeName(o.storeId))} 아직 입금 계좌를 등록하지 않아 주문을 받을 수 없어요.`);
       // 입금 기한은 주문 시각 기준: 기한이 지났는지도 같은 주문 시각(created_at)으로 본다
       const at = now();
       Object.assign(order, { bank, depositor: user.name, payBy: at + PAY_WINDOW_MS });
@@ -404,7 +413,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     ["GET", "/api/reservations", ({ user }) => db.listReservations(recordScope(user))],
     ["POST", "/api/reservations", ({ body, user }) => {
       const people = Number(body.people);
-      if (!STORE_IDS.has(body.restaurantId)) throw bad("식당을 알 수 없어요.");
+      if (!hasStoreId(body.restaurantId)) throw bad("식당을 알 수 없어요.");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) || !/^\d{2}:\d{2}$/.test(String(body.time))) throw bad("날짜·시간이 맞지 않아요.");
       if (!Number.isInteger(people) || people < 1 || people > MAX_PEOPLE) throw bad("인원이 맞지 않아요.");
       // 일시 중지 중에는 오늘 예약만 막는다 (내일 이후 예약은 그대로 받는다)
@@ -414,7 +423,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
         customer: who.username,
         customerName: who.name,
         restaurantId: body.restaurantId,
-        restaurantName: str(body.restaurantName),
+        restaurantName: storeName(body.restaurantId) ?? str(body.restaurantName),
         date: body.date,
         time: body.time,
         people,
@@ -433,6 +442,8 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     }],
 
     // ---- 매장 설정 ----
+    // 매장 목록: 목록 파일의 매장 + 관리자가 직접 만든 매장 (source: "admin")
+    ["GET", "/api/stores", () => allStores(db)],
     ["GET", "/api/stores/settings", () => Object.fromEntries(Object.entries(db.allStoreSettings()).map(([id, s]) => [id, liveSettings(s)]))],
     // 챗봇 추천용: 최근 30일 메뉴별 주문 수(배달 메뉴 id 로)와 식당별 예약 수. 개인 정보 없이 숫자만
     ["GET", "/api/stats/popular", () => {
@@ -447,19 +458,19 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     }],
     // ---- 입금 계좌 (결제는 계좌이체만) ----
     ["GET", "/api/stores/:id/bank", ({ params, user }) => {
-      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      if (!hasStoreId(params.id)) throw new HttpError(404, "없는 매장이에요.");
       assertManages(user, params.id);
       return { account: db.bankAccount(params.id) };
     }],
     ["PUT", "/api/stores/:id/bank", ({ params, body, user }) => {
-      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      if (!hasStoreId(params.id)) throw new HttpError(404, "없는 매장이에요.");
       assertManages(user, params.id);
       const account = cleanBankAccount(body);
       if (account.error) throw bad(account.error);
       return { account: db.setBankAccount(params.id, account) };
     }],
     ["DELETE", "/api/stores/:id/bank", ({ params, user }) => {
-      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      if (!hasStoreId(params.id)) throw new HttpError(404, "없는 매장이에요.");
       assertManages(user, params.id);
       db.setBankAccount(params.id, null);
       return { account: null };
@@ -473,7 +484,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     ["GET", "/api/menu", () => listedMenu(db)],
     // 사장님이 메뉴 추가: 바로 판매된다. 그 매장의 음식 종류 이름("치킨")은 자동으로 키워드에 넣어 챗봇이 찾을 수 있게
     ["POST", "/api/stores/:id/menu", ({ params, body, user }) => {
-      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      if (!hasStoreId(params.id)) throw new HttpError(404, "없는 매장이에요.");
       assertManages(user, params.id);
       const name = str(body.name, MENU_NAME_MAX + 1);
       if (!name || name.length > MENU_NAME_MAX) throw bad(`메뉴 이름을 1~${MENU_NAME_MAX}자로 적어 주세요.`);
@@ -486,12 +497,12 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       if (!unit || unit.length > MENU_UNIT_MAX) throw bad("단위(마리·판·인분 등)를 골라 주세요.");
       const given = Array.isArray(body.keywords) ? body.keywords : [];
       const squash = (s) => String(s).replace(/\s+/g, "").toLowerCase();
-      const keywords = [...new Set([...given.map(squash), squash(foodLabelOf(params.id) ?? "")])].filter((k) => k && k.length <= 15).slice(0, MENU_KEYWORDS_MAX);
+      const keywords = [...new Set([...given.map(squash), squash(foodLabel(findStore(db, params.id)?.food) ?? "")])].filter((k) => k && k.length <= 15).slice(0, MENU_KEYWORDS_MAX);
       return db.addMenuItem({ restaurantId: params.id, name, price, unit, keywords });
     }],
     // 판매 중지·다시 판매. 지운 것처럼 챗봇과 주문에서 빠지지만, 지난 주문 기록은 그대로 남는다
     ["PATCH", "/api/stores/:id/menu/:itemId", ({ params, body, user }) => {
-      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      if (!hasStoreId(params.id)) throw new HttpError(404, "없는 매장이에요.");
       assertManages(user, params.id);
       const item = db.menuItem(params.itemId);
       if (!item || item.restaurantId !== params.id) throw new HttpError(404, "없는 메뉴예요.");
@@ -505,7 +516,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
 
     ["PATCH", "/api/stores/:id/settings", ({ params, body, user }) => {
       if (!user) throw needLogin();
-      if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");
+      if (!hasStoreId(params.id)) throw new HttpError(404, "없는 매장이에요.");
       assertManages(user, params.id);
       const patch = {};
       if (body.hours !== undefined) {
@@ -567,7 +578,17 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     }],
     ["POST", "/api/owners", ({ body, user }) => {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();
-      const storeId = str(body.storeId, 10);
+      // 매장은 있는 매장(storeId)을 고르거나, 새 매장(newStore: 이름·음식 종류·영업시간·주소·대표 메뉴)을 직접 입력한다
+      if (body.newStore) {
+        const store = cleanNewStore(body.newStore);
+        if (store.error) throw bad(store.error);
+        if (allStores(db).some((s) => sameStoreName(s.name, store.name))) throw bad("같은 이름의 매장이 이미 있어요. 목록에서 골라 주세요.");
+        // 계정 입력을 먼저 검사해서, 아이디가 겹치는 등으로 계정을 못 만들면 매장도 만들지 않는다
+        checkAccount({ role: "user", username: body.username, password: body.password, name: str(body.name, 40) || "사장님" });
+        const created = db.addStore(store);
+        return createAccount({ role: "owner", username: body.username, password: body.password, name: str(body.name, 40) || `${created.name} 사장님`, storeId: created.id });
+      }
+      const storeId = str(body.storeId, 40);
       return createAccount({ role: "owner", username: body.username, password: body.password, name: str(body.name, 40) || "사장님", storeId });
     }],
     ["POST", "/api/owners/:username/approve", ({ params, user }) => {

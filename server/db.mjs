@@ -63,6 +63,17 @@ const SCHEMA = `
     created_at    INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS menu_store ON menu_items(restaurant_id);
+  -- 관리자가 사장님 계정을 만들며 직접 입력한 매장. 목록 파일(catalog.json)의 매장과 합쳐서 쓴다.
+  -- 목록 파일의 매장은 여기에 넣지 않는다 (목록 파일에서 뺀 매장이 DB 에 남아 되살아나지 않게)
+  CREATE TABLE IF NOT EXISTS stores (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    food       TEXT NOT NULL,
+    hours      TEXT NOT NULL,
+    address    TEXT,
+    signature  TEXT,
+    created_at INTEGER NOT NULL
+  );
   -- 매장 입금 계좌 (결제는 계좌이체만). 사장님이 등록해야 그 매장이 배달 주문을 받는다
   CREATE TABLE IF NOT EXISTS bank_accounts (
     store_id   TEXT PRIMARY KEY,
@@ -81,6 +92,18 @@ const toSettings = (r) => ({
   ...(r.paused_from ? { pausedFrom: r.paused_from } : {}),
   ...(r.paused_until ? { pausedUntil: r.paused_until } : {}),
 });
+
+// 관리자가 만든 매장을 목록 파일(catalog.json)의 restaurants 모양으로. 비어 있는 칸은 빼고, source 로 구분한다
+const toStore = (r) =>
+  r && {
+    id: r.id,
+    name: r.name,
+    food: r.food,
+    hours: r.hours,
+    ...(r.address ? { address: r.address } : {}),
+    ...(r.signature ? { signature: r.signature } : {}),
+    source: "admin",
+  };
 
 const toMenuItem = (r) =>
   r && {
@@ -183,6 +206,9 @@ export function openDb(path) {
     insertMenu: q("INSERT INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'owner', ?)"),
     listMenu: q("SELECT * FROM menu_items ORDER BY rowid"),
     menuById: q("SELECT * FROM menu_items WHERE id = ?"),
+    listStores: q("SELECT * FROM stores ORDER BY created_at, rowid"),
+    storeById: q("SELECT * FROM stores WHERE id = ?"),
+    insertStore: q("INSERT INTO stores (id, name, food, hours, address, signature, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
     menuByName: q("SELECT * FROM menu_items WHERE restaurant_id = ? AND name = ? ORDER BY active DESC, rowid DESC LIMIT 1"),
     updateMenu: q("UPDATE menu_items SET name = ?, unit = ?, keywords_json = ?, active = ? WHERE id = ?"),
     anonymizeOrders: q("UPDATE orders SET customer = ?, customer_name = ?, receipt = NULL WHERE customer = ?"),
@@ -277,6 +303,14 @@ export function openDb(path) {
     menuItem: (id) => toMenuItem(stmts.menuById.get(id)) ?? null,
     // 그 매장의 그 이름 메뉴 (같은 이름이 있으면 판매 중인 것, 그다음 최근 것)
     menuItemByName: (storeId, name) => toMenuItem(stmts.menuByName.get(storeId, name)) ?? null,
+    // ---- 관리자가 직접 만든 매장 (목록 파일의 매장과 같은 모양. 거리·평점은 없다) ----
+    listStores: () => stmts.listStores.all().map(toStore),
+    storeById: (id) => toStore(stmts.storeById.get(id)) ?? null,
+    addStore({ name, food, hours, address, signature }) {
+      const id = newId("s");
+      stmts.insertStore.run(id, name, food, hours, address ?? null, signature ?? null, Date.now());
+      return toStore(stmts.storeById.get(id));
+    },
     addMenuItem({ restaurantId, name, price, unit, keywords }) {
       const id = newId("m");
       stmts.insertMenu.run(id, restaurantId, name, price, unit, JSON.stringify(keywords), Date.now());

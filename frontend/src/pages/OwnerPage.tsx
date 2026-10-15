@@ -103,9 +103,12 @@ function PendingApproval({ storeName }: { storeName: string }) {
 export function OwnerPage() {
   const session = useSession()!;
   const db = useDb();
-  // 매장 목록이 바뀌어 내 매장이 사라졌으면 빈 매장 정보로 안내만 보여 준다 (아래에서 처리)
-  const store = findRestaurantById(session.storeId) ?? { id: session.storeId ?? "", name: "알 수 없는 매장", hours: "", address: "", signature: "", food: "", distanceKm: 0, rating: 0 };
-  const storeMissing = !findRestaurantById(session.storeId);
+  // 매장 목록이 바뀌어 내 매장이 사라졌으면 빈 매장 정보로 안내만 보여 준다 (아래에서 처리).
+  // 관리자가 직접 만든 매장은 서버에서 매장 목록을 받아 온 뒤에 알 수 있으므로, 그 전에는 불러오는 중으로 본다
+  const found = findRestaurantById(session.storeId);
+  const store = found ?? { id: session.storeId ?? "", name: "알 수 없는 매장", hours: "", food: "" };
+  const storeLoading = !found && !db.storesLoaded;
+  const storeMissing = !found && db.storesLoaded;
   const orders = db.orders.filter((o) => o.storeId === store.id);
   const reservations = db.reservations.filter((r) => r.restaurantId === store.id);
   const pending = orders.filter(needsAction).length;
@@ -115,7 +118,7 @@ export function OwnerPage() {
   // 입금 계좌: 없으면 배달 주문을 받지 못하므로 매장 탭이 아닌 화면에서도 위에 띠로 알린다
   const [bank, setBank] = useState<StoreBank | null>(null);
   const [bankError, setBankError] = useState<string | null>(null);
-  const canLoadBank = !storeMissing && session.approved !== false;
+  const canLoadBank = !!found && session.approved !== false;
   useEffect(() => {
     if (!canLoadBank) return;
     let alive = true;
@@ -144,6 +147,15 @@ export function OwnerPage() {
     setStorePause(store.id, null).catch((err: unknown) => setBannerError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
   }
 
+  if (storeLoading) {
+    return (
+      <DashLayout title="사장님">
+        <section className="dash-section">
+          <p className="muted">매장 정보를 불러오는 중이에요.</p>
+        </section>
+      </DashLayout>
+    );
+  }
   if (storeMissing) {
     return (
       <DashLayout title="사장님">
@@ -762,14 +774,18 @@ function StoreTab({ store, bank, bankError, onBankChange }: BankProps & { store:
             <dt>매장 이름</dt>
             <dd>{store.name}</dd>
           </div>
-          <div>
-            <dt>주소</dt>
-            <dd>{store.address}</dd>
-          </div>
-          <div>
-            <dt>대표 메뉴</dt>
-            <dd>{store.signature}</dd>
-          </div>
+          {store.address && (
+            <div>
+              <dt>주소</dt>
+              <dd>{store.address}</dd>
+            </div>
+          )}
+          {store.signature && (
+            <div>
+              <dt>대표 메뉴</dt>
+              <dd>{store.signature}</dd>
+            </div>
+          )}
         </dl>
       </section>
     </>

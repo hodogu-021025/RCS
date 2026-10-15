@@ -27,7 +27,8 @@ import {
   restaurantById,
   FOOD_PROMPT,
   FOODS,
-  FOODS_ON_OFFER,
+  foodsOnOffer,
+  filledRows,
   hasStoresFor,
   MAX_DAYS_AHEAD,
   MAX_PEOPLE,
@@ -266,7 +267,7 @@ interface PickCard {
   badge?: string; // 이름 옆 작은 태그 (오늘의 메뉴)
   tags: string[];
   info: string[];
-  pill: string;
+  pill?: string; // 오른쪽 작은 글자 (거리·가격). 거리를 모르는 매장은 없다
 }
 
 const restaurantCard = (r: Restaurant, now: Date): PickCard => ({
@@ -274,7 +275,8 @@ const restaurantCard = (r: Restaurant, now: Date): PickCard => ({
   name: r.name,
   tags: [],
   // 영업 상태는 예약할 때 참고용. 일시 중지한 곳은 목록에 아예 나오지 않는다
-  info: [`대표 메뉴 ${r.signature}`, `평점 ${r.rating.toFixed(1)}`, openStateText(r, now)],
+  // 관리자가 직접 만든 매장은 대표 메뉴·평점·거리가 없을 수 있어 있는 것만 적는다
+  info: [r.signature && `대표 메뉴 ${r.signature}`, r.rating !== undefined && `평점 ${r.rating.toFixed(1)}`, openStateText(r, now)].filter((x): x is string => !!x),
   pill: km(r.distanceKm),
 });
 
@@ -285,7 +287,7 @@ function menuCard(d: DeliveryItem): PickCard {
   return { id: d.id, name: d.name, badge: menuBadge(d), tags: deal ? [deal] : [], info: [restaurantById(d.restaurantId).name], pill: won(d.price) };
 }
 
-const pickCardRow = (c: PickCard): OrderRow => ({ label: c.name, badge: c.badge, value: [c.pill, ...c.tags, ...c.info].join(" · ") });
+const pickCardRow = (c: PickCard): OrderRow => ({ label: c.name, badge: c.badge, value: [c.pill, ...c.tags, ...c.info].filter(Boolean).join(" · ") });
 
 // 카드 목록. 버튼의 이름은 식당·메뉴 이름이고, 설명·알약은 읽기 프로그램에 덧붙는 설명으로 준다
 function PickCards({ cards, selected, disabled, onPick }: { cards: PickCard[]; selected?: string; disabled: boolean; onPick: (c: PickCard) => void }) {
@@ -302,7 +304,7 @@ function PickCards({ cards, selected, disabled, onPick }: { cards: PickCard[]; s
             disabled={disabled}
             onClick={() => onPick(c)}
             aria-labelledby={id}
-            aria-describedby={`${c.badge ? `${id}-badge ` : ""}${id}-info ${id}-pill`}
+            aria-describedby={`${c.badge ? `${id}-badge ` : ""}${id}-info${c.pill ? ` ${id}-pill` : ""}`}
           >
             <span className="place-main">
               <span className="place-name">
@@ -323,9 +325,11 @@ function PickCards({ cards, selected, disabled, onPick }: { cards: PickCard[]; s
                 {c.info.join(" · ")}
               </small>
             </span>
-            <span className="place-distance" id={`${id}-pill`}>
-              {c.pill}
-            </span>
+            {c.pill && (
+              <span className="place-distance" id={`${id}-pill`}>
+                {c.pill}
+              </span>
+            )}
           </button>
         );
       })}
@@ -356,13 +360,13 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
       return {
         key,
         messageId,
-        rows: [
+        rows: filledRows([
           { label: "식당", value: r.restaurant.name },
           { label: "날짜", value: formatDate(r.date) },
           { label: "시간", value: r.time, emphasis: true },
           { label: "인원", value: `${r.people}명` },
           { label: "주소", value: r.restaurant.address },
-        ],
+        ]),
       };
     }
     case "restaurantPicked": {
@@ -370,13 +374,13 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
       return {
         key,
         messageId,
-        rows: [
+        rows: filledRows([
           { label: "식당", value: r.name },
           { label: "거리", value: km(r.distanceKm) },
           { label: "대표 메뉴", value: r.signature },
           { label: "영업시간", value: r.hours },
           { label: "주소", value: r.address },
-        ],
+        ]),
       };
     }
     case "info":
@@ -1235,7 +1239,7 @@ export function OrderChatbot() {
       // "아무거나", "추천해줘": 지금 시간대에 어울리는 음식의 근처 맛집을 권한다
       if (detectIntent(text) === "hungry") {
         const meal = mealOf(new Date());
-        const pick = foodsForMeal(meal)[0] ?? FOODS_ON_OFFER[0] ?? FOODS[0];
+        const pick = foodsForMeal(meal)[0] ?? foodsOnOffer()[0] ?? FOODS[0];
         setRsvSlots((prev) => ({ ...prev, ...slots }));
         showRestaurants(pick.label, nearbyRestaurants(pick.key), { lead: [botText(`그럼 ${MEAL_WORD[meal]}으로 ${pick.label} 어떠세요?`)] });
         return;

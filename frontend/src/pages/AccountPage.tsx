@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { updateContact, useSession, withdraw } from "../auth/auth";
 import { ADDRESS_MAX, hasResume } from "../components/delivery";
 import { findRestaurantById } from "../components/orderChatKnowledge";
+import { useDb } from "../data/db";
 import { DashLayout } from "./DashLayout";
 import { PasswordField } from "./PasswordField";
 import { PhoneField } from "./PhoneField";
@@ -96,6 +97,8 @@ function ContactSection() {
 // 계정 관리 (#/account, 고객님·사장님): 내 계정 정보, 연락처·배달지, 회원 탈퇴
 export function AccountPage() {
   const session = useSession()!;
+  // 사장님 매장 이름: 관리자가 직접 만든 매장은 서버에서 매장 목록을 받아 와야 안다
+  const { storesLoaded } = useDb(["settings"]);
   const [password, setPassword] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +134,7 @@ export function AccountPage() {
           {owner && session.storeId && (
             <div>
               <dt>매장</dt>
-              <dd>{findRestaurantById(session.storeId)?.name ?? "알 수 없는 매장"}</dd>
+              <dd>{findRestaurantById(session.storeId)?.name ?? (storesLoaded ? "알 수 없는 매장" : "불러오는 중")}</dd>
             </div>
           )}
         </dl>
