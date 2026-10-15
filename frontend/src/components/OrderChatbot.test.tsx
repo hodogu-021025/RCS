@@ -206,15 +206,19 @@ describe("OrderChatbot", () => {
     fireEvent.click(within(menu as HTMLElement).getByRole("button", { name: "식당" }));
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     wait(700);
-    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 이런 식당 어떠세요\?/)).toBeInTheDocument();
   });
 
-  it("식당: 음식 선택지를 버튼으로 보여 주고, 누르면 근처 식당 목록이 나온다", () => {
+  it("식당: 배달처럼 추천 식당 카드를 바로 보여 주고, 아래 음식 종류 버튼을 누르면 그 음식 맛집 목록이 나온다", () => {
     renderChat();
     fireEvent.click(screen.getByRole("button", { name: "메뉴" }));
     fireEvent.click(screen.getByRole("button", { name: "식당" }));
     wait(700);
-    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 이런 식당 어떠세요\?/)).toBeInTheDocument();
+    // 추천 식당 4곳이 카드로, 그 아래 음식 종류 버튼과 직접 입력
+    const first = screen.getByText(/오늘은 이런 식당 어떠세요\?/).closest(".bubble") as HTMLElement;
+    expect(first.querySelectorAll(".places button")).toHaveLength(4);
+    expect(within(first).getByRole("button", { name: "직접 입력" })).toBeEnabled();
 
     const korean = screen.getByRole("button", { name: "한식" });
     fireEvent.click(korean);
@@ -222,7 +226,8 @@ describe("OrderChatbot", () => {
     expect(screen.getByRole("button", { name: "중식" })).toBeDisabled();
     wait(900);
     expect(screen.getByText(/근처 한식 맛집을 추천해요!/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /장락 할매국밥/ })).toBeEnabled();
+    // 장락 할매국밥은 첫 추천과 한식 목록 둘 다에 있으므로 마지막(한식) 목록의 카드를 본다
+    expect(screen.getAllByRole("button", { name: /장락 할매국밥/ }).at(-1)).toBeEnabled();
   });
 
   it("선택지가 떠 있으면 입력창이 접히고, 직접 입력을 누르면 열린다", () => {
@@ -272,7 +277,7 @@ describe("OrderChatbot", () => {
     wait(700);
 
     // 날짜: 오늘·내일·모레 버튼
-    expect(screen.getByText(/장락반점 예약을 도와드릴게요/)).toBeInTheDocument();
+    expect(screen.getByText(/장락반점을 선택했어요/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "오늘 (10/1)" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "내일 (10/2)" }));
     wait(700);
@@ -427,7 +432,7 @@ describe("OrderChatbot", () => {
 
     send("근처 식당 예약할래"); // 배달 메뉴를 보는 중에도 식당으로 넘어간다
     wait(700);
-    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 이런 식당 어떠세요\?/)).toBeInTheDocument();
 
     send("배달로 할게"); // 식당 단계에서도 배달로 넘어간다
     wait(700);
@@ -541,7 +546,7 @@ describe("OrderChatbot", () => {
     fireEvent.keyDown(place, { key: "Enter" });
     wait(700);
     wait(10_000);
-    expect(caption()).toMatch(/장락 옛날통닭 예약을 도와드릴게요/);
+    expect(caption()).toMatch(/장락 옛날통닭을 선택했어요/);
     // 지난 표의 줄은 더 이상 누를 수 없다 (지금 답할 질문의 표만)
     expect(document.querySelectorAll(".caption-row.pickable")).toHaveLength(0);
   });
@@ -568,7 +573,7 @@ describe("OrderChatbot", () => {
     wait(10_000);
     // 메뉴 추천은 이름을 자막에 늘어놓지 않고 짧은 안내만 적은 뒤, 식당 추천과 같은 모양의 표로 메뉴·가격·가게를 보여 준다
     // (사용자가 한 말은 자막에 없다)
-    expect(caption()).toBe("오늘은 이런 메뉴 어떠세요? 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.");
+    expect(caption()).toBe("오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요."); // 문장마다 줄을 바꾼다
     const menuRows = [...document.querySelectorAll(".caption-card .caption-row")].map((r) => r.textContent);
     expect(menuRows[0]).toBe("옛날통닭18,000원 · 장락 옛날통닭");
     expect(menuRows).toHaveLength(4);
@@ -594,7 +599,7 @@ describe("OrderChatbot", () => {
     send("식당");
     wait(700);
 
-    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 이런 식당 어떠세요\?/)).toBeInTheDocument();
     expect(screen.queryByText(/어떤 걸로 결제하시겠어요/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });
@@ -713,7 +718,7 @@ describe("음성", () => {
     renderChat();
     speakInto("식당이요");
     wait(700);
-    expect(screen.getByText(/오늘은 어떤 음식이 당기세요\?/)).toBeInTheDocument();
+    expect(screen.getByText(/오늘은 이런 식당 어떠세요\?/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Say 전송" }).closest("form")).toHaveAttribute("inert");
 
     speakInto("한식");
@@ -722,7 +727,7 @@ describe("음성", () => {
 
     speakInto("장락 할매국밥");
     wait(700);
-    expect(screen.getByText(/장락 할매국밥 예약을 도와드릴게요/)).toBeInTheDocument();
+    expect(screen.getByText(/장락 할매국밥을 선택했어요/)).toBeInTheDocument();
   });
 
   it("결제 화면이 떠 있을 때 '결제'라고 말하면 결제가 진행되고, '취소'는 닫는다", () => {

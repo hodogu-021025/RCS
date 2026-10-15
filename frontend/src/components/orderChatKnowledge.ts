@@ -387,10 +387,12 @@ export function datePrompt(restaurant: Restaurant, now: Date, lead?: string): Bo
     const d = addDays(today, i);
     return isBookableDate(restaurant, d, now) ? [{ label: `${label} (${d.getMonth() + 1}/${d.getDate()})`, value: label }] : [];
   });
-  const head = lead ?? `${restaurant.name} 예약을 도와드릴게요.`;
+  // 바로 앞에 "○○을 선택했어요" 카드가 오므로 가게 이름을 또 말하지 않는다
+  const head = lead ?? "예약을 도와드릴게요.";
   return {
     text: `${head}\n언제 방문하실 건가요?`,
-    say: `${head} 언제 방문하실 건가요?${choices[0] ? ` ${choices[0].value}도 예약할 수 있어요.` : ""} 편한 날짜를 말씀해 주세요.`,
+    // "편한 날짜를 말씀해 주세요"는 "언제 방문하실 건가요?"와 같은 뜻이라 붙이지 않는다 (자막이 길어진다)
+    say: `${head} 언제 방문하실 건가요?${choices[0] ? ` ${choices[0].value}도 예약할 수 있어요.` : ""}`,
     choices,
     picker: "date",
   };

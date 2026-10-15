@@ -99,11 +99,11 @@ const BENCHMARK: [string, RegExp][] = [
   ["치킨 두마리", /이런 메뉴를 추천해요/],
   ["간장치킨 2마리 시켜줘", /^간장치킨 2마리$/],
   ["배달", /오늘은 이런 메뉴 어떠세요/],
-  ["식당", /오늘은 어떤 음식이 당기세요/],
+  ["식당", /오늘은 이런 식당 어떠세요/],
   ["한식 먹고 싶어", /근처 한식 맛집을 추천해요/],
   ["피자 주문할래", /몇 판 주문할까요/],
   ["떡볶이", /몇 인분 주문할까요/],
-  ["근처 식당 예약할래", /오늘은 어떤 음식이 당기세요/],
+  ["근처 식당 예약할래", /오늘은 이런 식당 어떠세요/],
 ];
 
 describe("처음 점검한 20문장", () => {
@@ -147,7 +147,7 @@ describe("1. 모르겠어요 대신 기능으로", () => {
     await say("할머니국밥 예약");
     expect(await find(/혹시 장락 할매국밥을 찾으세요/)).toBeTruthy();
     await click("장락 할매국밥 예약");
-    expect(await find(/장락 할매국밥 예약을 도와드릴게요/)).toBeTruthy();
+    expect(await find(/장락 할매국밥을 선택했어요/)).toBeTruthy();
   });
 });
 
@@ -194,7 +194,7 @@ describe("3. 안 되는 것 대신 할 수 있는 것", () => {
     await say("짜장면 배달해줘");
     expect(await find(/짜장면은 아직 배달이 안 돼요/)).toBeTruthy();
     await click(/장락반점/);
-    expect(await find(/장락반점 예약을 도와드릴게요/)).toBeTruthy();
+    expect(await find(/장락반점을 선택했어요/)).toBeTruthy();
   });
 
   it("품절 메뉴는 비슷한 메뉴를 권한다", async () => {
@@ -278,7 +278,7 @@ describe("5. 주문한 뒤의 질문", () => {
     expect(inCard("11:00 - 21:00 · 영업 중")).toBe(true);
     expect(inCard("제천시 장락동 30-7")).toBe(true);
     await click("예약하기");
-    expect(await find(/장락반점 예약을 도와드릴게요/)).toBeTruthy();
+    expect(await find(/장락반점을 선택했어요/)).toBeTruthy();
   });
 
   it("어느 가게인지 말하지 않으면 목록에서 고르게 한다", async () => {
@@ -459,7 +459,7 @@ describe("점검에서 찾은 문제", () => {
     expect(await find(/근처 치킨 맛집을 추천해요/)).toBeTruthy();
     expect(screen.queryByText(/몇 마리 주문할까요/)).not.toBeInTheDocument();
     await click(/장락 옛날통닭/);
-    expect(await find(/장락 옛날통닭 예약을 도와드릴게요/)).toBeTruthy();
+    expect(await find(/장락 옛날통닭을 선택했어요/)).toBeTruthy();
   });
 
   it("로그인하지 않은 손님도 메뉴 추천 뒤 '치킨집 예약'은 로그인 안내 없이 식당 예약으로 간다", async () => {
@@ -543,7 +543,7 @@ describe("6. 앞에서 한 말 기억하기·고치기", () => {
     await say("장락반점 어디에 있어?");
     await find(/주소/);
     await type("그 식당 예약할래");
-    expect(await find(/장락반점 예약을 도와드릴게요/)).toBeTruthy();
+    expect(await find(/장락반점을 선택했어요/)).toBeTruthy();
   });
 
   it("주문 확인에서 '3마리로 해줘'라고 하면 수량만 바꾼다", async () => {
@@ -590,6 +590,16 @@ describe("일시 중지한 매장", () => {
     expect(screen.queryByText(/몇 마리 주문할까요/)).not.toBeInTheDocument();
   });
 
+  it("식당 찾기를 고르면 바로 뜨는 추천 식당에서도 빠진다", async () => {
+    pauseH3();
+    await renderChat();
+    await say("식당");
+    const places = buttonsIn(/오늘은 이런 식당 어떠세요/).slice(0, 4);
+    expect(places).toHaveLength(4);
+    expect(places).not.toContain("청전 치킨공방");
+    // 카드 아래에는 음식 종류 버튼이 붙는다
+    expect(buttonsIn(/오늘은 이런 식당 어떠세요/)).toEqual(expect.arrayContaining(["한식", "중식", "직접 입력"]));
+  });
   it("가게 이름으로 배달을 청해도 이유를 알려 주고, 가게 정보에는 쉬는 중으로 보인다", async () => {
     pauseH3();
     await renderChat();

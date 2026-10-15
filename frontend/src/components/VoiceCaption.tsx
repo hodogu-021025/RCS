@@ -72,8 +72,18 @@ function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messa
   );
 }
 
-// "." 로 끝난 문장 뒤에서 줄을 바꾼다. 숫자 속 점(1.8km)은 뒤에 띄어쓰기가 없어 그대로 둔다
-const breakAfterSentences = (text: string) => text.replace(/\.\s+/g, ".\n");
+// 문장 부호(. ? !) 뒤에서 줄을 바꿔 한 줄에 한 문장씩 읽히게 한다. 다만 이어지는 짧은 문장들("안녕하세요! Saylo예요.")은
+// 한 줄에 둔다. 숫자 속 점(1.8km)은 뒤에 띄어쓰기가 없어 그대로 둔다
+const SHORT_LINE_CHARS = 18;
+function breakAfterSentences(text: string): string {
+  const lines: string[] = [];
+  for (const part of text.split(/(?<=[.?!])\s+/)) {
+    const last = lines.length - 1;
+    if (last >= 0 && Array.from(`${lines[last]} ${part}`).length <= SHORT_LINE_CHARS) lines[last] += ` ${part}`;
+    else lines.push(part);
+  }
+  return lines.join("\n");
+}
 
 interface Props {
   id: number | null; // 지금 보여 줄 봇 답의 id (바뀌면 다시 적는다)

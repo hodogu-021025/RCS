@@ -25,7 +25,7 @@ import {
   type Meal,
   type Restaurant,
 } from "./orderChatKnowledge";
-import { storePausedUntil, type OrderRecord } from "../data/db";
+import { getPopularity, storePausedUntil, type OrderRecord } from "../data/db";
 
 // ---- 무엇을 하려는 말인지 ----
 export type Intent =
@@ -85,6 +85,20 @@ export function recommendItems(now: Date, n = 3): DeliveryItem[] {
   return [...ranked.filter((d) => fits.has(foodOfItem(d) ?? "")), ...ranked.filter((d) => !fits.has(foodOfItem(d) ?? ""))].slice(0, n);
 }
 
+// 식당 찾기를 고르면 바로 보여 줄 추천 식당 n 곳 (배달 메뉴 추천과 같은 방식): 지금 시간대에 어울리는 음식의 식당이 먼저,
+// 그 안에서는 최근 예약이 많은 순, 같으면 가까운 순. 일시 중지 중인 곳은 뺀다
+export function recommendRestaurants(now: Date, n = 4): Restaurant[] {
+  const fits = new Set(foodsForMeal(mealOf(now)).map((f) => f.key));
+  const booked = getPopularity().restaurants;
+  return allRestaurants()
+    .filter((r) => !storePausedUntil(r.id, now.getTime()))
+    .sort(
+      (a, b) =>
+        Number(fits.has(b.food)) - Number(fits.has(a.food)) || (booked[b.id] ?? 0) - (booked[a.id] ?? 0) || a.distanceKm - b.distanceKm,
+    )
+    .slice(0, n);
+}
+
 // ---- 영업 중인지 ----
 export function isOpenNow(r: Restaurant, now: Date): boolean {
   const [openText, closeText] = r.hours.split("-").map((s) => s.trim());
@@ -94,6 +108,14 @@ export function isOpenNow(r: Restaurant, now: Date): boolean {
   let t = now.getHours() * 60 + now.getMinutes();
   if (t < open) t += 24 * 60;
   return t >= open && t < close;
+}
+
+// 카드·표에 적는 영업 상태: "영업 중", 열기 전이면 "11:00 오픈", 닫은 뒤면 "영업 종료"
+export function openStateText(r: Restaurant, now: Date): string {
+  if (isOpenNow(r, now)) return "영업 중";
+  const [openText] = r.hours.split("-").map((s) => s.trim());
+  const t = now.getHours() * 60 + now.getMinutes();
+  return t < toMinutes(openText) ? `${openText} 오픈` : "영업 종료";
 }
 
 // ---- 가게 찾기 ----
@@ -303,7 +325,7 @@ export function storeInfoCard(r: Restaurant, now: Date): InfoCard {
     : isOpenNow(r, now)
       ? "지금 영업 중이에요."
       : "지금은 영업시간이 아니에요.";
-  const tag = paused ? `잠시 쉬는 중 (${untilText(paused, now.getTime())}까지)` : isOpenNow(r, now) ? "영업 중" : "영업 전·후";
+  const tag = paused ? `잠시 쉬는 중 (${untilText(paused, now.getTime())}까지)` : openStateText(r, now);
   return {
     title: `${r.name} 정보예요.`,
     rows: [
