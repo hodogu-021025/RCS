@@ -13,6 +13,10 @@
 //   POST   /api/auth/withdraw          { password }                   회원 탈퇴 (고객님·사장님). 주문·예약 기록은 이름을 지우고 남긴다
 //   GET    /api/orders                 고객: 내 것 / 사장님: 내 매장 / 관리자: 전체
 //   POST   /api/orders                 { order }                      로그인한 고객님만. order.address·order.phone 필수.
+//                                      order: { storeId, items: [{ item, qty, choices? }], address, phone } — 한 주문에 한 매장 메뉴를 여러 개(장바구니).
+//                                      메뉴·단위·금액은 서버가 다시 정해 items 마다 { item, qty, unit, price, listPrice?, discountPct?, choices?, choiceLabel? } 로 적고,
+//                                      price 에 합계(할인이 있으면 listPrice 에 할인 전 합계)를 둔다. 같은 메뉴를 두 번 담으면 합친다.
+//                                      (예전 화면이 보내던 메뉴 하나짜리 { item, qty, choices? } 도 받는다)
 //                                      결제는 계좌이체: "입금 대기"로 들어오고, 응답의 order.bank 계좌로 order.payBy 까지 입금한다
 //   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자 (입금 대기 → 접수 가 입금 확인)
 //   POST   /api/orders/:id/cancel                                     주문한 고객님이 취소 (입금 대기·접수 상태일 때만)
@@ -53,6 +57,7 @@ import {
   DISCOUNT_MAX,
   MAX_PEOPLE,
   MAX_QTY,
+  MAX_ORDER_ITEMS,
   MENU_KEYWORDS_MAX,
   MENU_NAME_MAX,
   MENU_PRICE_MAX,
@@ -333,45 +338,72 @@ export function createApp({ db, verifier, mailer, adminEmail, now = () => Date.n
       if (!user) throw new HttpError(401, "배달 주문은 로그인한 뒤에 할 수 있어요.");
       if (user.role !== "user") throw new HttpError(403, "배달 주문은 고객님 계정으로 할 수 있어요.");
       const o = body.order ?? {};
-      const qty = Number(o.qty);
-      if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) throw bad("주문 내용이 맞지 않아요.");
       if (!hasStoreId(o.storeId)) throw bad("매장을 알 수 없어요.");
       const pausedUntil = storePaused(o.storeId);
       if (pausedUntil) throw bad(`${withTopic(storeName(o.storeId))} 지금 잠시 주문을 받지 않아요. ${pauseEndText(pausedUntil, now())}부터 다시 받아요.`);
-      // 메뉴·단위·금액은 화면이 보낸 값을 믿지 않고 목록(catalog.json)과 사장님 설정(가격·품절)으로 다시 정한다
-      const item = activeMenuItem(o.storeId, str(o.item));
-      if (!item) throw bad(db.menuItemByName(o.storeId, str(o.item)) ? `${str(o.item)}은(는) 지금 판매하지 않아요.` : "메뉴를 알 수 없어요.");
-      const setting = db.allStoreSettings()[o.storeId]?.items?.[item.id] ?? {};
-      if (setting.soldOut) throw bad(`${item.name}은(는) 지금 품절이에요.`);
-      // 세트 메뉴: 고른 맛을 검사한다 (세트 수 × 마리 수만큼, 메뉴의 맛 목록 안에서 서로 다르게). 맛의 추가금은 세트 값에 더한다
-      let choices;
-      let extra = 0;
-      if (item.choice) {
-        const picked = pickedChoices(item.choice, o.choices, qty);
-        if (picked.error) throw bad(picked.error);
-        choices = picked.choices;
-        extra = picked.extra;
+      // 담긴 메뉴들 (장바구니). 예전 화면이 보내던 메뉴 하나짜리(item·qty 가 주문 바로 아래)도 받는다.
+      // 한 주문은 한 매장: 메뉴는 모두 o.storeId 매장 것이어야 한다 (다른 매장 메뉴는 아래에서 "메뉴를 알 수 없어요")
+      const sent = Array.isArray(o.items) ? o.items : [{ item: o.item, qty: o.qty, choices: o.choices }];
+      if (sent.length < 1) throw bad("주문할 메뉴를 담아 주세요.");
+      if (sent.length > MAX_ORDER_ITEMS) throw bad(`한 주문에는 메뉴를 ${MAX_ORDER_ITEMS}가지까지 담을 수 있어요.`);
+      // 같은 메뉴를 두 번 담았으면 합친다 (수량을 더하고, 세트면 고른 맛을 이어 붙인다).
+      // 세트의 맛은 같은 맛을 한 번만 고를 수 있으므로, 합치면 맛이 겹치는 세트는 따로 둔다
+      const merged = [];
+      for (const sentLine of sent) {
+        const name = str(sentLine?.item);
+        const qty = Number(sentLine?.qty);
+        if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) throw bad("주문 내용이 맞지 않아요.");
+        const picked = Array.isArray(sentLine?.choices) ? sentLine.choices.map((c) => String(typeof c === "object" && c ? c.name : c).trim()) : [];
+        const same = merged.find((m) => m.name === name && !m.picked.some((n) => picked.includes(n)));
+        if (same) {
+          same.qty += qty;
+          same.picked.push(...picked);
+        } else merged.push({ name, qty, picked });
       }
-      // 1단위 가격: 사장님이 바꾼 가격, 그다음 할인율 (10원 단위로 반올림)
-      const listPrice = setting.price ?? item.price;
-      const discountPct = setting.discountPct ?? 0;
-      const unitPrice = discountedPrice(listPrice, discountPct);
+      // 메뉴·단위·금액은 화면이 보낸 값을 믿지 않고 목록(catalog.json)과 사장님 설정(가격·품절)으로 다시 정한다
+      const items = merged.map(({ name, qty, picked }) => {
+        const item = activeMenuItem(o.storeId, name);
+        if (!item) throw bad(db.menuItemByName(o.storeId, name) ? `${name}은(는) 지금 판매하지 않아요.` : "메뉴를 알 수 없어요.");
+        if (qty > MAX_QTY) throw bad(`${withTopic(item.name)} 한 번에 ${MAX_QTY}${item.unit}까지 주문할 수 있어요.`);
+        const setting = db.allStoreSettings()[o.storeId]?.items?.[item.id] ?? {};
+        if (setting.soldOut) throw bad(`${item.name}은(는) 지금 품절이에요.`);
+        // 세트 메뉴: 고른 맛을 검사한다 (세트 수 × 마리 수만큼, 메뉴의 맛 목록 안에서 서로 다르게). 맛의 추가금은 세트 값에 더한다
+        let choices;
+        let extra = 0;
+        if (item.choice) {
+          const result = pickedChoices(item.choice, picked, qty);
+          if (result.error) throw bad(result.error);
+          choices = result.choices;
+          extra = result.extra;
+        }
+        // 1단위 가격: 사장님이 바꾼 가격, 그다음 할인율 (10원 단위로 반올림)
+        const listPrice = setting.price ?? item.price;
+        const discountPct = setting.discountPct ?? 0;
+        const unitPrice = discountedPrice(listPrice, discountPct);
+        return {
+          item: item.name,
+          qty,
+          unit: item.unit,
+          price: unitPrice * qty + extra, // 세트 메뉴면 고른 맛의 추가금을 더한다 (할인은 세트 값에만)
+          // 할인했으면 할인율과 할인 전 금액도 남긴다 (영수증·사장님 화면에 보여 준다)
+          ...(discountPct > 0 ? { discountPct, listPrice: listPrice * qty + extra } : {}),
+          // 세트 메뉴의 고른 맛 (사장님 화면·내 주문에 보여 준다)
+          ...(choices ? { choices, choiceLabel: item.choice.label } : {}),
+        };
+      });
       // 배달지와 연락처는 꼭 받는다 (가게가 배달하고 연락할 수 있게)
       const address = str(o.address, ADDRESS_MAX);
       if (address.length < ADDRESS_MIN) throw bad("배달 받을 주소를 적어 주세요.");
       const phone = normalizePhone(o.phone);
       if (!phone) throw bad("연락받을 전화번호를 다시 확인해 주세요.");
+      const price = items.reduce((sum, line) => sum + line.price, 0);
+      const listTotal = items.reduce((sum, line) => sum + (line.listPrice ?? line.price), 0);
       const order = {
         store: { name: storeName(o.storeId), ...(o.store?.distance ? { distance: str(o.store.distance, 20) } : {}) },
         storeId: o.storeId,
-        item: item.name,
-        qty,
-        unit: item.unit,
-        price: unitPrice * qty + extra, // 세트 메뉴면 고른 맛의 추가금을 더한다 (할인은 세트 값에만)
-        // 할인했으면 할인율과 할인 전 금액도 남긴다 (영수증·사장님 화면에 보여 준다)
-        ...(discountPct > 0 ? { discountPct, listPrice: listPrice * qty + extra } : {}),
-        // 세트 메뉴의 고른 맛 (사장님 화면·내 주문에 보여 준다)
-        ...(choices ? { choices, choiceLabel: item.choice.label } : {}),
+        items,
+        price, // 합계 (메뉴마다 할인·맛 추가금을 더한 값의 합)
+        ...(listTotal > price ? { listPrice: listTotal } : {}), // 할인 전 합계 (할인한 메뉴가 있을 때만)
         address,
         phone,
       };

@@ -148,6 +148,23 @@ const toUser = (r) =>
     ...(r.role === "owner" ? { approved: r.approved !== 0 } : {}),
   };
 
+// 주문 내용(order_json): { store, storeId, items: [{ item, qty, unit, price, listPrice?, discountPct?, choices?, choiceLabel? }], price(합계), listPrice?(할인 전 합계), address, phone, ... }.
+// 장바구니 전에 저장된 메뉴 하나짜리 주문은 item·qty·unit·choices 가 주문 바로 아래에 있다. 읽을 때 items 하나짜리로 바꿔
+// 화면·통계가 한 모양만 다루게 한다 (DB 는 그대로 둔다)
+export function normalizeOrder(o) {
+  if (Array.isArray(o.items)) return o;
+  const { item, qty, unit, discountPct, listPrice, choices, choiceLabel, ...rest } = o;
+  const line = {
+    item,
+    qty,
+    unit,
+    price: o.price,
+    ...(discountPct ? { discountPct, listPrice } : {}),
+    ...(choices ? { choices, ...(choiceLabel ? { choiceLabel } : {}) } : {}),
+  };
+  return { ...rest, items: [line], ...(discountPct && listPrice !== undefined ? { listPrice } : {}) };
+}
+
 const toOrder = (r) => ({
   id: r.id,
   createdAt: r.created_at,
@@ -156,7 +173,7 @@ const toOrder = (r) => ({
   customerName: r.customer_name,
   payment: r.payment,
   storeId: r.store_id,
-  order: JSON.parse(r.order_json),
+  order: normalizeOrder(JSON.parse(r.order_json)),
 });
 
 const toReservation = (r) => ({
@@ -414,14 +431,16 @@ export function openDb(path) {
       cutoff.setFullYear(cutoff.getFullYear() - ORDER_KEEP_YEARS);
       return Number(stmts.purgeOrders.run(cutoff.getTime()).changes);
     },
-    // since 이후 취소되지 않은 주문(메뉴 이름·매장별)과 예약(식당별) 수
+    // since 이후 취소되지 않은 주문(메뉴 이름·매장별, 한 주문에 담긴 메뉴마다 1)과 예약(식당별) 수
     popularity(since) {
       const items = {};
       const restaurants = {};
       for (const r of stmts.ordersSince.all(since)) {
         if (r.status === "취소") continue;
-        const key = `${r.store_id}|${JSON.parse(r.order_json).item}`;
-        items[key] = (items[key] ?? 0) + 1;
+        for (const line of normalizeOrder(JSON.parse(r.order_json)).items) {
+          const key = `${r.store_id}|${line.item}`;
+          items[key] = (items[key] ?? 0) + 1;
+        }
       }
       for (const r of stmts.reservationsSince.all(since)) {
         if (r.status === "취소") continue;

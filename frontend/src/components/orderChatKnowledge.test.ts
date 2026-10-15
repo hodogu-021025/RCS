@@ -24,6 +24,12 @@ import {
   isYes,
   km,
   makeOrder,
+  makeOrderItem,
+  addItem,
+  replaceItem,
+  cartCardRows,
+  orderItemText,
+  orderPriceLabel,
   matchFood,
   nearbyRestaurants,
   parseQuantity,
@@ -292,7 +298,8 @@ describe("식당 예약", () => {
 describe("makeOrder / completionText", () => {
   it("메뉴의 매장·단위로 주문서를 만들고 수량만큼 가격을 계산한다", () => {
     const order = makeOrder(item("간장치킨"), 2);
-    expect(order).toMatchObject({ item: "간장치킨", qty: 2, unit: "마리", price: 40000 });
+    expect(order.items).toEqual([{ item: "간장치킨", qty: 2, unit: "마리", price: 40000 }]);
+    expect(order.price).toBe(40000);
     expect(order.store).toEqual({ name: "청전 치킨공방", distance: "1.8km" });
     expect(won(40000)).toBe("40,000원");
   });
@@ -326,5 +333,67 @@ describe("추천하는 말투 (읽어 주기·자막)", () => {
     expect(say).toContain("오후 12시, 오후 1시, 오후 6시를 추천해요!");
     expect(say).toContain("다른 시간도 괜찮아요");
     expect(datePrompt(restaurantById("c1"), now).say).toContain("오늘도 예약할 수 있어요");
+  });
+});
+
+describe("장바구니 주문서 (메뉴 여러 개)", () => {
+  it("같은 메뉴는 합치고, 금액은 메뉴마다 더한 합계이며, 글·표에 메뉴를 줄줄이 적는다", () => {
+    const chicken = item("간장치킨");
+    const one = makeOrder(chicken, 1, { address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" });
+    const two = addItem(one, makeOrderItem({ ...chicken, id: "x1", name: "양념치킨", price: 21000 }, 2));
+    const merged = addItem(two, makeOrderItem(chicken, 2));
+    expect(merged.items.map((l) => [l.item, l.qty, l.price])).toEqual([["간장치킨", 3, 60000], ["양념치킨", 2, 42000]]);
+    expect(merged.price).toBe(102000);
+    expect(merged.listPrice).toBeUndefined();
+    expect(orderItemText(merged)).toBe("간장치킨 3마리, 양념치킨 2마리");
+    const rows = orderCardRows(merged);
+    expect(rows.map((r) => [r.label, r.value]).slice(0, 4)).toEqual([
+      ["매장", "청전 치킨공방 · 1.8km"],
+      ["음식", "간장치킨 3마리 · 60,000원"],
+      ["음식", "양념치킨 2마리 · 42,000원"],
+      ["합계", "102,000원"],
+    ]);
+    expect(rows.find((r) => r.label === "합계")?.emphasis).toBe(true);
+    // 하나만 남기면 "가격"으로, 금액 없이 메뉴만
+    const alone = replaceItem(merged, 1);
+    expect(orderCardRows(alone).map((r) => [r.label, r.value]).slice(1, 3)).toEqual([["음식", "간장치킨 3마리"], ["가격", "60,000원"]]);
+    expect(cartCardRows(alone).map((r) => r.label)).toEqual(["매장", "음식", "가격"]);
+  });
+
+  it("할인은 메뉴 줄마다 적고, 할인율이 하나면 합계 옆에 할인율을, 서로 다르면 할인 전 합계를 적는다", () => {
+    const chicken = item("간장치킨");
+    const sale = { ...chicken, price: 16000, listPrice: 20000, discountPct: 20 };
+    const order = makeOrder(sale, 1);
+    expect(order).toMatchObject({ price: 16000, listPrice: 20000 });
+    expect(orderPriceLabel(order)).toBe("16,000원 (20% 할인)");
+    const mixed = addItem(order, makeOrderItem({ ...chicken, id: "x2", name: "양념치킨", price: 18900, listPrice: 21000, discountPct: 10 }, 1));
+    expect(mixed).toMatchObject({ price: 34900, listPrice: 41000 });
+    expect(orderPriceLabel(mixed)).toBe("34,900원 (할인 전 41,000원)");
+    expect(orderCardRows(mixed).find((r) => r.label === "음식")?.value).toBe("간장치킨 1마리 · 16,000원 (20% 할인)");
+  });
+
+  it("세트는 맛이 겹치지 않을 때만 합치고, 맛 줄은 메뉴 바로 아래에 둔다", () => {
+    const set = { ...item("간장치킨"), id: "s1", name: "2마리 치킨 세트", unit: "세트", price: 26000, choice: { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }, { name: "굽는 불닭", extra: 2000 }] } };
+    const first = makeOrder(set, 1, undefined, [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }]);
+    const merged = addItem(first, makeOrderItem(set, 1, [{ name: "양념 파닭", extra: 0 }, { name: "굽는 불닭", extra: 2000 }]));
+    expect(merged.items).toHaveLength(1);
+    expect(merged.items[0]).toMatchObject({ qty: 2, price: 55000 });
+    expect(merged.items[0].choices?.map((c) => c.name)).toEqual(["간장 파닭", "블랙스완 파닭", "양념 파닭", "굽는 불닭"]);
+    const apart = addItem(first, makeOrderItem(set, 1, [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }]));
+    expect(apart.items).toHaveLength(2);
+    expect(apart.price).toBe(53000);
+    expect(orderCardRows(apart).map((r) => r.label).slice(1, 5)).toEqual(["음식", "맛", "음식", "맛"]);
+    expect(orderItemText(apart)).toBe("2마리 치킨 세트 1세트 (간장 파닭, 블랙스완 파닭(+1,000원)), 2마리 치킨 세트 1세트 (간장 파닭, 양념 파닭)");
+  });
+});
+
+describe("로/으로", () => {
+  it("받침에 맞춰 붙이고, ㄹ 받침과 괄호로 끝나는 말도 맞게 붙인다", async () => {
+    const { withRoParticle } = await import("./orderChatKnowledge");
+    expect(withRoParticle("2마리")).toBe("2마리로");
+    expect(withRoParticle("3묶음")).toBe("3묶음으로");
+    expect(withRoParticle("1일")).toBe("1일로");
+    expect(withRoParticle("2개")).toBe("2개로");
+    expect(withRoParticle("2마리 치킨 세트 1세트 (간장 파닭, 뿌링클 치킨(+1,000원))")).toBe("2마리 치킨 세트 1세트 (간장 파닭, 뿌링클 치킨(+1,000원))으로");
   });
 });

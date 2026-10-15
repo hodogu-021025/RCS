@@ -209,7 +209,7 @@ describe("주문·예약과 권한", () => {
   it("금액·단위·매장 이름은 화면이 보낸 값 대신 목록과 사장님 설정으로 정한다", async () => {
     const cheat = await call("POST", "/api/orders", { order: { ...chicken, qty: 3, price: 1, unit: "개", store: { name: "가짜" } }, payment: "카카오페이" }, buyer);
     assert.equal(cheat.status, 200);
-    assert.deepEqual([cheat.body.order.price, cheat.body.order.unit, cheat.body.order.store.name], [60000, "마리", "청전 치킨공방"]);
+    assert.deepEqual([cheat.body.order.price, cheat.body.order.items[0].unit, cheat.body.order.store.name], [60000, "마리", "청전 치킨공방"]);
 
     db.updateStoreSettings("h3", { item: { id: "d2", patch: { price: 25000 } } });
     assert.equal((await call("POST", "/api/orders", { order: { ...chicken, qty: 2 }, payment: "카카오페이" }, buyer)).body.order.price, 50000);
@@ -452,7 +452,7 @@ describe("손님의 주문 조회·취소와 인기 통계", () => {
     old.close();
     const migrated = openDb(file);
     const rec = migrated.addOrder({ customer: "guest", customerName: "비회원", payment: "x", storeId: "h3", order: { item: "간장치킨" } });
-    assert.equal(migrated.orderById(rec.id).order.item, "간장치킨");
+    assert.equal(migrated.orderById(rec.id).order.items[0].item, "간장치킨");
     migrated.close();
     // 예전에 비회원 주문으로 받은 영수증 번호가 남아 있으면 다시 열 때 비운다
     const raw = new DatabaseSync(file);
@@ -572,7 +572,7 @@ describe("점검에서 찾은 서버 문제", () => {
     const kept = db.orderById(order.id);
     assert.equal(kept.order.address, undefined);
     assert.equal(kept.order.phone, undefined);
-    assert.equal(kept.order.item, "옛날통닭");
+    assert.equal(kept.order.items[0].item, "옛날통닭");
     assert.equal(kept.customerName, WITHDRAWN.name);
   });
 
@@ -641,7 +641,7 @@ describe("사장님 배달 메뉴 관리", () => {
     const order = await call("POST", "/api/orders", { order: { ...chicken, storeId: "p2", item: "불고기 피자", qty: 2, price: 1 }, payment: "카드" }, buyer);
     assert.equal(order.status, 200, JSON.stringify(order.body));
     assert.equal(order.body.order.price, 42000);
-    assert.equal(order.body.order.unit, "판");
+    assert.equal(order.body.order.items[0].unit, "판");
   });
 
   it("입력 규칙과 권한을 서버가 검사한다", async () => {
@@ -702,7 +702,7 @@ describe("할인과 오늘의 메뉴", () => {
     assert.equal(set.body.items.d4.discountPct, 15);
     const o = (await order(2)).body; // 6000원 × 0.85 = 5100원
     assert.equal(o.order.price, 10200);
-    assert.equal(o.order.discountPct, 15);
+    assert.equal(o.order.items[0].discountPct, 15);
     assert.equal(o.order.listPrice, 12000);
 
     // 사장님이 바꾼 가격에 할인을 적용한다: 6,500원 × 0.85 = 5,525 → 5,530원
@@ -714,7 +714,8 @@ describe("할인과 오늘의 메뉴", () => {
     assert.equal(off.body.items.d4.discountPct, undefined);
     const plain = (await order(1)).body.order;
     assert.equal(plain.price, 6500);
-    assert.equal(plain.discountPct, undefined);
+    assert.equal(plain.items[0].discountPct, undefined);
+    assert.equal(plain.listPrice, undefined);
   });
 
   it("할인율은 0~90% 정수만 받는다", async () => {
@@ -1037,8 +1038,8 @@ describe("세트 메뉴 맛 고르기 주문", () => {
     const plain = await order(1, ["간장 파닭", "양념 파닭"]);
     assert.equal(plain.status, 200, JSON.stringify(plain.body));
     assert.equal(plain.body.order.price, 26000);
-    assert.deepEqual(plain.body.order.choices, [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }]);
-    assert.equal(plain.body.order.choiceLabel, "맛");
+    assert.deepEqual(plain.body.order.items[0].choices, [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }]);
+    assert.equal(plain.body.order.items[0].choiceLabel, "맛");
 
     const extra = await order(1, ["블랙스완 파닭", "굽는 불닭"]);
     assert.equal(extra.body.order.price, 29000); // 26,000 + 1,000 + 2,000
@@ -1058,7 +1059,7 @@ describe("세트 메뉴 맛 고르기 주문", () => {
   it("맛 고르기가 없는 메뉴는 보낸 맛을 무시한다", async () => {
     const r = await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭", qty: 1, choices: ["간장 파닭"] } }, buyer);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.order.choices, undefined);
+    assert.equal(r.body.order.items[0].choices, undefined);
   });
 });
 
@@ -1126,11 +1127,11 @@ describe("사장님이 세트 메뉴의 맛 목록을 넣고 고치기", () => {
     assert.equal(removed.body.choice, undefined);
     const plain = await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "2마리 세트", qty: 1 } }, buyer);
     assert.equal(plain.status, 200, JSON.stringify(plain.body));
-    assert.equal(plain.body.order.choices, undefined);
+    assert.equal(plain.body.order.items[0].choices, undefined);
 
     // 지난 주문 기록은 주문할 때의 맛·추가금 그대로
     const old = db.orderById(ordered.body.id);
-    assert.deepEqual(old.order.choices, [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }]);
+    assert.deepEqual(old.order.items[0].choices, [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }]);
     assert.equal(old.order.price, 27000);
   });
 
@@ -1222,5 +1223,112 @@ describe("관리자에게 문의", () => {
     assert.equal(db.listInquiries({ username: "leaver001" }).length, 1);
     assert.equal((await call("POST", "/api/auth/withdraw", { password: "password1" }, token)).status, 200);
     assert.equal(db.listInquiries({ username: "leaver001" }).length, 0);
+  });
+});
+
+describe("장바구니: 한 주문에 메뉴 여러 개", () => {
+  let storeId;
+  let owner;
+  const FLAVORS = { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }, { name: "굽는 불닭", extra: 2000 }] };
+  before(async () => {
+    storeId = db.addStore({ name: "장바구니 치킨", food: "chicken", hours: "00:00 - 24:00" }).id;
+    db.setBankAccount(storeId, DEFAULT_ACCOUNT);
+    db.addMenuItem({ restaurantId: storeId, name: "후라이드", price: 18000, unit: "마리", keywords: ["치킨"] });
+    db.addMenuItem({ restaurantId: storeId, name: "치즈볼", price: 5000, unit: "개", keywords: [] });
+    db.addMenuItem({ restaurantId: storeId, name: "2마리 세트", price: 26000, unit: "세트", keywords: ["세트"], choice: FLAVORS });
+    owner = await signup({ role: "owner", username: "cartboss01", email: "cartboss@example.com", storeId });
+    db.approveOwner("cartboss01");
+  });
+  const order = (items, over = {}) => call("POST", "/api/orders", { order: { storeId, items, address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678", ...over } }, buyer);
+
+  it("메뉴마다 수량·단위·가격을 서버가 정하고 합계를 price 에 둔다", async () => {
+    const r = await order([{ item: "후라이드", qty: 2, price: 1, unit: "판" }, { item: "치즈볼", qty: 3 }]);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.order.items, [
+      { item: "후라이드", qty: 2, unit: "마리", price: 36000 },
+      { item: "치즈볼", qty: 3, unit: "개", price: 15000 },
+    ]);
+    assert.equal(r.body.order.price, 51000);
+    assert.equal(r.body.order.listPrice, undefined);
+    assert.equal(r.body.order.store.name, "장바구니 치킨");
+    // 메뉴 하나짜리 옛 모양(item·qty 가 주문 바로 아래)도 받아 items 하나짜리로 저장한다
+    const legacy = await call("POST", "/api/orders", { order: { storeId, item: "치즈볼", qty: 2, address: "제천시 장락동 제천빌라 331호", phone: "010-1234-5678" } }, buyer);
+    assert.equal(legacy.status, 200);
+    assert.deepEqual(legacy.body.order.items, [{ item: "치즈볼", qty: 2, unit: "개", price: 10000 }]);
+    assert.equal(legacy.body.order.price, 10000);
+  });
+
+  it("할인한 메뉴가 있으면 메뉴 줄에 할인율·할인 전 금액을, 주문에 할인 전 합계를 적는다", async () => {
+    const fried = (await call("GET", "/api/menu")).body.find((d) => d.restaurantId === storeId && d.name === "후라이드");
+    await call("PATCH", `/api/stores/${storeId}/settings`, { item: { id: fried.id, patch: { discountPct: 10 } } }, owner);
+    const r = await order([{ item: "후라이드", qty: 1 }, { item: "치즈볼", qty: 1 }]);
+    assert.deepEqual(r.body.order.items[0], { item: "후라이드", qty: 1, unit: "마리", price: 16200, discountPct: 10, listPrice: 18000 });
+    assert.equal(r.body.order.items[1].discountPct, undefined);
+    assert.equal(r.body.order.price, 21200);
+    assert.equal(r.body.order.listPrice, 23000);
+    await call("PATCH", `/api/stores/${storeId}/settings`, { item: { id: fried.id, patch: { discountPct: 0 } } }, owner);
+  });
+
+  it("같은 메뉴를 두 번 담으면 합치고, 합친 수량도 상한을 넘을 수 없다", async () => {
+    const r = await order([{ item: "치즈볼", qty: 2 }, { item: "후라이드", qty: 1 }, { item: "치즈볼", qty: 3 }]);
+    assert.deepEqual(r.body.order.items.map((l) => [l.item, l.qty]), [["치즈볼", 5], ["후라이드", 1]]);
+    assert.equal(r.body.order.price, 25000 + 18000);
+    const tooMany = await order([{ item: "치즈볼", qty: 6 }, { item: "치즈볼", qty: 5 }]);
+    assert.equal(tooMany.status, 400);
+    assert.match(tooMany.body.error, /치즈볼은 한 번에 10개까지/);
+  });
+
+  it("세트는 메뉴마다 맛을 검사하고, 같은 세트를 다시 담으면 맛이 겹치지 않을 때만 합친다", async () => {
+    const merged = await order([{ item: "2마리 세트", qty: 1, choices: ["간장 파닭", "양념 파닭"] }, { item: "치즈볼", qty: 1 }, { item: "2마리 세트", qty: 1, choices: ["블랙스완 파닭", "굽는 불닭"] }]);
+    assert.equal(merged.status, 200, JSON.stringify(merged.body));
+    assert.deepEqual(merged.body.order.items.map((l) => [l.item, l.qty, l.choices?.map((c) => c.name)]), [
+      ["2마리 세트", 2, ["간장 파닭", "양념 파닭", "블랙스완 파닭", "굽는 불닭"]],
+      ["치즈볼", 1, undefined],
+    ]);
+    assert.equal(merged.body.order.price, 26000 * 2 + 3000 + 5000);
+    // 맛이 겹치면 따로 둔다 (같은 맛은 한 세트 안에서 한 번만)
+    const apart = await order([{ item: "2마리 세트", qty: 1, choices: ["간장 파닭", "양념 파닭"] }, { item: "2마리 세트", qty: 1, choices: ["간장 파닭", "굽는 불닭"] }]);
+    assert.equal(apart.status, 200, JSON.stringify(apart.body));
+    assert.equal(apart.body.order.items.length, 2);
+    assert.equal(apart.body.order.price, 26000 * 2 + 2000);
+    // 맛이 모자라면 그 메뉴 이름으로 거절한다
+    const short = await order([{ item: "치즈볼", qty: 1 }, { item: "2마리 세트", qty: 1, choices: ["간장 파닭"] }]);
+    assert.equal(short.status, 400);
+    assert.match(short.body.error, /맛을\(를\) 2가지 골라/);
+  });
+
+  it("한 주문은 한 매장 메뉴만, 1~10가지까지", async () => {
+    const other = await order([{ item: "치즈볼", qty: 1 }, { item: "간장치킨", qty: 1 }]); // 간장치킨은 h3 메뉴
+    assert.equal(other.status, 400);
+    assert.match(other.body.error, /메뉴를 알 수 없어요/);
+    assert.match((await order([])).body.error, /담아 주세요/);
+    assert.match((await order(Array.from({ length: 11 }, () => ({ item: "치즈볼", qty: 1 })))).body.error, /10가지까지/);
+    assert.equal((await order([{ item: "치즈볼", qty: 0 }, { item: "후라이드", qty: 1 }])).status, 400);
+    // 품절·판매 중지는 그 메뉴 이름으로 알린다
+    const ball = (await call("GET", "/api/menu")).body.find((d) => d.restaurantId === storeId && d.name === "치즈볼");
+    await call("PATCH", `/api/stores/${storeId}/settings`, { item: { id: ball.id, patch: { soldOut: true } } }, owner);
+    assert.match((await order([{ item: "후라이드", qty: 1 }, { item: "치즈볼", qty: 1 }])).body.error, /치즈볼은\(는\) 지금 품절/);
+    await call("PATCH", `/api/stores/${storeId}/settings`, { item: { id: ball.id, patch: { soldOut: false } } }, owner);
+  });
+
+  it("장바구니 전에 저장된 메뉴 하나짜리 주문도 items 하나짜리로 읽히고, 인기 통계는 담긴 메뉴마다 센다", async () => {
+    const legacy = db.addOrder({
+      customer: "buyer0001", customerName: "주문자", payment: "계좌이체", storeId,
+      order: { store: { name: "장바구니 치킨" }, storeId, item: "2마리 세트", qty: 1, unit: "세트", price: 24400, discountPct: 10, listPrice: 27000, choices: [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }], choiceLabel: "맛", address: "제천시 장락동", phone: "010-1234-5678" },
+    });
+    const read = db.orderById(legacy.id).order;
+    assert.deepEqual(read.items, [{ item: "2마리 세트", qty: 1, unit: "세트", price: 24400, discountPct: 10, listPrice: 27000, choices: [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }], choiceLabel: "맛" }]);
+    assert.deepEqual([read.price, read.listPrice, read.address, read.item, read.qty], [24400, 27000, "제천시 장락동", undefined, undefined]);
+    // GET 으로도 같은 모양
+    const mine = (await call("GET", "/api/orders", undefined, buyer)).body.find((o) => o.id === legacy.id);
+    assert.deepEqual(mine.order.items, read.items);
+
+    const before = (await call("GET", "/api/stats/popular")).body.items;
+    await order([{ item: "후라이드", qty: 2 }, { item: "치즈볼", qty: 1 }]);
+    const after = (await call("GET", "/api/stats/popular")).body.items;
+    const menu = (await call("GET", "/api/menu")).body;
+    const id = (name) => menu.find((d) => d.restaurantId === storeId && d.name === name).id;
+    assert.equal((after[id("후라이드")] ?? 0) - (before[id("후라이드")] ?? 0), 1);
+    assert.equal((after[id("치즈볼")] ?? 0) - (before[id("치즈볼")] ?? 0), 1);
   });
 });
