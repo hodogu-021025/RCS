@@ -6,3 +6,6 @@ server/data/
 
 # 로컬 메모 (운영 계정 비밀번호 등). 저장소에 올리지 않는다
 *.local.txt
+
+# 각자 PC의 Claude Code 개인 설정 (운영 서버 접속 허용 등)
+.claude/settings.local.json
