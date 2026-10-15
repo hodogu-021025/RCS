@@ -949,6 +949,8 @@ describe("매장 일시 중지 (사장님·관리자 화면)", () => {
   const onServer = () => server.db.allStoreSettings().h3 as unknown as { pausedFrom?: number; pausedUntil?: number } | undefined;
   const pad = (n: number) => String(n).padStart(2, "0");
   const hhmm = (ms: number) => `${pad(new Date(ms).getHours())}:${pad(new Date(ms).getMinutes())}`;
+  // 오늘이 아닌 날의 시각은 "내일 00:25"처럼 보인다 (밤 9시 넘어 2~3시간 뒤를 잡으면 자정을 넘는다)
+  const atText = (ms: number) => `${new Date(ms).toDateString() !== new Date().toDateString() ? "내일 " : ""}${hhmm(ms)}`;
   async function openStoreTab() {
     server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
     await loginAs("chickenboss");
@@ -996,7 +998,7 @@ describe("매장 일시 중지 (사장님·관리자 화면)", () => {
 
     const timer = await screen.findByRole("timer");
     expect(timer).toHaveTextContent("일시 중지 시작까지");
-    expect(timer).toHaveTextContent(`${hhmm(from)}부터 ${hhmm(until)}까지 멈춰요.`);
+    expect(timer).toHaveTextContent(`${atText(from)}부터 ${atText(until)}까지 멈춰요.`);
     // 아직 시작 전이라 주문은 받는다
     fireEvent.click(screen.getByRole("tab", { name: "메뉴" }));
     expect(screen.getByText(/일시 중지 예정이에요$/)).toBeInTheDocument();
