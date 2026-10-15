@@ -262,7 +262,11 @@ header .title {
 .caption-card.list .caption-row.pickable + .caption-row.pickable { padding-top: 8px; }
 .caption-row.pickable:hover { background: var(--accent-weak); }
 .caption-row.pickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 맛 고르기 체크 표: 표가 자기 테두리·흰 바탕을 가지므로 카드 껍데기는 비운다 */
+.caption-card.picker { padding: 0; background: none; border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.caption-card.picker .choice-picker { margin-top: 0; }
 html[data-keyboard] .caption-card { padding: 10px 12px; }
+html[data-keyboard] .caption-card.picker { padding: 0; }
 html[data-keyboard] .caption-card dl { gap: 5px; }
 @keyframes card-rise { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes row-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }

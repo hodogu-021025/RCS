@@ -41,38 +41,45 @@ function Typewriter({ text, after }: { text: string; after?: ReactNode }) {
 function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messageId: number, index: number) => void }) {
   return (
     <div className="caption-cards">
-      {cards.map((c) => (
-        <div key={c.key} className={"caption-card" + (c.list ? " list" : "")}>
-          <dl>
-            {c.rows.map((row, i) => {
-              const pick = c.pickable && onPick ? () => onPick(c.messageId, i) : undefined;
-              const onKeyDown = (e: KeyboardEvent) => {
-                if (pick && (e.key === "Enter" || e.key === " ")) {
-                  e.preventDefault();
-                  pick();
-                }
-              };
-              return (
-                <div
-                  key={`${i}-${row.label}`}
-                  className={"caption-row" + (pick ? " pickable" : "")}
-                  style={{ "--i": i } as CSSProperties}
-                  {...(pick ? { role: "button", tabIndex: 0, "aria-label": row.label, onClick: pick, onKeyDown } : {})}
-                >
-                  <dt>
-                    {row.label}
-                    {row.badge && <span className="place-badge">{row.badge}</span>}
-                  </dt>
-                  <dd className={row.emphasis ? "price" : undefined}>
-                    {row.tel ? <TelLink phone={row.value} /> : row.value}
-                    {row.copy && <CopyButton text={row.copy} label="계좌번호 복사" />}
-                  </dd>
-                </div>
-              );
-            })}
-          </dl>
-        </div>
-      ))}
+      {cards.map((c) =>
+        c.picker ? (
+          // 맛 고르기: 채팅창과 같은 체크 표 (표가 자기 테두리를 가진다)
+          <div key={c.key} className="caption-card picker">
+            {c.picker}
+          </div>
+        ) : (
+          <div key={c.key} className={"caption-card" + (c.list ? " list" : "")}>
+            <dl>
+              {c.rows.map((row, i) => {
+                const pick = c.pickable && onPick ? () => onPick(c.messageId, i) : undefined;
+                const onKeyDown = (e: KeyboardEvent) => {
+                  if (pick && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault();
+                    pick();
+                  }
+                };
+                return (
+                  <div
+                    key={`${i}-${row.label}`}
+                    className={"caption-row" + (pick ? " pickable" : "")}
+                    style={{ "--i": i } as CSSProperties}
+                    {...(pick ? { role: "button", tabIndex: 0, "aria-label": row.label, onClick: pick, onKeyDown } : {})}
+                  >
+                    <dt>
+                      {row.label}
+                      {row.badge && <span className="place-badge">{row.badge}</span>}
+                    </dt>
+                    <dd className={row.emphasis ? "price" : undefined}>
+                      {row.tel ? <TelLink phone={row.value} /> : row.value}
+                      {row.copy && <CopyButton text={row.copy} label="계좌번호 복사" />}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </div>
+        ),
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import backgroundVideo from "../image/saylo_background.mp4";
 import { CopyButton } from "./CopyButton";
 import { InstallBanner } from "./InstallBanner";
@@ -371,6 +371,8 @@ export interface CaptionCard {
   rows: OrderRow[];
   list?: boolean; // 메뉴·식당 목록: 이름이 앞, 아래 줄에 가격·가게·거리 등
   pickable?: boolean; // 줄을 눌러 고를 수 있는지 (그 질문이 지금 답할 차례일 때만)
+  choices?: boolean; // 맛 고르기: 줄 대신 채팅창과 같은 체크 표(ChoicePicker)를 띄운다 (picker 는 그릴 때 붙인다)
+  picker?: ReactNode;
 }
 
 function captionCard(m: Message, now: Date): CaptionCard | null {
@@ -380,15 +382,9 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
   switch (m.kind) {
     case "order":
       return { key, messageId, rows: orderCardRows(m.order) };
-    // 맛 고르기: 추가금이 같은 맛끼리 한 줄로 (채팅창을 끈 동안에는 맛 이름을 말해서 고른다)
+    // 맛 고르기: 채팅창과 같은 체크 표 (눌러서 고르거나 맛 이름을 말해서 고른다)
     case "choices":
-      return {
-        key,
-        messageId,
-        rows: [...new Set(m.options.map((o) => o.extra))]
-          .sort((a, b) => a - b)
-          .map((extra) => ({ label: extra ? `+${won(extra)}` : "추가금 없음", value: m.options.filter((o) => o.extra === extra).map((o) => o.name).join(", ") })),
-      };
+      return { key, messageId, rows: [], choices: true };
     case "reservation": {
       const r = m.reservation;
       return {
@@ -1644,6 +1640,23 @@ export function OrderChatbot() {
     handle(names.join(", "));
   }
 
+  // 맛 고르기 표 (채팅 말풍선과 채팅창을 끈 동안의 자막 아래에 같은 표를 쓴다)
+  function choicePickerFor(messageId: number) {
+    const m = messages.find((x) => x.id === messageId);
+    if (!m || m.role !== "bot" || m.kind !== "choices") return undefined;
+    return (
+      <ChoicePicker
+        label={m.label}
+        need={m.need}
+        options={m.options}
+        basePrice={m.basePrice}
+        active={m.id === activeChoicesId}
+        picked={m.picked}
+        onPick={(names) => pickChoices(m.id, names)}
+      />
+    );
+  }
+
   function pickCount(promptId: number, count: number, unit: string) {
     setMessages((prev) =>
       prev.map((m) =>
@@ -1885,15 +1898,7 @@ export function OrderChatbot() {
         return (
           <>
             {m.text}
-            <ChoicePicker
-              label={m.label}
-              need={m.need}
-              options={m.options}
-              basePrice={m.basePrice}
-              active={m.id === activeChoicesId}
-              picked={m.picked}
-              onPick={(names) => pickChoices(m.id, names)}
-            />
+            {choicePickerFor(m.id)}
           </>
         );
       case "qty":
@@ -2073,7 +2078,7 @@ export function OrderChatbot() {
           <VoiceCaption
             id={captionId}
             text={captionText}
-            cards={captionCards.map((c) => ({ ...c, pickable: c.list && (c.messageId === activeChoicesId || c.messageId === activeRestaurantsId) }))}
+            cards={captionCards.map((c) => ({ ...c, pickable: c.list && (c.messageId === activeChoicesId || c.messageId === activeRestaurantsId), picker: c.choices ? choicePickerFor(c.messageId) : undefined }))}
             thinking={thinking}
             onPick={pickCaptionRow}
           />

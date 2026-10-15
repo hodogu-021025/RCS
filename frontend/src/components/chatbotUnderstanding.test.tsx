@@ -831,6 +831,44 @@ describe("세트 메뉴 맛 고르기", () => {
     expect(inCard("28,000원")).toBe(true);
   });
 
+  it("1마리 치킨은 마리 수만큼 맛을 고르고, 이름 속 '1마리'를 수량으로 읽지 않는다", async () => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "1마리 치킨", price: 18000, unit: "마리", keywords: ["한마리", "치킨"], choice: { label: "맛", count: 1, options: FLAVORS } });
+    await renderChat();
+    await say("1마리 치킨 시켜줘");
+    expect(await find(/몇 마리 주문할까요/)).toBeTruthy();
+    await click(/1마리 · 18,000원 선택/);
+    expect(await find(/맛을 1가지 골라 주세요/)).toBeTruthy();
+    fireEvent.click(cell("블랙스완 파닭"));
+    expect(cell("간장 파닭")).toBeDisabled();
+    expect(screen.getByText(/1가지 중 1가지 · 19,000원/)).toBeInTheDocument();
+    fireEvent.click(doneButton());
+    await wait();
+    await wait();
+    expect(inCard("블랙스완 파닭(+1,000원)")).toBe(true);
+    expect(inCard("19,000원")).toBe(true);
+
+    await say("1마리 치킨 2마리");
+    expect(await find(/맛을 2가지 골라 주세요/)).toBeTruthy();
+  });
+
+  it("채팅창을 끈 동안에도 맛을 채팅창과 같은 체크 표에서 고른다", async () => {
+    render(<OrderChatbot />); // 채팅창은 처음에 꺼져 있다
+    await act(() => refresh(["settings", "popular", "menu"]));
+    await say("2마리 치킨 세트 1세트");
+    await wait(15_000); // 자막이 한 글자씩 다 적히고 표가 뜰 때까지
+    const caption = within(document.querySelector<HTMLElement>(".voice-caption")!);
+    const cellIn = (name: string) => caption.getByRole("button", { name });
+    fireEvent.click(cellIn("간장 파닭"));
+    fireEvent.click(cellIn("굽는 불닭"));
+    expect(cellIn("간장 파닭")).toHaveAttribute("aria-pressed", "true");
+    expect(cellIn("양념 파닭")).toBeDisabled(); // 다 고르면 나머지는 잠긴다
+    expect(caption.getByText(/2가지 중 2가지 · 28,000원/)).toBeInTheDocument();
+    fireEvent.click(caption.getByRole("button", { name: "선택 완료" }));
+    await wait(); // 봇이 주문서를 낸 뒤
+    await wait(15_000); // 자막이 다 적히고 주문서 표가 뜰 때까지
+    expect(document.querySelector(".voice-caption")?.textContent).toContain("간장 파닭, 굽는 불닭(+2,000원)");
+  });
+
   it("주문서에서 세트 수를 바꾸면 맛을 다시 고른다", async () => {
     await renderChat();
     await say("2마리 치킨 세트 1세트");
