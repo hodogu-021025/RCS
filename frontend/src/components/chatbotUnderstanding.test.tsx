@@ -960,6 +960,19 @@ describe("취소했던 주문서 다시", () => {
     expect(screen.queryByText(/주문서를 다시 만들었어요/)).not.toBeInTheDocument();
   });
 
+  it("'방금 거 취소해줘'·'아까 거 말고'처럼 물리는 말은 되살리지 않고 그대로 처리한다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리");
+    await say("옛날통닭 1마리");
+    await say("방금 거 취소해줘");
+    expect(await find(/주문을 취소했어요/)).toBeTruthy();
+    expect(screen.queryByText(/주문서를 다시 만들었어요/)).not.toBeInTheDocument();
+    await say("간장치킨 2마리");
+    await say("아까 거 말고 떡볶이");
+    expect(await find(/국물떡볶이는 장락 떡볶이에서/)).toBeTruthy();
+    expect(screen.queryByText(/주문서를 다시 만들었어요/)).not.toBeInTheDocument();
+  });
+
   it("그사이 품절된 메뉴는 이유를 말하고 다른 메뉴를 권한다", async () => {
     await renderChat();
     await say("간장치킨 2마리");
