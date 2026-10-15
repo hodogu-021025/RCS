@@ -20,8 +20,8 @@ export function verifyPassword(password, stored) {
 export const newToken = () => randomBytes(32).toString("base64url");
 
 // 회원가입·사장님 계정 만들기가 함께 쓰는 입력 규칙 (화면에도 같은 규칙이 있어 바로 안내하지만, 최종 판단은 여기서)
-export const USERNAME_RE = /^[a-z0-9_]{8,20}$/i;
-export const PASSWORD_MIN = 8;
-export const usernameError = (username) => (USERNAME_RE.test(username) ? null : "아이디는 영문·숫자 8~20자로 적어 주세요.");
+export const USERNAME_RE = /^[a-z0-9_]{6,20}$/i;
+export const PASSWORD_MIN = 6;
+export const usernameError = (username) => (USERNAME_RE.test(username) ? null : "아이디는 영문·숫자 6~20자로 적어 주세요.");
 export const passwordError = (password) =>
   typeof password === "string" && password.length >= PASSWORD_MIN ? null : `비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요.`;

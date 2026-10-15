@@ -21,10 +21,10 @@ export const ROLE_LABEL: Record<Role, string> = { user: "소비자", owner: "사
 export const HOME_BY_ROLE: Record<Role, string> = { user: "/chat", owner: "/owner", admin: "/admin" };
 
 // 회원가입·사장님 계정 만들기가 함께 쓰는 입력 규칙 (서버도 같은 규칙으로 다시 검사한다)
-export const USERNAME_RULE = "영문·숫자 8~20자";
-export const PASSWORD_MIN = 8;
+export const USERNAME_RULE = "영문·숫자 6~20자";
+export const PASSWORD_MIN = 6;
 export const usernameError = (username: string): string | null =>
-  /^[a-z0-9_]{8,20}$/i.test(username) ? null : `아이디는 ${USERNAME_RULE}로 적어 주세요.`;
+  /^[a-z0-9_]{6,20}$/i.test(username) ? null : `아이디는 ${USERNAME_RULE}로 적어 주세요.`;
 export const passwordError = (password: string): string | null =>
   password.length < PASSWORD_MIN ? `비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요.` : null;
 

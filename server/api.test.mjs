@@ -93,8 +93,8 @@ describe("회원가입·로그인", () => {
     await call("POST", "/api/email/send-code", { email: "rule@example.com" });
     const v = await call("POST", "/api/email/verify", { email: "rule@example.com", code: "123456" });
     const base = { role: "user", name: "규칙", email: "rule@example.com", proof: v.body.proof, password: "password1", passwordConfirm: "password1", phone: "01012345678", agreePrivacy: true };
-    assert.match((await call("POST", "/api/auth/signup", { ...base, username: "short1" })).body.error, /8~20자/);
-    assert.match((await call("POST", "/api/auth/signup", { ...base, username: "ruleuser1", password: "1234567", passwordConfirm: "1234567" })).body.error, /8자 이상/);
+    assert.match((await call("POST", "/api/auth/signup", { ...base, username: "short" })).body.error, /6~20자/);
+    assert.match((await call("POST", "/api/auth/signup", { ...base, username: "ruleuser1", password: "12345", passwordConfirm: "12345" })).body.error, /6자 이상/);
     assert.match((await call("POST", "/api/auth/signup", { ...base, username: "ruleuser1", passwordConfirm: "different1" })).body.error, /서로 달라요/);
     assert.match((await call("POST", "/api/auth/signup", { ...base, username: "hongildong" })).body.error, /이미 있는 아이디/);
     // 이미 가입된 이메일로는 인증번호부터 보내지 않는다
@@ -995,7 +995,7 @@ describe("관리자가 새 매장을 직접 입력해 사장님 계정 만들기
     assert.match((await newOwner("newstore02", { name: "청전치킨공방", food: "chicken" })).body.error, /같은 이름의 매장/);
     // 아이디가 이미 있으면 매장을 만들지 않는다
     assert.match((await newOwner("newstore01", { name: "새 가게", food: "korean" })).body.error, /이미 있는 아이디/);
-    assert.match((await newOwner("bad", { name: "새 가게", food: "korean" })).body.error, /8~20자/);
+    assert.match((await newOwner("bad", { name: "새 가게", food: "korean" })).body.error, /6~20자/);
     assert.equal((await call("GET", "/api/stores")).body.length, before);
     assert.equal(db.findUser("newstore02"), null);
   });
@@ -1005,5 +1005,20 @@ describe("관리자가 새 매장을 직접 입력해 사장님 계정 만들기
     assert.equal((await call("POST", "/api/owners", { username: "newstore03", password: "password1", newStore: { name: "몰래 가게", food: "korean" } }, owner)).status, 403);
     assert.equal((await call("POST", "/api/owners", { username: "newstore03", password: "password1", newStore: { name: "몰래 가게", food: "korean" } })).status, 401);
     assert.ok(!(await call("GET", "/api/stores")).body.some((s) => s.name === "몰래 가게"));
+  });
+});
+
+describe("아이디·비밀번호 최소 길이 6자", () => {
+  it("6자 아이디·6자 비밀번호로 계정을 만들고 로그인할 수 있고, 5자는 거절한다", async () => {
+    db.createUser({ username: "sixadmin1", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
+    const admin = (await call("POST", "/api/auth/login", { username: "sixadmin1", password: "password1" })).body.token;
+    const make = (username, password, name) => call("POST", "/api/owners", { username, password, newStore: { name, food: "korean" } }, admin);
+    assert.match((await make("abc12", "pass12", "다섯자 가게")).body.error, /6~20자/);
+    assert.match((await make("abc123", "pass1", "다섯자 가게")).body.error, /6자 이상/);
+    const ok = await make("abc123", "pass12", "여섯자 가게");
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    const login = await call("POST", "/api/auth/login", { username: "abc123", password: "pass12" });
+    assert.equal(login.status, 200);
+    assert.equal(login.body.session.name, "여섯자 가게 사장님");
   });
 });

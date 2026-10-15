@@ -245,15 +245,15 @@ describe("회원가입", () => {
     expect(await screen.findByText("이미 가입된 이메일이에요.")).toBeInTheDocument();
     expect(server.sent).toEqual([]);
 
-    fill({ 아이디: "short1", 이름: "누구", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
+    fill({ 아이디: "short", 이름: "누구", "휴대폰 번호": "01012345678", 비밀번호: "password1", "비밀번호 확인": "password1" });
     agree();
     await verifyEmail("new@example.com");
     await click("가입하기");
-    expect(await screen.findByRole("alert")).toHaveTextContent("영문·숫자 8~20자");
+    expect(await screen.findByRole("alert")).toHaveTextContent("영문·숫자 6~20자");
     fill({ 아이디: "takenuser" });
     await click("가입하기"); // 이번엔 서버가 거른다 (안내가 바뀔 때까지 기다린다)
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("이미 있는 아이디예요"));
-    expect(server.db.findUser("short1")).toBeNull();
+    expect(server.db.findUser("short")).toBeNull();
   });
 
   it("개인정보 수집·이용에 동의해야 가입되고, 요약과 전체 방침(새 탭)을 볼 수 있다", async () => {
