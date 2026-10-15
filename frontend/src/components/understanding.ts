@@ -2,7 +2,7 @@
 // 외부 AI 없이 규칙과 가게·메뉴 목록(catalog.json)만 쓴다. 가게·메뉴 이름을 코드에 직접 적지 않는다
 import {
   deliveryMenu,
-  FOODS,
+  FOODS_ON_OFFER,
   MAX_PEOPLE,
   RESTAURANTS,
   availableDeliveryMenu,
@@ -76,8 +76,8 @@ export function mealOf(now: Date): Meal {
 }
 export const MEAL_WORD: Record<Meal, string> = { breakfast: "아침", lunch: "점심", afternoon: "오후 간식", dinner: "저녁", late: "야식" };
 
-// 지금 시간대에 어울리는 음식 종류 (catalog.json 의 foods[].meals)
-export const foodsForMeal = (meal: Meal): FoodCategory[] => FOODS.filter((f) => f.meals?.includes(meal));
+// 지금 시간대에 어울리는 음식 종류 (catalog.json 의 foods[].meals). 근처에 가게가 있는 종류만
+export const foodsForMeal = (meal: Meal): FoodCategory[] => FOODS_ON_OFFER.filter((f) => f.meals?.includes(meal));
 
 const foodOfItem = (d: DeliveryItem) => RESTAURANTS.find((r) => r.id === d.restaurantId)?.food;
 

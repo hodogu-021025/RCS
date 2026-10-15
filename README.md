@@ -143,6 +143,7 @@ server/
   verification.mjs            인증번호 만들기·확인·재발송 제한
   mail.mjs                    Resend 메일 발송
   *.test.mjs                  서버 테스트 (node --test)
+  test/catalog.fixture.json   테스트 전용 가게·메뉴 목록 (예시 가게 여러 곳. 서버·화면 테스트가 함께 쓴다)
   Dockerfile
 deploy/nginx.conf             화면 컨테이너의 nginx 설정 (/api/ → API 서버)
 docker-compose.yml            로컬 Docker: 화면 + API (+ 터널) → http://localhost:8080
@@ -153,7 +154,9 @@ deploy/Caddyfile              HTTPS 앞단 설정 (도메인은 .env 의 DOMAIN)
 
 ## 자주 바꾸는 것
 
-- 가게·식당 목록과 처음 배달 메뉴: `server/catalog.json` 하나만 고치면 서버와 화면에 같이 반영됩니다.
+- 가게·식당 목록과 처음 배달 메뉴: `server/catalog.json` 하나만 고치면 서버와 화면에 같이 반영됩니다. 지금은 시험용 가게 1곳(청전 치킨공방)만 있습니다.
+  - 목록에서 뺀 가게의 메뉴는 DB에 남아 있어도 화면과 메뉴 API에 나오지 않습니다.
+  - 테스트는 이 파일 대신 `server/test/catalog.fixture.json`을 읽으므로, 실제 목록을 바꿔도 테스트는 그대로 돕니다.
 - 배달 메뉴 추가·판매 중지: 사장님 화면의 "메뉴" 탭에서 바로 합니다 (추가하면 바로 판매). 서버가 켜질 때 `catalog.json`의 메뉴 중 DB에 없는 것만 채워 넣으므로, 사장님이 바꾼 내용은 그대로 유지됩니다.
 - 서버의 지금 메뉴 목록(사장님이 추가한 메뉴 포함)을 `catalog.json`에 되돌려 쓰기:
   - 운영 서버: `docker compose -f docker-compose.prod.yml exec -T api node export-catalog.mjs > server/catalog.new.json` 후 확인하고 `server/catalog.json`으로 바꿔 커밋

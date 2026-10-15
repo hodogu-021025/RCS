@@ -7,6 +7,6 @@
   "scripts": {
     "start": "node --env-file-if-exists=../.env index.mjs",
     "dev": "node --watch --env-file-if-exists=../.env index.mjs",
-    "test": "node --test"
+    "test": "node --env-file=test/test.env --test"
   }
 }

@@ -67,6 +67,7 @@ import {
   STORE_IDS,
   discountedPrice,
   foodLabelOf,
+  listedMenu,
   restaurantName,
   todayKST,
 } from "./stores.mjs";
@@ -469,7 +470,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     }],
 
     // ---- 배달 메뉴 ----
-    ["GET", "/api/menu", () => db.listMenu()],
+    ["GET", "/api/menu", () => listedMenu(db)],
     // 사장님이 메뉴 추가: 바로 판매된다. 그 매장의 음식 종류 이름("치킨")은 자동으로 키워드에 넣어 챗봇이 찾을 수 있게
     ["POST", "/api/stores/:id/menu", ({ params, body, user }) => {
       if (!STORE_IDS.has(params.id)) throw new HttpError(404, "없는 매장이에요.");

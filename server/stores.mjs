@@ -1,7 +1,13 @@
 // 가게·메뉴 목록 (catalog.json, 화면과 같이 쓰는 파일)과 상태 값. 실제 목록이 오면 catalog.json 만 바꾼다.
 // 배달 메뉴는 서버가 켜질 때 DB(menu_items)로 옮겨 담고, 그 뒤로는 DB 가 기준이다 (사장님이 메뉴를 추가·판매 중지할 수 있게).
 // DB 의 지금 목록을 catalog.json 으로 되돌려 쓰려면 export-catalog.mjs 를 쓴다
-import catalog from "./catalog.json" with { type: "json" };
+// 테스트는 SAYLO_CATALOG 로 예시 가게가 여러 곳 든 고정 목록(test/catalog.fixture.json)을 읽는다 (경로는 server/ 기준)
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const catalogPath = resolve(dirname(fileURLToPath(import.meta.url)), process.env.SAYLO_CATALOG || "catalog.json");
+const catalog = JSON.parse(readFileSync(catalogPath, "utf8"));
 
 export const RESTAURANTS = catalog.restaurants;
 export const DELIVERY_MENU = catalog.deliveryMenu; // 처음 목록 (DB 에 없는 것만 채워 넣는다)
@@ -80,10 +86,13 @@ export const MENU_PRICE_MAX = 1_000_000;
 export const MENU_UNIT_MAX = 6;
 export const MENU_KEYWORDS_MAX = 10;
 
+// DB 의 배달 메뉴 중 지금 목록(catalog.json)에 있는 가게의 것만. 목록에서 빠진 가게의 메뉴는 DB 에 남아 있어도 보이지 않는다
+export const listedMenu = (db) => db.listMenu().filter((d) => STORE_IDS.has(d.restaurantId));
+
 // DB 의 메뉴 목록을 catalog.json 모양으로 (사장님이 바꾼 가격은 그 가격으로, 판매 중지한 메뉴는 active: false)
 export function catalogWithMenu(db) {
   const settings = db.allStoreSettings();
-  const deliveryMenu = db.listMenu().map((d) => ({
+  const deliveryMenu = listedMenu(db).map((d) => ({
     id: d.id,
     name: d.name,
     restaurantId: d.restaurantId,

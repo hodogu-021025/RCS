@@ -52,7 +52,7 @@ export const accountDigits = (account: string) => account.replace(/[^0-9]/g, "")
 export const bankLine = (b: BankAccount) => `${b.bank} ${b.account}`;
 
 // ---- 식당 찾기 ----
-// 근처 식당 (catalog.json 의 restaurants). 지금은 화면 확인용 가상 식당이다.
+// 근처 식당 (catalog.json 의 restaurants). 지금은 시험용 가게 1곳만 있고, 실제 목록이 오면 바뀐다.
 
 export type FoodKey = string; // catalog.json 의 foods[].key
 
@@ -81,6 +81,10 @@ export interface Restaurant {
 export const FOODS: FoodCategory[] = catalog.foods as FoodCategory[];
 
 export const RESTAURANTS: Restaurant[] = catalog.restaurants as Restaurant[];
+
+// 음식 종류 중 근처에 가게가 있는 것만 (고르는 버튼·추천에 쓴다). 말로 한 음식은 FOODS 전체로 알아듣는다
+export const FOODS_ON_OFFER: FoodCategory[] = FOODS.filter((f) => RESTAURANTS.some((r) => r.food === f.key));
+export const hasStoresFor = (food: FoodKey) => RESTAURANTS.some((r) => r.food === food);
 
 export function matchFood(text: string): FoodCategory | undefined {
   const low = text.toLowerCase();
@@ -489,8 +493,8 @@ export interface BotPrompt {
 
 export const FOOD_PROMPT: BotPrompt = {
   text: "오늘은 어떤 음식이 당기세요?\n말씀해 주시면 근처 맛집을 추천해 드릴게요.",
-  say: `오늘은 어떤 음식이 당기세요? ${FOODS.map((f) => f.label).join(", ")} 뭐든 좋아요. 말씀해 주시면 근처 맛집을 추천해 드릴게요!`,
-  choices: FOODS.map((f) => ({ label: f.label, value: f.label })),
+  say: `오늘은 어떤 음식이 당기세요? ${FOODS_ON_OFFER.map((f) => f.label).join(", ")} 뭐든 좋아요. 말씀해 주시면 근처 맛집을 추천해 드릴게요!`,
+  choices: FOODS_ON_OFFER.map((f) => ({ label: f.label, value: f.label })),
   placeholder: "먹고 싶은 음식을 입력하세요",
 };
 

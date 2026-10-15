@@ -6,7 +6,7 @@ import { LOGIN_MAX_PER_IP, LOGIN_MAX_PER_USER, LOGIN_WINDOW_MS, PRIVACY_VERSION,
 import { normalizePhone } from "./contact.mjs";
 import { ORDER_KEEP_YEARS, WITHDRAWN, openDb } from "./db.mjs";
 import { STORE_IDS } from "./stores.mjs";
-import { pauseEndText, todayKST, withTopic } from "./stores.mjs";
+import { catalogWithMenu, pauseEndText, todayKST, withTopic } from "./stores.mjs";
 import { hashPassword } from "./auth.mjs";
 import { createVerifier } from "./verification.mjs";
 
@@ -636,6 +636,12 @@ describe("사장님 배달 메뉴 관리", () => {
   it("목록 파일의 메뉴가 DB 에 들어가 메뉴 목록으로 나온다", async () => {
     const menu = (await call("GET", "/api/menu")).body;
     assert.ok(menu.find((d) => d.id === "d1" && d.name === "옛날통닭" && d.active === true && d.source === "catalog"));
+  });
+
+  it("목록 파일에서 빠진 가게의 메뉴는 DB 에 남아 있어도 메뉴 목록과 내보내기에 나오지 않는다", async () => {
+    const gone = db.addMenuItem({ restaurantId: "zz9", name: "사라진 메뉴", price: 10000, unit: "개", keywords: [] });
+    assert.ok(!(await call("GET", "/api/menu")).body.some((d) => d.id === gone.id));
+    assert.ok(!catalogWithMenu(db).deliveryMenu.some((d) => d.id === gone.id));
   });
 
   it("사장님이 메뉴를 추가하면 바로 판매되고, 매장 음식 종류가 키워드에 들어가며, 주문 금액도 그 가격으로 정해진다", async () => {

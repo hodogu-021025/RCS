@@ -196,6 +196,23 @@ describe("3. 안 되는 것 대신 할 수 있는 것", () => {
     expect(await find(/장락반점을 선택했어요/)).toBeTruthy();
   });
 
+  // 테스트 목록의 디저트는 근처 가게가 없는 음식 종류다
+  it("근처에 가게가 없는 음식은 없다고 알리고, 음식 고르는 버튼에서도 뺀다", async () => {
+    await renderChat();
+    await say("케이크 먹고 싶어");
+    expect(await find(/아직 근처에 디저트 가게가 없어요/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "디저트" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "치킨" }).length).toBeGreaterThan(0);
+  });
+
+  it("배달도 가게도 없는 음식은 '대신 맛집에서' 권하지 않는다", async () => {
+    await renderChat();
+    await say("케이크 배달해줘");
+    expect(await find(/케이크는 아직 배달이 안 돼요/)).toBeTruthy();
+    expect(await find(/아직 근처에 디저트 가게가 없어요/)).toBeTruthy();
+    expect(screen.queryByText(/대신 근처 디저트 맛집/)).not.toBeInTheDocument();
+  });
+
   it("품절 메뉴는 비슷한 메뉴를 권한다", async () => {
     server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: true } } });
     await renderChat();

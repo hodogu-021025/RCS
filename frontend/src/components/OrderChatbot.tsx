@@ -27,6 +27,8 @@ import {
   restaurantById,
   FOOD_PROMPT,
   FOODS,
+  FOODS_ON_OFFER,
+  hasStoresFor,
   MAX_DAYS_AHEAD,
   MAX_PEOPLE,
   MAX_QTY,
@@ -610,9 +612,14 @@ export function OrderChatbot() {
     list: Restaurant[],
     opts: { heading?: string; lead?: NewMessage[]; next?: Stage; choices?: Choice[]; placeholder?: string; delay?: number } = {},
   ) {
-    // 추천할 곳이 하나도 없으면(그 음식 가게가 모두 일시 중지 중) 빈 목록 대신 그렇다고 알리고 다른 음식을 권한다
+    // 추천할 곳이 하나도 없으면 빈 목록 대신 그렇다고 알리고 다른 음식을 권한다
+    // (그 음식을 파는 가게가 아예 없을 때와, 있지만 모두 일시 중지 중일 때 말이 다르다)
     if (list.length === 0) {
-      const text = `지금 ${foodLabel ? `근처 ${foodLabel} 가게가` : "근처 가게가"} 모두 잠시 쉬고 있어요.\n다른 음식은 어떠세요?`;
+      const food = FOODS.find((f) => f.label === foodLabel);
+      const text =
+        food && !hasStoresFor(food.key)
+          ? `아직 근처에 ${foodLabel} 가게가 없어요.\n다른 음식은 어떠세요?`
+          : `지금 ${foodLabel ? `근처 ${foodLabel} 가게가` : "근처 가게가"} 모두 잠시 쉬고 있어요.\n다른 음식은 어떠세요?`;
       setStage("food");
       botReply(() =>
         push(
@@ -1228,7 +1235,7 @@ export function OrderChatbot() {
       // "아무거나", "추천해줘": 지금 시간대에 어울리는 음식의 근처 맛집을 권한다
       if (detectIntent(text) === "hungry") {
         const meal = mealOf(new Date());
-        const pick = foodsForMeal(meal)[0] ?? FOODS[0];
+        const pick = foodsForMeal(meal)[0] ?? FOODS_ON_OFFER[0] ?? FOODS[0];
         setRsvSlots((prev) => ({ ...prev, ...slots }));
         showRestaurants(pick.label, nearbyRestaurants(pick.key), { lead: [botText(`그럼 ${MEAL_WORD[meal]}으로 ${pick.label} 어떠세요?`)] });
         return;
@@ -1352,8 +1359,10 @@ export function OrderChatbot() {
     if (food && !deliversFood(food) && (menu === "배달" || stage === "menu")) {
       const word = foodWord(text, food);
       startFresh();
+      // 그 음식을 파는 근처 가게도 없으면 "대신 맛집에서" 대신 배달이 안 된다는 말만 하고, 가게가 없다는 안내로 이어진다
+      const offer = hasStoresFor(food.key) ? `\n대신 근처 ${food.label} 맛집에서 드시는 건 어때요?` : "";
       showRestaurants(food.label, nearbyRestaurants(food.key), {
-        lead: [botText(`${withTopicParticle(word)} 아직 배달이 안 돼요.\n대신 근처 ${food.label} 맛집에서 드시는 건 어때요?`)],
+        lead: [botText(`${withTopicParticle(word)} 아직 배달이 안 돼요.${offer}`)],
       });
       return;
     }
