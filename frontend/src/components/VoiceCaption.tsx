@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { CopyButton } from "./CopyButton";
+import { TelLink } from "./TelLink";
 import type { CaptionCard } from "./OrderChatbot";
 
 // 한 글자씩 나오는 간격. 긴 답은 조금 빠르게 적어 전체가 5초 안팎에 끝나게 한다
@@ -63,7 +64,7 @@ function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messa
                     {row.badge && <span className="place-badge">{row.badge}</span>}
                   </dt>
                   <dd className={row.emphasis ? "price" : undefined}>
-                    {row.value}
+                    {row.tel ? <TelLink phone={row.value} /> : row.value}
                     {row.copy && <CopyButton text={row.copy} label="계좌번호 복사" />}
                   </dd>
                 </div>

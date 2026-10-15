@@ -36,7 +36,8 @@
 //   DELETE /api/stores/:id/bank        (지우면 배달 주문을 받지 않는다)
 //   GET    /api/bank                   관리자 → { 매장 id: 계좌 }  등록된 매장 계좌 전체
 //   GET    /api/owners                 관리자
-//   POST   /api/owners                 { username, password, newStore | storeId }   관리자. 사장님 이름은 "매장 이름 사장님"
+//   POST   /api/owners                 { username, password, phone, newStore | storeId }   관리자. 사장님 이름은 "매장 이름 사장님"
+//                                      phone: 매장 전화번호 (사장님 계정 전화번호로 두고, 주문에 storePhone 으로 실어 손님에게 보여 준다. newStore 면 필수)
 //                                      newStore: { name, food, hours?, address? } 새 매장을 만들고 그 매장 사장님으로
 //   POST   /api/owners/:username/approve  관리자: 스스로 가입한 사장님 승인 (승인 전에는 매장 주문·예약·설정에 접근할 수 없다)
 //   DELETE /api/owners/:username       관리자 (승인 거절도 이것으로)
@@ -205,7 +206,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
 
   // ---- 계정 ----
   // 입력을 검사해 정리된 값을 돌려준다. 문제가 있으면 400
-  function checkAccount({ role, username, password, name, email, storeId }) {
+  function checkAccount({ role, username, password, name, email, storeId, phone }) {
     username = str(username, 20);
     name = str(name, 40);
     const error = usernameError(username) ?? passwordError(password) ?? (!name ? "이름을 적어 주세요." : null);
@@ -213,8 +214,11 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     if (db.findUser(username)) throw bad("이미 있는 아이디예요.");
     if (role === "owner" && !hasStoreId(storeId)) throw bad("매장을 골라 주세요.");
     if (email && db.emailTaken(email)) throw bad("이미 가입된 이메일이에요.");
-    return { role, username, password, name, email, storeId: role === "owner" ? storeId : undefined };
+    return { role, username, password, name, email, storeId: role === "owner" ? storeId : undefined, phone };
   }
+  // 매장 전화번호 = 그 매장 사장님 계정의 전화번호 (관리자가 계정을 만들 때 넣고, 사장님이 계정 관리에서 바꾼다).
+  // 주문한 손님에게 보여 주려고 주문에 적어 둔다
+  const storePhone = (storeId) => db.listByRole("owner").find((u) => u.storeId === storeId && u.approved !== false && u.phone)?.phone;
   const createAccount = (input) => {
     const a = checkAccount(input);
     return db.createUser({ ...a, passwordHash: hashPassword(a.password) });
@@ -396,6 +400,9 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       // 입금 기한은 주문 시각 기준: 기한이 지났는지도 같은 주문 시각(created_at)으로 본다
       const at = now();
       Object.assign(order, { bank, depositor: user.name, payBy: at + PAY_WINDOW_MS });
+      // 가게 전화번호 (손님이 입금·배달 일로 가게에 전화할 수 있게). 사장님이 번호를 등록하지 않았으면 싣지 않는다
+      const shopPhone = storePhone(o.storeId);
+      if (shopPhone) order.storePhone = shopPhone;
       return db.addOrder({ customer: user.username, customerName: user.name, payment: PAYMENT_METHOD, storeId: o.storeId, order, status: "입금 대기", createdAt: at });
     }],
     // 손님이 취소: 주문한 고객님이 로그인해 있고, 가게가 아직 준비를 시작하지 않았을 때만
@@ -614,18 +621,21 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();
       // 관리자 화면은 새 매장(newStore: 이름·음식 종류·영업시간·주소)을 입력해 매장과 사장님 계정을 함께 만든다.
       // 이미 있는 매장(storeId)에 붙이는 것도 API 로는 받는다 (목록 파일의 매장처럼 사장님이 아직 없는 매장).
-      // 사장님 이름은 늘 "매장 이름 사장님"으로 정한다
+      // 사장님 이름은 늘 "매장 이름 사장님"으로 정한다. 전화번호(phone)는 매장 전화번호로 주문한 손님에게 보인다 (새 매장이면 꼭 받는다)
+      const phone = body.phone === undefined || body.phone === "" ? undefined : normalizePhone(body.phone);
+      if (phone === null) throw bad(PHONE_ERROR);
       if (body.newStore) {
         const store = cleanNewStore(body.newStore);
         if (store.error) throw bad(store.error);
+        if (!phone) throw bad("매장 전화번호를 적어 주세요.");
         if (allStores(db).some((s) => sameStoreName(s.name, store.name))) throw bad("같은 이름의 매장이 이미 있어요.");
         // 계정 입력을 먼저 검사해서, 아이디가 겹치는 등으로 계정을 못 만들면 매장도 만들지 않는다
         checkAccount({ role: "user", username: body.username, password: body.password, name: `${store.name} 사장님` });
         const created = db.addStore(store);
-        return createAccount({ role: "owner", username: body.username, password: body.password, name: `${created.name} 사장님`, storeId: created.id });
+        return createAccount({ role: "owner", username: body.username, password: body.password, name: `${created.name} 사장님`, storeId: created.id, phone });
       }
       const storeId = str(body.storeId, 40);
-      return createAccount({ role: "owner", username: body.username, password: body.password, name: `${storeName(storeId) ?? "매장"} 사장님`, storeId });
+      return createAccount({ role: "owner", username: body.username, password: body.password, name: `${storeName(storeId) ?? "매장"} 사장님`, storeId, phone });
     }],
     ["POST", "/api/owners/:username/approve", ({ params, user }) => {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();

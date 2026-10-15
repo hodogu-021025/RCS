@@ -31,6 +31,7 @@ export interface Order {
   depositor?: string; // 입금자명 (주문한 회원 이름)
   payBy?: number; // 입금 기한 (밀리초). 지나면 서버가 자동으로 취소한다
   paidAt?: number; // 사장님이 입금을 확인한 시각
+  storePhone?: string; // 가게 전화번호 (그 매장 사장님 계정의 번호. 주문할 때의 것 그대로)
   cancelNote?: string; // 자동 취소된 이유
 }
 
@@ -667,6 +668,7 @@ export interface OrderRow {
   emphasis?: boolean;
   badge?: string; // 이름 옆에 붙는 작은 태그 (오늘의 메뉴)
   copy?: string; // 옆에 "복사" 버튼을 달고 누르면 이 글자를 복사한다 (계좌번호)
+  tel?: boolean; // 값이 전화번호: 누르면 전화를 건다
 }
 
 export function orderCardRows(order: Order): OrderRow[] {

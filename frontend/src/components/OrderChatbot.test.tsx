@@ -110,6 +110,7 @@ describe("OrderChatbot", () => {
   });
 
   it("주문을 확인하면 결제수단을 묻지 않고 계좌이체로 주문하고, 입금 계좌·금액·기한과 계좌번호 복사 버튼을 보여 준다", async () => {
+    server.createAccount({ username: "chickenboss", name: "청전 치킨공방 사장님", role: "owner", storeId: "h3", phone: "043-111-2222" });
     const writeText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     renderChat();
@@ -125,6 +126,8 @@ describe("OrderChatbot", () => {
     expect(screen.getByText("김소비")).toBeInTheDocument(); // 입금자명은 주문한 회원 이름
     expect(screen.getByText(/^(내일 )?\d{2}:\d{2}까지$/)).toBeInTheDocument();
     expect(screen.getByText(/기한까지 입금이 확인되지 않으면 주문이 자동으로 취소돼요/)).toBeInTheDocument();
+    // 그 매장 사장님 계정의 전화번호가 가게 전화로 보이고, 누르면 전화를 건다
+    expect(screen.getByRole("link", { name: "043-111-2222" })).toHaveAttribute("href", "tel:0431112222");
 
     const copy = screen.getByRole("button", { name: "계좌번호 복사: 00000000000" });
     fireEvent.click(copy);

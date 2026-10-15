@@ -335,6 +335,9 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .card dt { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .card dd { margin: 0; font-weight: 600; }
 .card .price { color: var(--accent); font-weight: 700; }
+/* 가게 전화번호: 누르면 전화를 건다 (채팅 카드·내 주문) */
+.tel-link { color: var(--accent); font-weight: 700; text-decoration: none; }
+.tel-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 /* 채팅 말풍선 속 표도 살짝 떠오르며 나타난다 */
 .card { animation: card-rise .38s cubic-bezier(.2, .8, .2, 1) both; animation-delay: .08s; }
 .card-note { margin-top: 10px; }

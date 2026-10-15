@@ -44,10 +44,17 @@ function ContactSection() {
           {!session.address ? "배달지를 등록해야 배달 주문을 할 수 있어요." : "연락받을 휴대폰 번호를 등록해야 배달 주문을 할 수 있어요."}
         </p>
       ) : (
-        <p className="contact-lead">{customer ? "챗봇으로 배달 주문하면 이 주소와 번호로 보내 드려요." : "관리자가 매장 일로 연락드릴 번호예요."}</p>
+        <p className="contact-lead">
+          {customer
+            ? "챗봇으로 배달 주문하면 이 주소와 번호로 보내 드려요."
+            : session.role === "owner"
+              ? "매장 전화번호예요. 주문한 손님에게 가게 전화번호로 보이고, 관리자도 이 번호로 연락드려요."
+              : "관리자가 매장 일로 연락드릴 번호예요."}
+        </p>
       )}
       <form className="contact-form" onSubmit={onSave} noValidate>
         <PhoneField
+          label={session.role === "owner" ? "매장 전화번호" : undefined}
           value={phone}
           onChange={(v) => {
             setSaved(false);

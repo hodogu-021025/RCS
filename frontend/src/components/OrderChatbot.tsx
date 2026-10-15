@@ -2,6 +2,7 @@ import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSP
 import backgroundVideo from "../image/saylo_background.mp4";
 import { CopyButton } from "./CopyButton";
 import { InstallBanner } from "./InstallBanner";
+import { TelLink } from "./TelLink";
 import { AccountIcon, ChatIcon, HelpIcon, MenuIcon, MicIcon, PlusIcon, SpeakerIcon } from "./icons";
 import { Tutorial } from "./Tutorial";
 import { markTutorialSeen, tutorialSeen } from "./tutorialSeen";
@@ -1856,7 +1857,7 @@ export function OrderChatbot() {
                   <Fragment key={row.label}>
                     <dt>{row.label}</dt>
                     <dd className={row.emphasis ? "price" : undefined}>
-                      {row.value}
+                      {row.tel ? <TelLink phone={row.value} /> : row.value}
                       {row.copy && <CopyButton text={row.copy} label="계좌번호 복사" />}
                     </dd>
                   </Fragment>

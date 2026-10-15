@@ -15,6 +15,8 @@ import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
 import { PasswordField } from "./PasswordField";
+import { PhoneField } from "./PhoneField";
+import { PHONE_ERROR, normalizePhone } from "../components/delivery";
 
 type Tab = "all" | "stores" | "stats" | "users";
 type KindFilter = "all" | "delivery" | "reservation";
@@ -261,12 +263,17 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
 // 계정 만들기에서 "새 매장 직접 입력"을 고른 값 (매장 id 와 겹치지 않는 글자)
 const EMPTY_STORE = { name: "", food: "", open: "11:00", close: "21:00", address: "" };
 
+// 전화번호 칸 (없으면 "-")
+const phoneText = (phone?: string) => phone ?? "-";
+
 // 식당마다 사장님 계정을 보여 주고, 새 사장님 계정을 만든다.
-// 계정을 만들 때 매장 정보(이름·음식 종류·영업시간·주소)를 입력하면 그 매장도 함께 만든다. 사장님 이름은 "매장 이름 사장님"
+// 계정을 만들 때 매장 정보(이름·음식 종류·영업시간·주소)를 입력하면 그 매장도 함께 만든다. 사장님 이름은 "매장 이름 사장님".
+// 매장 전화번호는 사장님 계정의 전화번호로 저장되고, 주문한 손님에게 "가게 전화"로 보인다
 function StoresTab() {
   const owners = useDb(["settings", "accounts"]).owners;
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
   const [store, setStore] = useState(EMPTY_STORE);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null); // 방금 만든 계정 안내
@@ -281,14 +288,18 @@ function StoresTab() {
     const storeName = store.name.trim().replace(/\s+/g, " ");
     if (!storeName) return setError("매장 이름을 적어 주세요.");
     if (!store.food) return setError("음식 종류를 골라 주세요.");
+    if (!phone.trim()) return setError("매장 전화번호를 적어 주세요.");
+    const shopPhone = normalizePhone(phone);
+    if (!shopPhone) return setError(PHONE_ERROR);
     try {
       const { open, close, ...rest } = store;
-      await addOwner({ username: u, password, newStore: { ...rest, name: storeName, hours: `${open} - ${close}` } });
+      await addOwner({ username: u, password, phone: shopPhone, newStore: { ...rest, name: storeName, hours: `${open} - ${close}` } });
     } catch (err) {
       return setError((err as Error).message); // 이미 있는 아이디·같은 이름의 매장 등 서버가 거절한 이유
     }
     setUsername("");
     setPassword("");
+    setPhone("");
     setStore(EMPTY_STORE);
     setError(null);
     setCreated(`${u} 계정과 ${storeName} 매장을 만들었어요. 사장님 이름은 "${storeName} 사장님"이에요.`);
@@ -355,6 +366,10 @@ function StoresTab() {
                     <dt>이메일</dt>
                     <dd>{o.email ?? "-"}</dd>
                   </div>
+                  <div>
+                    <dt>전화번호</dt>
+                    <dd>{phoneText(o.phone)}</dd>
+                  </div>
                 </dl>
                 <div className="record-actions">
                   <button type="button" className="btn primary small" onClick={() => run(approveOwner(o.username))}>
@@ -414,6 +429,16 @@ function StoresTab() {
                             mine.map((o) => `${o.username} (${o.name})${o.approved === false ? " · 승인 대기" : ""}`).join(", ")
                           ) : (
                             <span className="muted">없음</span>
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>매장 전화</dt>
+                        <dd>
+                          {mine.some((o) => o.phone) ? (
+                            mine.filter((o) => o.phone).map((o) => o.phone).join(", ")
+                          ) : (
+                            <span className="muted">없음 · 손님에게 안 보임</span>
                           )}
                         </dd>
                       </div>
@@ -501,6 +526,8 @@ function StoresTab() {
                 <input type="time" value={store.close} onChange={(e) => e.target.value && setStoreField("close")(e.target.value)} />
               </label>
             </div>
+            <PhoneField label="매장 전화번호" value={phone} onChange={setPhone} />
+            <p className="form-hint muted">주문한 손님에게 가게 전화번호로 보여요. 사장님 계정의 연락처로도 쓰이고, 사장님이 계정 관리에서 바꿀 수 있어요.</p>
             <label>
               <span>주소 (선택)</span>
               <input value={store.address} onChange={(e) => setStoreField("address")(e.target.value)} maxLength={100} />
@@ -627,6 +654,10 @@ function UsersTab({ rows }: { rows: Row[] }) {
                   <span className="muted">{m.username}</span>
                 </div>
                 <dl>
+                  <div>
+                    <dt>전화번호</dt>
+                    <dd>{phoneText(m.phone)}</dd>
+                  </div>
                   <div>
                     <dt>이메일</dt>
                     <dd>{m.email ?? "-"}</dd>

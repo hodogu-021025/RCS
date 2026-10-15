@@ -653,16 +653,23 @@ describe("관리자 페이지", () => {
     await click("계정 만들기");
     expect(await screen.findByRole("alert")).toHaveTextContent("음식 종류를 골라 주세요");
     choose("음식 종류", "치킨");
+    // 매장 전화번호도 꼭 적는다 (주문한 손님에게 가게 전화번호로 보인다)
+    await click("계정 만들기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("매장 전화번호를 적어 주세요");
+    fill({ "매장 전화번호": "12345" });
+    await click("계정 만들기");
+    expect(await screen.findByRole("alert")).toHaveTextContent("010-1234-5678 형식");
+    fill({ "매장 전화번호": "0431234567" });
     await click("계정 만들기");
     expect(await screen.findByRole("status")).toHaveTextContent('newstoreboss 계정과 하소 닭강정 매장을 만들었어요. 사장님 이름은 "하소 닭강정 사장님"이에요.');
     const owner = server.db.findUser("newstoreboss")!;
-    expect(owner).toMatchObject({ role: "owner", name: "하소 닭강정 사장님" });
+    expect(owner).toMatchObject({ role: "owner", name: "하소 닭강정 사장님", phone: "043-123-4567" });
     expect(server.db.storeById(owner.storeId!)).toMatchObject({ name: "하소 닭강정", food: "chicken", hours: "11:00 - 21:00", address: "제천시 하소동 1-2" });
     // 입력칸은 비워진다
     expect(screen.getByLabelText("매장 이름")).toHaveValue("");
 
     // 이미 있는 아이디, 이미 있는 매장 이름(띄어쓰기 차이도 같은 이름)은 서버가 거절한다
-    fill({ 아이디: "newstoreboss", 비밀번호: "password1", "매장 이름": "다른 가게" });
+    fill({ 아이디: "newstoreboss", 비밀번호: "password1", "매장 이름": "다른 가게", "매장 전화번호": "010-2222-3333" });
     choose("음식 종류", "한식");
     await click("계정 만들기");
     expect(await screen.findByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
@@ -672,6 +679,7 @@ describe("관리자 페이지", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "매장 목록" }));
     expect(await screen.findByText("newstoreboss (하소 닭강정 사장님)")).toBeInTheDocument();
+    expect(screen.getByText("043-123-4567")).toBeInTheDocument(); // 매장 전화
     await click("newstoreboss 삭제");
     await waitFor(() => expect(server.db.findUser("newstoreboss")).toBeNull());
   });
@@ -692,7 +700,7 @@ describe("관리자 페이지", () => {
 
   it("통계 탭은 건수와 매출을, 사용자 탭은 가입한 고객님을 보여 준다", async () => {
     server.createAccount(admin);
-    server.createAccount({ ...KIM, email: "kim@example.com" });
+    server.createAccount({ ...KIM, email: "kim@example.com", phone: "010-5555-6666" });
     seedOrder(KIM, chicken, 2);
     await loginAs("adminuser");
     open("#/admin");
@@ -702,6 +710,7 @@ describe("관리자 페이지", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "사용자" }));
     expect(await screen.findByText("kim@example.com")).toBeInTheDocument();
+    expect(screen.getByText("010-5555-6666")).toBeInTheDocument(); // 가입 회원의 전화번호
     fireEvent.click(screen.getByRole("tab", { name: "이용 내역" }));
     expect(await screen.findByText("이용 내역 (1)")).toBeInTheDocument();
     expect(screen.queryByText("kim@example.com")).not.toBeInTheDocument(); // 세부 메뉴마다 한 화면씩
@@ -777,7 +786,7 @@ describe("계좌이체 (사장님·관리자·내 주문)", () => {
       customerName: KIM.name,
       payment: "계좌이체",
       storeId: "h3",
-      order: { ...makeOrder(chicken, 1, TEST_DELIVERY), bank: TEST_BANK, depositor: KIM.name, payBy },
+      order: { ...makeOrder(chicken, 1, TEST_DELIVERY), bank: TEST_BANK, depositor: KIM.name, payBy, storePhone: "043-111-2222" },
       status: "입금 대기",
     });
     const expired = server.db.addOrder({
@@ -795,6 +804,9 @@ describe("계좌이체 (사장님·관리자·내 주문)", () => {
     expect(screen.getByRole("button", { name: "계좌번호 복사: 00000000000" })).toBeInTheDocument();
     expect(screen.getByText(/까지 \(지나면 자동 취소\)/)).toBeInTheDocument();
     expect(screen.getByText("입금 기한이 지나 자동으로 취소됐어요.")).toBeInTheDocument();
+    // 가게 전화번호는 누르면 전화를 거는 링크 (번호가 없는 주문에는 그 줄이 없다)
+    expect(screen.getByRole("link", { name: "043-111-2222" })).toHaveAttribute("href", "tel:0431112222");
+    expect(screen.getAllByText("가게 전화")).toHaveLength(1);
 
     await click("주문 취소");
     await waitFor(() => expect(server.db.orderById(waiting.id)?.status).toBe("취소"));
@@ -1133,7 +1145,9 @@ describe("로그인한 고객님의 연락처·배달지", () => {
     open("#/account");
     expect(await screen.findByRole("heading", { name: "연락처" })).toBeInTheDocument();
     expect(screen.queryByLabelText("배달지")).not.toBeInTheDocument();
-    fill({ "휴대폰 번호": "01055556666" });
+    // 사장님의 번호는 매장 전화번호 (주문한 손님에게 보인다)
+    expect(screen.getByText(/주문한 손님에게 가게 전화번호로 보이고/)).toBeInTheDocument();
+    fill({ "매장 전화번호": "01055556666" });
     await click("저장");
     expect(await screen.findByRole("status")).toHaveTextContent("저장했어요");
     expect(server.db.findUser("chickenboss")).toMatchObject({ phone: "010-5555-6666" });

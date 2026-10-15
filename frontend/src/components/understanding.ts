@@ -324,12 +324,15 @@ function transferRows(order: Order) {
   ];
 }
 
+// 가게 전화번호 줄 (사장님이 번호를 등록했으면). 누르면 전화를 건다
+const storePhoneRows = (order: Order) => (order.storePhone ? [{ label: "가게 전화", value: order.storePhone, tel: true }] : []);
+
 // 주문을 넣은 직후: 어디로 얼마를 언제까지 보내면 되는지
 export function transferCard(o: OrderRecord): InfoCard {
   const { order } = o;
   return {
     title: `주문을 받았어요! 아래 계좌로 입금해 주세요.`,
-    rows: [{ label: "주문", value: orderLabel(o) }, ...transferRows(order)],
+    rows: [{ label: "주문", value: orderLabel(o) }, ...transferRows(order), ...storePhoneRows(order)],
     note: "사장님이 입금을 확인하면 준비를 시작해요. 기한까지 입금이 확인되지 않으면 주문이 자동으로 취소돼요.",
     say: order.bank
       ? `주문을 받았어요. ${order.bank.bank} ${order.bank.account}, 예금주 ${order.bank.holder}에게 ${won(order.price)}을 ${order.payBy ? `${untilText(order.payBy)}까지 ` : ""}입금해 주세요. 사장님이 입금을 확인하면 준비를 시작해요.`
@@ -347,6 +350,7 @@ export function orderStatusCard(o: OrderRecord): InfoCard {
       { label: "상태", value: o.status },
       ...(o.status === "입금 대기" ? transferRows(o.order) : []),
       ...(coming ? [{ label: "도착 예정", value: `약 ${hhmm(o.createdAt + ETA_MINUTES * 60_000)}`, emphasis: true }] : []),
+      ...storePhoneRows(o.order),
     ],
     note: (o.status === "취소" && o.order.cancelNote) || STATUS_NOTE[o.status],
   };

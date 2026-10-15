@@ -956,7 +956,7 @@ describe("관리자가 새 매장을 직접 입력해 사장님 계정 만들기
     db.createUser({ username: "storeadmin1", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
     admin = (await call("POST", "/api/auth/login", { username: "storeadmin1", password: "password1" })).body.token;
   });
-  const newOwner = (username, newStore, extra = {}) => call("POST", "/api/owners", { username, password: "password1", newStore, ...extra }, admin);
+  const newOwner = (username, newStore, extra = {}) => call("POST", "/api/owners", { username, password: "password1", phone: "043-123-4567", newStore, ...extra }, admin);
 
   it("새 매장을 만들고 그 매장 사장님 계정을 만든다. 매장 목록과 메뉴·주문·계좌에 그대로 쓰인다", async () => {
     // 보낸 사장님 이름과 대표 메뉴는 쓰지 않는다 (이름은 매장 이름으로 정하고, 대표 메뉴는 받지 않는다)
@@ -980,6 +980,14 @@ describe("관리자가 새 매장을 직접 입력해 사장님 계정 만들기
     const order = await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "순살 닭강정", qty: 1 } }, buyer);
     assert.equal(order.status, 200, JSON.stringify(order.body));
     assert.equal(order.body.order.store.name, "하소 닭강정");
+    // 계정을 만들 때 넣은 전화번호가 매장 전화번호로 주문에 실린다 (손님이 가게에 전화할 수 있게)
+    assert.equal(order.body.order.storePhone, "043-123-4567");
+    assert.equal((await call("GET", "/api/owners", undefined, admin)).body.find((o) => o.username === "newstore01").phone, "043-123-4567");
+    // 사장님이 계정 관리에서 번호를 바꾸면 다음 주문부터 바뀐 번호가 실린다 (이미 받은 주문은 그대로)
+    assert.equal((await call("PATCH", "/api/auth/contact", { phone: "01098765432" }, owner)).status, 200);
+    const next = await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "순살 닭강정", qty: 1 } }, buyer);
+    assert.equal(next.body.order.storePhone, "010-9876-5432");
+    assert.equal((await call("GET", "/api/orders", undefined, buyer)).body.find((r) => r.id === order.body.id).order.storePhone, "043-123-4567");
     const rsv = await call("POST", "/api/reservations", { restaurantId: storeId, restaurantName: "가짜 이름", date: "2026-12-01", time: "18:00", people: 2 });
     assert.equal(rsv.body.restaurantName, "하소 닭강정"); // 매장 이름은 서버가 정한다
     // 내보낸 목록에도 관리자가 만든 매장이 들어간다 (source 는 빼고)
@@ -996,6 +1004,9 @@ describe("관리자가 새 매장을 직접 입력해 사장님 계정 만들기
     // 아이디가 이미 있으면 매장을 만들지 않는다
     assert.match((await newOwner("newstore01", { name: "새 가게", food: "korean" })).body.error, /이미 있는 아이디/);
     assert.match((await newOwner("bad", { name: "새 가게", food: "korean" })).body.error, /6~20자/);
+    // 매장 전화번호는 꼭 받고, 번호 모양이 아니면 거절한다
+    assert.match((await newOwner("newstore02", { name: "새 가게", food: "korean" }, { phone: undefined })).body.error, /매장 전화번호/);
+    assert.match((await newOwner("newstore02", { name: "새 가게", food: "korean" }, { phone: "12345" })).body.error, /010-1234-5678/);
     assert.equal((await call("GET", "/api/stores")).body.length, before);
     assert.equal(db.findUser("newstore02"), null);
   });
@@ -1012,7 +1023,7 @@ describe("아이디·비밀번호 최소 길이 6자", () => {
   it("6자 아이디·6자 비밀번호로 계정을 만들고 로그인할 수 있고, 5자는 거절한다", async () => {
     db.createUser({ username: "sixadmin1", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
     const admin = (await call("POST", "/api/auth/login", { username: "sixadmin1", password: "password1" })).body.token;
-    const make = (username, password, name) => call("POST", "/api/owners", { username, password, newStore: { name, food: "korean" } }, admin);
+    const make = (username, password, name) => call("POST", "/api/owners", { username, password, phone: "010-1111-2222", newStore: { name, food: "korean" } }, admin);
     assert.match((await make("abc12", "pass12", "다섯자 가게")).body.error, /6~20자/);
     assert.match((await make("abc123", "pass1", "다섯자 가게")).body.error, /6자 이상/);
     const ok = await make("abc123", "pass12", "여섯자 가게");

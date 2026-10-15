@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSession } from "../auth/auth";
 import { CopyButton } from "../components/CopyButton";
+import { TelLink } from "../components/TelLink";
 import { accountDigits, formatDate, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
 import { cancelMyOrder, useDb, type OrderRecord } from "../data/db";
 import { DashLayout } from "./DashLayout";
@@ -96,6 +97,14 @@ function OrderItem({ record: o }: { record: OrderRecord }) {
             <dd>{r.value}</dd>
           </div>
         ))}
+        {o.order.storePhone && (
+          <div>
+            <dt>가게 전화</dt>
+            <dd>
+              <TelLink phone={o.order.storePhone} />
+            </dd>
+          </div>
+        )}
         <div>
           <dt>결제</dt>
           <dd className="price">

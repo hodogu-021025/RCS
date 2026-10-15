@@ -61,6 +61,7 @@ export interface Account {
   email?: string;
   storeId?: string; // 사장님
   approved?: boolean; // 사장님: 관리자 승인 여부
+  phone?: string; // 연락처 (사장님은 매장 전화번호로 주문한 손님에게 보인다)
   createdAt: number;
 }
 
@@ -267,7 +268,7 @@ export interface NewStore {
   hours?: string;
   address?: string;
 }
-export async function addOwner(account: { username: string; password: string; newStore: NewStore }) {
+export async function addOwner(account: { username: string; password: string; phone: string; newStore: NewStore }) {
   await api("POST", "/api/owners", account);
   await refresh(["accounts", "settings"]);
 }
