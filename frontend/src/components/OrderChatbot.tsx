@@ -773,9 +773,10 @@ export function OrderChatbot() {
   function tryDelivery(text: string): boolean {
     const items = findDeliveryItems(text);
     if (items.length > 0) {
-      // "깐장치킨"은 "치킨"으로 여러 메뉴에 걸리지만, 이름이 비슷한 메뉴가 그중에 있으면 그 메뉴로 본다
+      // "깐장치킨"은 "치킨"으로 여러 메뉴에 걸리지만, 이름이 비슷한 메뉴가 그중에 있으면 그 메뉴로 본다.
+      // 세 글자 이하의 짧은 이름("족발 소")은 "족발 시켜줘"의 "족발시"처럼 한 글자만 달라도 비슷해 보이므로 이렇게 고르지 않는다
       const near = items.length > 1 ? fuzzyFind(text) : undefined;
-      const one = near?.kind === "menu" ? items.find((d) => d.id === near.item.id) : undefined;
+      const one = near?.kind === "menu" && [...squash(near.item.name)].length >= 4 ? items.find((d) => d.id === near.item.id) : undefined;
       deliverItems(one ? [one] : items, text);
       return true;
     }
@@ -1099,7 +1100,7 @@ export function OrderChatbot() {
             ...items.map((d) => ({ label: d.name, value: d.name })),
             { label: "식당 찾기", value: "식당" },
           ],
-          placeholder: "예) 간장치킨",
+          placeholder: items[0] ? `예) ${items[0].name}` : undefined, // 지금 권하는 첫 메뉴
           menu: items,
         }),
       ),

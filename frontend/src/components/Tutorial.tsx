@@ -5,7 +5,7 @@ import { AccountIcon, ChatIcon, HelpIcon, MicIcon, PlusIcon, SpeakerIcon } from 
 // 끝까지 보거나 닫으면 이 브라우저에선 다시 띄우지 않고(tutorialSeen.ts), 헤더의 "?" 버튼으로 언제든 다시 볼 수 있다
 
 // 2장의 예시 문장. 누르면 안내를 닫고 그 말을 보낸 것처럼 바로 해 본다
-const TUTORIAL_EXAMPLES = ["간장치킨 두 마리 시켜줘", "내일 저녁 7시 4명 식당 예약", "배고파, 뭐 먹지?", "내 주문 어디쯤 왔어?"];
+const TUTORIAL_EXAMPLES = ["치킨 두 마리 시켜줘", "내일 저녁 7시 4명 식당 예약", "배고파, 뭐 먹지?", "내 주문 어디쯤 왔어?"];
 
 interface Step {
   title: string;

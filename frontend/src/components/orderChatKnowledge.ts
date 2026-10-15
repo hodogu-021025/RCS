@@ -651,7 +651,7 @@ export const deliveryPrompt = (): BotPrompt => {
       ? `${dealsSay(menu)}오늘은 ${recommend(menu.map((d) => d.name))} 드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.`
       : "어떤 음식을 배달해 드릴까요?",
     choices: deliveryChoices(menu),
-    placeholder: "예) 간장치킨",
+    placeholder: menu[0] ? `예) ${menu[0].name}` : undefined, // 지금 권하는 첫 메뉴
   };
 };
 

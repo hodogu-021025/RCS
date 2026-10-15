@@ -60,12 +60,12 @@ describe("사용법 안내", () => {
   it("예시 문장을 누르면 안내를 닫고 그 말을 보낸 것처럼 바로 진행한다", () => {
     render(<OrderChatbot />);
     fireEvent.click(screen.getByRole("button", { name: "다음" }));
-    fireEvent.click(screen.getByRole("button", { name: "“간장치킨 두 마리 시켜줘”" }));
+    fireEvent.click(screen.getByRole("button", { name: "“치킨 두 마리 시켜줘”" }));
     expect(dialog()).not.toBeInTheDocument();
     wait(1000);
 
     fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
-    expect(screen.getByText("간장치킨 두 마리 시켜줘")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "응 해줘" })).toBeInTheDocument(); // 주문서까지 바로 간다
+    expect(screen.getByText("치킨 두 마리 시켜줘")).toBeInTheDocument();
+    expect(screen.getByText(/이런 메뉴를 추천해요/)).toBeInTheDocument(); // 치킨 메뉴를 바로 권한다
   });
 });
