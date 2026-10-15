@@ -22,11 +22,9 @@
 //   GET    /api/stores                 누구나: 매장 목록 (목록 파일 + 관리자가 만든 매장)
 //   GET    /api/stores/settings        누구나 (챗봇이 영업시간·품절을 본다)
 //   GET    /api/menu                   누구나: 배달 메뉴 전체 (판매 중지는 active: false)
-//   GET    /api/stats/popular
 //   POST   /api/stores/:id/menu        { name, price, unit, keywords?, choice? }  그 매장 사장님(승인)·관리자: 메뉴 추가, 바로 판매
 //                                      (choice: 세트 메뉴의 맛 고르기 { label, count, options: [{ name, extra }] })
 //   PATCH  /api/stores/:id/menu/:itemId  { active?, choice? }       판매 중지(false)·다시 판매(true) · 맛 고르기 붙이기·고치기(choice)·없애기(null)
-//   PATCH  /api/stores/:id/menu/:itemId  { active }                 판매 중지(false)·다시 판매(true)
 //   GET    /api/stats/popular          누구나: 최근 30일 메뉴별 주문 수·식당별 예약 수 (챗봇 추천 순서)
 //   PATCH  /api/stores/:id/settings    { hours? } · { item: { id, patch: { price?, soldOut?, discountPct? } } } · { special: { itemId } | null }
 //                                      · { pause: { from?: 밀리초, until: 밀리초 } | null }  그 매장 사장님·관리자
