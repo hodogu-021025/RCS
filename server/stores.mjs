@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const catalogPath = resolve(dirname(fileURLToPath(import.meta.url)), process.env.SAYLO_CATALOG || "catalog.json");
+// (test.env 가 CRLF 로 받아져도 경로 끝에 \r 이 붙지 않게 앞뒤 공백을 지운다)
+const catalogPath = resolve(dirname(fileURLToPath(import.meta.url)), process.env.SAYLO_CATALOG?.trim() || "catalog.json");
 const catalog = JSON.parse(readFileSync(catalogPath, "utf8"));
 
 export const RESTAURANTS = catalog.restaurants;
