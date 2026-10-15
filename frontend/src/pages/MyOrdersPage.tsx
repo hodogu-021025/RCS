@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSession } from "../auth/auth";
-import { CopyButton } from "../components/CopyButton";
+import { AccountText, CopyButton } from "../components/CopyButton";
 import { TelLink } from "../components/TelLink";
 import { accountDigits, formatDate, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
 import { cancelMyOrder, useDb, type OrderRecord } from "../data/db";
@@ -116,7 +116,7 @@ function OrderItem({ record: o }: { record: OrderRecord }) {
             <div>
               <dt>입금 계좌</dt>
               <dd>
-                {bank.bank} {bank.account}
+                <AccountText value={`${bank.bank} ${bank.account}`} />
                 <CopyButton text={accountDigits(bank.account)} label="계좌번호 복사" />
               </dd>
             </div>

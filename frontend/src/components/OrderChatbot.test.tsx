@@ -121,7 +121,8 @@ describe("OrderChatbot", () => {
     // 서버가 주문을 받은 뒤 입금 안내를 보여 준다: 실제 응답을 기다리도록 진짜 시계로 바꾼다
     vi.useRealTimers();
     expect(await screen.findByText(/주문을 받았어요! 아래 계좌로 입금해 주세요/, {}, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.getByText(`${TEST_BANK.bank} ${TEST_BANK.account}`)).toBeInTheDocument();
+    // 계좌번호는 줄 중간에서 끊기지 않게 따로 감싸 그리므로, 칸(dd) 전체 글자로 찾는다
+    expect(screen.getAllByRole("definition").some((dd) => dd.textContent?.startsWith(`${TEST_BANK.bank} ${TEST_BANK.account}`))).toBe(true);
     expect(screen.getByText(TEST_BANK.holder)).toBeInTheDocument();
     expect(screen.getByText("김소비")).toBeInTheDocument(); // 입금자명은 주문한 회원 이름
     expect(screen.getByText(/^(내일 )?\d{2}:\d{2}까지$/)).toBeInTheDocument();

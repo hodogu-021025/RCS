@@ -802,7 +802,8 @@ describe("계좌이체 (사장님·관리자·내 주문)", () => {
     void expired;
     await loginAs(KIM.username);
     open("#/me");
-    expect(await screen.findByText(`${TEST_BANK.bank} ${TEST_BANK.account}`, { exact: false })).toBeInTheDocument();
+    // 계좌번호는 줄 중간에서 끊기지 않게 따로 감싸 그리므로, 칸(dd) 전체 글자로 찾는다
+    await waitFor(() => expect(screen.getAllByRole("definition").some((dd) => dd.textContent?.startsWith(`${TEST_BANK.bank} ${TEST_BANK.account}`))).toBe(true));
     expect(screen.getByRole("button", { name: "계좌번호 복사: 00000000000" })).toBeInTheDocument();
     expect(screen.getByText(/까지 \(지나면 자동 취소\)/)).toBeInTheDocument();
     expect(screen.getByText("입금 기한이 지나 자동으로 취소됐어요.")).toBeInTheDocument();
