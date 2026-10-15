@@ -806,9 +806,12 @@ export function OrderChatbot() {
     const items = findDeliveryItems(text);
     if (items.length > 0) {
       // "깐장치킨"은 "치킨"으로 여러 메뉴에 걸리지만, 이름이 비슷한 메뉴가 그중에 있으면 그 메뉴로 본다.
-      // 세 글자 이하의 짧은 이름("족발 소")은 "족발 시켜줘"의 "족발시"처럼 한 글자만 달라도 비슷해 보이므로 이렇게 고르지 않는다
+      // 세 글자 이하의 짧은 이름("족발 소")은 "족발 시켜줘"의 "족발시"처럼 한 글자만 달라도 비슷해 보이므로 이렇게 고르지 않는다.
+      // "소떡소떡"처럼 말한 낱말로 시작하는 메뉴가 여럿이면(1개·2개 묶음·3개 묶음) 하나를 고르지 않고 그중에서 고르게 한다
       const near = items.length > 1 ? fuzzyFind(text) : undefined;
-      const one = near?.kind === "menu" && [...squash(near.item.name)].length >= 4 ? items.find((d) => d.id === near.item.id) : undefined;
+      const words = text.split(/\s+/).map(squash).filter((w) => [...w].length >= 2);
+      const ambiguous = words.some((w) => items.filter((d) => squash(d.name).startsWith(w)).length > 1);
+      const one = near?.kind === "menu" && !ambiguous && [...squash(near.item.name)].length >= 4 ? items.find((d) => d.id === near.item.id) : undefined;
       deliverItems(one ? [one] : items, text);
       return true;
     }
@@ -1065,15 +1068,18 @@ export function OrderChatbot() {
       // 지금 계정의 배달지로 보낸다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
       return () => {
         if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
-        if (item.choice) {
+        // 세트 메뉴는 지난번에 고른 맛 그대로 (수량이 바뀌었거나 그 맛이 메뉴에서 빠졌으면 맛부터 다시 고른다)
+        const picked = (last.order.choices ?? []).map((c) => item.choice?.options.find((o) => o.name === c.name));
+        const choices = item.choice && qty === last.order.qty && picked.length === item.choice.count * qty && picked.every(Boolean) ? (picked as ChosenOption[]) : undefined;
+        if (item.choice && !choices) {
           startOrder(item, qty);
           return;
         }
-        const next = makeOrder(item, qty, myDelivery);
+        const next = makeOrder(item, qty, myDelivery, choices);
         setLastItem(item);
         setOrder(next);
         setStage("confirm");
-        push(botText(`지난번에 드신 ${item.name} ${qty}${item.unit}로 주문서를 만들었어요.`), { role: "bot", kind: "order", order: next });
+        push(botText(`지난번에 드신 ${orderItemText(next)}로 주문서를 만들었어요.`), { role: "bot", kind: "order", order: next });
       };
     });
   }
@@ -1281,7 +1287,7 @@ export function OrderChatbot() {
         return;
       }
       if (!quickMenuReply(text) && findDeliveryItems(text).length === 0 && !detectIntent(text)) {
-        botReply(() => push(choicePrompt(choosing.item, choosing.qty, `어떤 ${withTopicParticle(c.label)} 드실지 잘 모르겠어요.`)));
+        botReply(() => push(choicePrompt(choosing.item, choosing.qty, `어떤 ${withObjectParticle(c.label)} 드실지 잘 모르겠어요.`)));
         return;
       }
       setChoosing(null);
@@ -1316,6 +1322,14 @@ export function OrderChatbot() {
       if (!wantsRestaurant && !restaurantNamed(text) && tryDelivery(text)) return;
       if (isNo(text)) {
         cancelDelivery();
+        return;
+      }
+      // "응", "좋아": 아직 고른 메뉴가 없으니 ("배달이 어려워요"가 아니라) 보여 드린 메뉴 중에서 골라 달라고 한다
+      if (isYes(text)) {
+        const lastBot = messages.at(-1);
+        const shown = lastBot?.role === "bot" && lastBot.kind === "text" && lastBot.menu?.length ? lastBot.menu : undefined;
+        const ask = "어떤 메뉴로 할지 골라 주세요.";
+        botReply(() => push(botPrompt({ ...(shown ? pickDeliveryPrompt(shown) : deliveryPrompt()), text: `${ask}\n이름을 말씀하시거나 아래에서 눌러 주세요.`, say: `${ask} 이름을 말씀하시거나 아래에서 눌러 주세요.` })));
         return;
       }
       if (!understood()) {

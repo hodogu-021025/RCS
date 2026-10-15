@@ -984,3 +984,55 @@ describe("취소했던 주문서 다시", () => {
     expect(screen.getAllByText(/대신 이런 메뉴는 어떠세요/).length).toBeGreaterThan(0);
   });
 });
+
+describe("손님 주문 시뮬레이션에서 찾은 것들", () => {
+  const SET_FLAVORS = [
+    { name: "간장 파닭", extra: 0 },
+    { name: "양념 파닭", extra: 0 },
+    { name: "뿌링클 치킨", extra: 1000 },
+  ];
+
+  it("메뉴를 고르는 중에 '응'이라고 하면 배달이 어렵다는 말 대신 메뉴부터 골라 달라고 한다", async () => {
+    await renderChat();
+    await say("치킨 시켜줘");
+    await find(/이런 메뉴를 추천해요/);
+    await type("응");
+    expect(await find(/어떤 메뉴로 할지 골라 주세요/)).toBeTruthy();
+    expect(screen.queryByText(/아직 배달이 어려워요/)).not.toBeInTheDocument();
+    expect(buttonsIn(/어떤 메뉴로 할지 골라 주세요/)).toEqual(expect.arrayContaining(["옛날통닭", "간장치킨"]));
+  });
+
+  it("'소떡소떡'처럼 같은 말로 시작하는 메뉴가 여럿이면 하나를 멋대로 고르지 않고 그중에서 고르게 한다", async () => {
+    for (const [name, price, unit] of [["소떡소떡 1개", 3000, "개"], ["소떡소떡 2개 묶음", 5000, "묶음"], ["소떡소떡 3개 묶음", 7000, "묶음"]] as const) {
+      server.db.addMenuItem({ restaurantId: "h3", name, price, unit, keywords: ["소떡소떡", "소떡"] });
+    }
+    await renderChat();
+    await say("소떡소떡 시켜줘");
+    expect(await find(/이런 메뉴를 추천해요/)).toBeTruthy();
+    expect(buttonsIn(/이런 메뉴를 추천해요/).filter((b) => b.startsWith("소떡"))).toEqual(["소떡소떡 1개", "소떡소떡 2개 묶음", "소떡소떡 3개 묶음"]);
+    await click("소떡소떡 2개 묶음");
+    expect(await find(/몇 묶음 주문할까요/)).toBeTruthy();
+  });
+
+  it("모르는 맛을 말하면 '어떤 맛을 드실지'라고 묻는다", async () => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["두마리", "세트"], choice: { label: "맛", count: 2, options: SET_FLAVORS } });
+    await renderChat();
+    await say("2마리 치킨 세트 1세트");
+    await type("민트초코");
+    expect(await find(/어떤 맛을 드실지 잘 모르겠어요/)).toBeTruthy();
+  });
+
+  it("'지난번 메뉴 다시'는 세트도 지난번에 고른 맛 그대로 주문서를 만든다", async () => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["두마리", "세트"], choice: { label: "맛", count: 2, options: SET_FLAVORS } });
+    await renderChat();
+    await say("2마리 치킨 세트 1세트");
+    await type("간장이랑 뿌링클 치킨"); // 시험 메뉴에는 "치킨"으로 끝나는 맛이 하나뿐이라 짧은 이름 "뿌링클"은 없다
+    await wait();
+    await wait();
+    await click("응 해줘");
+    expect(await find(/주문을 받았어요/)).toBeTruthy();
+    await say("지난번 메뉴 다시 주문해줘");
+    expect(await find(/지난번에 드신 2마리 치킨 세트 1세트 \(간장 파닭, 뿌링클 치킨\(\+1,000원\)\)로 주문서를 만들었어요/)).toBeTruthy();
+    expect(inCard("27,000원")).toBe(true);
+  });
+});
