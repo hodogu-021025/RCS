@@ -233,11 +233,12 @@ export function editDistance(a: string, b: string): number {
 
 export type FuzzyHit = { kind: "menu"; item: DeliveryItem; name: string } | { kind: "restaurant"; restaurant: Restaurant; name: string };
 
-// 비교할 이름: 메뉴·식당 이름 전체와 띄어 쓴 낱말(3글자 이상). 짧은 말은 엉뚱한 데 걸리기 쉬워 뺀다
+// 비교할 이름: 메뉴·식당 이름 전체와 띄어 쓴 낱말(3글자 이상). 짧은 말은 엉뚱한 데 걸리기 쉬워 뺀다.
+// 숫자가 든 말("2마리", "치즈볼20개")도 뺀다: 손님이 말한 수량("한 마리", "치킨 2마리")이 세트 메뉴 이름과 비슷하다고 잘못 잡힌다
 function fuzzyTargets(): { hit: FuzzyHit; word: string }[] {
   const targets: { hit: FuzzyHit; word: string }[] = [];
   const add = (hit: FuzzyHit, name: string) => {
-    for (const w of new Set([squash(name), ...name.split(/\s+/).map(squash)])) if ([...w].length >= 3) targets.push({ hit, word: w });
+    for (const w of new Set([squash(name), ...name.split(/\s+/).map(squash)])) if ([...w].length >= 3 && !/\d/.test(w)) targets.push({ hit, word: w });
   };
   for (const item of deliveryMenu()) add({ kind: "menu", item, name: item.name }, item.name);
   for (const restaurant of allRestaurants()) add({ kind: "restaurant", restaurant, name: restaurant.name }, restaurant.name);

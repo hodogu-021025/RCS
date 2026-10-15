@@ -84,6 +84,12 @@ describe("오타·비슷한 이름", () => {
     for (const text of ["안녕하세요", "우주 음식", "오늘 날씨 어때", "국밥 먹고 싶어"]) expect(fuzzyFind(text)).toBeUndefined();
   });
 
+  it("수량을 말한 것(\"치킨 한 마리\", \"치킨 2마리\")을 이름에 숫자가 든 세트 메뉴로 잘못 잡지 않는다", async () => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트", "치킨"] });
+    await refresh(["menu"]);
+    for (const text of ["치킨 한 마리", "치킨 2마리", "치킨 두 마리 시켜줘"]) expect(fuzzyFind(text)?.name).not.toBe("2마리 치킨 세트");
+  });
+
   it("문장에 식당 이름이 들어 있으면 그 식당", () => {
     expect(restaurantNamed("장락반점 영업시간")?.id).toBe("c1");
     expect(restaurantNamed("짜장면")).toBeUndefined();

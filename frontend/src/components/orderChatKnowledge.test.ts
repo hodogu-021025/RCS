@@ -26,6 +26,8 @@ import {
   matchFood,
   nearbyRestaurants,
   parseQuantity,
+  pickDeliveryPrompt,
+  MENU_PICK_MAX,
   parseVisitDate,
   parseVisitTime,
   quantityQuestion,
@@ -68,6 +70,29 @@ describe("배달 메뉴", () => {
     expect(findDeliveryItems("간장 치킨 줘").map((d) => d.id)).toEqual(["d2"]);
     expect(findDeliveryItems("치킨 시켜줘").map((d) => d.id)).toEqual(["d1", "d2"]);
     expect(findDeliveryItems("짜장면")).toEqual([]);
+  });
+
+  it("메뉴가 많으면 추천 카드는 앞의 몇 개만 보여 주고, 오늘의 메뉴가 먼저 오며, 나머지도 이름으로 찾는다", async () => {
+    const { server } = await import("../test/setup");
+    const { refresh } = await import("../data/db");
+    const { todayKST } = await import("./deals");
+    const ids = Array.from({ length: 10 }, (_, i) => server.db.addMenuItem({ restaurantId: "h3", name: `시험치킨${i + 1}`, price: 18000, unit: "마리", keywords: ["치킨"] }).id);
+    server.db.updateStoreSettings("h3", { special: { itemId: ids[9], date: todayKST() } });
+    await refresh(["menu", "settings"]);
+    const prompt = deliveryPrompt();
+    expect(prompt.menu).toHaveLength(MENU_PICK_MAX);
+    expect(prompt.choices).toHaveLength(MENU_PICK_MAX);
+    expect(prompt.menu![0].name).toBe("시험치킨10"); // 오늘의 메뉴가 맨 앞
+    const many = findDeliveryItems("치킨");
+    expect(many.length).toBeGreaterThan(MENU_PICK_MAX);
+    const pick = pickDeliveryPrompt(many);
+    expect(pick.menu).toHaveLength(MENU_PICK_MAX);
+    expect(pick.text).toContain("찾는 메뉴가 없으면 메뉴 이름을 말씀해 주세요");
+    // 카드에 안 나온 메뉴도 이름으로 말하면 그 메뉴 하나로 찾는다
+    const hidden = many.find((d) => !pick.menu!.some((m) => m.id === d.id))!;
+    expect(findDeliveryItems(`${hidden.name} 시켜줘`).map((d) => d.id)).toEqual([hidden.id]);
+    // 몇 개 안 되면 그대로 다 보여 준다
+    expect(pickDeliveryPrompt(many.slice(0, 2)).text).toContain("마음에 드는 걸로 골라 주세요");
   });
 
   it("메뉴 이름에 든 숫자는 수량으로 보지 않는다 (\"2마리 치킨 세트\", \"치즈볼 20개\")", async () => {

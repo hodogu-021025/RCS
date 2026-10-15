@@ -555,9 +555,13 @@ export function dealsSay(menu: DeliveryItem[]): string {
 export const menuBadge = (d: DeliveryItem): string | undefined => (d.special ? "오늘의 메뉴" : undefined);
 export const discountTag = (d: DeliveryItem): string | undefined => (d.discountPct ? `${d.discountPct}% 할인` : undefined);
 
+// 한 번에 카드로 보여 주는 메뉴 수. 메뉴가 많은 가게(수십 개)도 말풍선이 휴대폰 화면 한 장 안팎에 들어가게 앞의 몇 개만 보여 준다.
+// 나머지도 이름을 말하면 그대로 주문된다
+export const MENU_PICK_MAX = 6;
+
 // 매번 계산한다: 사장님이 품절시킨 메뉴는 버튼에서도 빠져야 하고, 인기 순서도 바뀐다
 export const deliveryPrompt = (): BotPrompt => {
-  const menu = popularFirst(availableDeliveryMenu());
+  const menu = popularFirst(availableDeliveryMenu()).slice(0, MENU_PICK_MAX);
   return {
     text: "오늘은 이런 메뉴 어떠세요?\n드시고 싶은 다른 메뉴도 편하게 말씀해 주세요.",
     menu,
@@ -569,14 +573,19 @@ export const deliveryPrompt = (): BotPrompt => {
   };
 };
 
-// 여러 메뉴에 걸리는 말이면("치킨") 그 메뉴들을 추천한다
-export const pickDeliveryPrompt = (items: DeliveryItem[]): BotPrompt => ({
-  ...deliveryPrompt(),
-  text: "이런 메뉴를 추천해요!\n마음에 드는 걸로 골라 주세요.",
-  say: `${dealsSay(items)}${recommend(items.map((d) => d.name))} 마음에 드는 걸로 말씀해 주세요.`,
-  choices: deliveryChoices(items),
-  menu: items,
-});
+// 여러 메뉴에 걸리는 말이면("치킨") 그 메뉴들을 추천한다. 많으면 오늘의 메뉴·할인·인기 순으로 앞의 몇 개만 보여 주고,
+// 더 있다고 알려 준다
+export const pickDeliveryPrompt = (all: DeliveryItem[]): BotPrompt => {
+  const items = popularFirst(all).slice(0, MENU_PICK_MAX);
+  const more = all.length > items.length;
+  return {
+    ...deliveryPrompt(),
+    text: more ? "이런 메뉴를 추천해요!\n찾는 메뉴가 없으면 메뉴 이름을 말씀해 주세요." : "이런 메뉴를 추천해요!\n마음에 드는 걸로 골라 주세요.",
+    say: `${dealsSay(items)}${recommend(items.map((d) => d.name))} ${more ? "찾는 메뉴가 없으면 메뉴 이름을 말씀해 주세요." : "마음에 드는 걸로 말씀해 주세요."}`,
+    choices: deliveryChoices(items),
+    menu: items,
+  };
+};
 
 // (빠른 메뉴 — 배달·식당 — 는 quickMenu.ts 에 있다)
 

@@ -34,7 +34,7 @@
     { "category": "파닭 세트", "name": "3마리 치킨 세트", "price": 33000, "unit": "세트", "keywords": ["세마리", "세트", "치킨"] },
     { "category": "파닭 세트", "name": "4마리 치킨 세트", "price": 42000, "unit": "세트", "keywords": ["네마리", "세트", "치킨"] },
     { "category": "뼈닭", "name": "못말리는 뼈닭", "price": 22000, "unit": "마리", "keywords": ["뼈닭", "뼈치킨", "반반", "치킨"] },
-    { "category": "사이드", "name": "소떡소떡", "price": 3000, "unit": "개", "keywords": ["소떡소떡", "소떡"] },
+    { "category": "사이드", "name": "소떡소떡 1개", "price": 3000, "unit": "개", "keywords": ["소떡소떡", "소떡"] },
     { "category": "사이드", "name": "소떡소떡 2개 묶음", "price": 5000, "unit": "묶음", "keywords": ["소떡소떡", "소떡"] },
     { "category": "사이드", "name": "소떡소떡 3개 묶음", "price": 7000, "unit": "묶음", "keywords": ["소떡소떡", "소떡"] },
     { "category": "사이드", "name": "국물떡볶이 매운맛", "price": 5000, "unit": "인분", "keywords": ["떡볶이", "국물떡볶이", "매운떡볶이", "매운맛"] },
