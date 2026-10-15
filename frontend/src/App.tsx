@@ -3,7 +3,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { OrderChatbot } from "./components/OrderChatbot";
 import { RequireRole } from "./pages/RequireRole";
 import { useSession } from "./auth/auth";
-import { AccountPage, AdminPage, LoginPage, MyOrdersPage, OwnerPage, PrivacyPage, ResetPasswordPage, SignupPage } from "./pages/routes";
+import { AccountPage, AdminPage, AppDownloadPage, LoginPage, MyOrdersPage, OwnerPage, PrivacyPage, ResetPasswordPage, SignupPage } from "./pages/routes";
 
 // 사장님 계정은 손님용 챗봇 대신 사장님 화면으로 보낸다 (주소를 직접 입력해도)
 function ChatRoute() {
@@ -27,6 +27,8 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          {/* 앱 받기 (안드로이드 앱 파일, 아이폰 홈 화면 추가 안내). 로그인 없이 볼 수 있다 */}
+          <Route path="/app" element={<AppDownloadPage />} />
           <Route path="/reset" element={<ResetPasswordPage />} />
           <Route
             path="/me"

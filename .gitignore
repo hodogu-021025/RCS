@@ -9,3 +9,12 @@ server/data/
 
 # 각자 PC의 Claude Code 개인 설정 (운영 서버 접속 허용 등)
 .claude/settings.local.json
+
+# 안드로이드 앱: 빌드 결과와 서명 키 정보는 저장소에 올리지 않는다 (서명 키를 잃으면 앱을 업데이트할 수 없으니 따로 보관)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore

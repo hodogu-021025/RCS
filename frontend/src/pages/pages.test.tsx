@@ -10,7 +10,7 @@ import { formatDateTime } from "./format";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
-  const [login, signup, me, owner, admin, privacy, account, reset] = await Promise.all([
+  const [login, signup, me, owner, admin, privacy, account, reset, app] = await Promise.all([
     import("./LoginPage"),
     import("./SignupPage"),
     import("./MyOrdersPage"),
@@ -19,6 +19,7 @@ vi.mock("./routes", async () => {
     import("./PrivacyPage"),
     import("./AccountPage"),
     import("./ResetPasswordPage"),
+    import("./AppDownloadPage"),
   ]);
   return {
     LoginPage: login.LoginPage,
@@ -29,6 +30,7 @@ vi.mock("./routes", async () => {
     PrivacyPage: privacy.PrivacyPage,
     AccountPage: account.AccountPage,
     ResetPasswordPage: reset.ResetPasswordPage,
+    AppDownloadPage: app.AppDownloadPage,
   };
 });
 

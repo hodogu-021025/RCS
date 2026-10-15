@@ -2,15 +2,21 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DISMISS_DAYS, decideInstallMode, resetInstall, setupInstall } from "../pwa";
 import { InstallBanner } from "./InstallBanner";
+import { AppDownloadPage } from "../pages/AppDownloadPage";
 
 const DAY = 24 * 60 * 60_000;
-const base = { standalone: false, installed: false, ios: false, hasPrompt: false, dismissedAt: null, now: 100 * DAY };
+const base = { standalone: false, installed: false, ios: false, android: false, hasPrompt: false, dismissedAt: null, now: 100 * DAY };
+const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36";
+const IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile Safari/604.1";
 
 describe("앱으로 설치 띠를 띄울지 정하기", () => {
   it("설치 신호가 있으면 설치 띠, 아이폰이면 홈 화면 추가 안내, 둘 다 아니면 띄우지 않는다", () => {
     expect(decideInstallMode({ ...base, hasPrompt: true })).toBe("prompt");
     expect(decideInstallMode({ ...base, ios: true })).toBe("ios");
     expect(decideInstallMode(base)).toBeNull();
+    // 안드로이드는 브라우저 설치 창이 있어도 앱 파일 받기로 안내한다 (크롬이 아닌 브라우저에서도 같게)
+    expect(decideInstallMode({ ...base, android: true })).toBe("android");
+    expect(decideInstallMode({ ...base, android: true, hasPrompt: true })).toBe("android");
   });
 
   it("이미 앱으로 열었거나 설치했거나, 닫기를 누르고 며칠이 안 지났으면 띄우지 않는다", () => {
@@ -63,7 +69,7 @@ describe("앱으로 설치 띠 (InstallBanner)", () => {
   });
 
   it("아이폰에서는 설치 버튼 없이 '공유 → 홈 화면에 추가' 순서를 알려 준다", () => {
-    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile Safari/604.1");
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(IPHONE_UA);
     render(<InstallBanner />);
     expect(screen.getByRole("region", { name: "앱으로 설치" })).toHaveTextContent("공유 버튼을 누르고 홈 화면에 추가를 골라 주세요.");
     expect(screen.queryByRole("button", { name: "설치" })).not.toBeInTheDocument();
@@ -78,5 +84,35 @@ describe("앱으로 설치 띠 (InstallBanner)", () => {
     } finally {
       delete (window as { matchMedia?: unknown }).matchMedia;
     }
+  });
+});
+
+describe("안드로이드 앱 받기", () => {
+  beforeEach(() => act(() => resetInstall()));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("안드로이드에서는 띠의 '앱 받기'가 앱 받기 화면(#/app)으로 간다 (설치 창 버튼은 없다)", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID_UA);
+    render(<InstallBanner />);
+    expect(screen.getByRole("region", { name: "앱으로 설치" })).toHaveTextContent("Saylo 앱을 받으면 홈 화면에서 바로 열 수 있어요.");
+    expect(screen.getByRole("link", { name: "앱 받기" })).toHaveAttribute("href", "#/app");
+    expect(screen.queryByRole("button", { name: "설치" })).not.toBeInTheDocument();
+  });
+
+  it("앱 받기 화면: 안드로이드는 앱 파일 다운로드를 먼저, 아이폰은 홈 화면 추가 안내를 먼저 보여 준다", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID_UA);
+    const { unmount } = render(<AppDownloadPage />);
+    const download = screen.getByRole("link", { name: "안드로이드 앱 다운로드" });
+    expect(download).toHaveAttribute("href", "/download/saylo.apk");
+    expect(download).toHaveAttribute("download", "saylo.apk");
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["안드로이드", "아이폰"]);
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    unmount();
+
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(IPHONE_UA + " KAKAOTALK 10.8.0");
+    render(<AppDownloadPage />);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["아이폰", "안드로이드"]);
+    // 카카오톡 안에서 열었으면 다른 브라우저로 열라고 먼저 알려 준다
+    expect(screen.getByRole("note")).toHaveTextContent("다른 브라우저로 열기");
   });
 });

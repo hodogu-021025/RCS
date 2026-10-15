@@ -9,7 +9,11 @@ export interface InstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-export type InstallMode = "prompt" | "ios" | null;
+// prompt: 브라우저 설치 창 (데스크톱 크롬 등) / android: Saylo 앱 파일(APK) 받기 / ios: 홈 화면에 추가 안내
+export type InstallMode = "prompt" | "android" | "ios" | null;
+
+// 사이트에서 받는 안드로이드 앱 파일 (frontend/public/download/saylo.apk). 앱 받기 화면(#/app)에서 받는다
+export const APK_URL = "/download/saylo.apk";
 
 const DISMISSED_KEY = "saylo.installDismissedAt";
 const INSTALLED_KEY = "saylo.installed";
@@ -52,10 +56,16 @@ export function isIOS(): boolean {
   return /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
 }
 
-// 띠를 어떤 모양으로 띄울지 (null 이면 띄우지 않는다). 판단만 하는 함수라 테스트에서 상황을 바꿔 가며 부른다
-export function decideInstallMode(env: { standalone: boolean; installed: boolean; ios: boolean; hasPrompt: boolean; dismissedAt: number | null; now: number }): InstallMode {
+export const isAndroid = () => /android/i.test(navigator.userAgent);
+// 카카오톡·네이버·인스타그램 같은 앱 안의 브라우저 (파일 받기·홈 화면 추가가 막혀 있는 경우가 많다)
+export const isInAppBrowser = () => /kakaotalk|naver\(inapp|instagram|fban|fbav|line\//i.test(navigator.userAgent);
+
+// 띠를 어떤 모양으로 띄울지 (null 이면 띄우지 않는다). 판단만 하는 함수라 테스트에서 상황을 바꿔 가며 부른다.
+// 안드로이드는 브라우저(크롬·삼성 인터넷·카카오톡 안 등)와 상관없이 앱 파일 받기로 안내한다
+export function decideInstallMode(env: { standalone: boolean; installed: boolean; ios: boolean; android: boolean; hasPrompt: boolean; dismissedAt: number | null; now: number }): InstallMode {
   if (env.standalone || env.installed) return null;
   if (env.dismissedAt !== null && env.now - env.dismissedAt < DISMISS_DAYS * 24 * 60 * 60_000) return null;
+  if (env.android) return "android";
   if (env.hasPrompt) return "prompt";
   if (env.ios) return "ios";
   return null;
@@ -67,6 +77,7 @@ export function installMode(now = Date.now()): InstallMode {
     standalone: isStandalone(),
     installed: read(INSTALLED_KEY) === "1",
     ios: isIOS(),
+    android: isAndroid(),
     hasPrompt: hasInstallPrompt(),
     dismissedAt: Number.isFinite(dismissed) && dismissed > 0 ? dismissed : null,
     now,
