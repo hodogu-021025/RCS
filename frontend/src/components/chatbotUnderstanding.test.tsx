@@ -188,6 +188,15 @@ describe("2. 한 번에 말한 정보 기억하기", () => {
 });
 
 describe("3. 안 되는 것 대신 할 수 있는 것", () => {
+  it("이름에 숫자가 든 메뉴(\"2마리 치킨 세트\")를 말하면 그 숫자를 수량으로 쓰지 않고 몇 세트인지 묻는다", async () => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트"] });
+    await renderChat();
+    await refresh(["menu"]);
+    await waitFor(() => expect(getMenu().some((d) => d.name === "2마리 치킨 세트")).toBe(true));
+    await say("2마리 치킨 세트 시켜줘");
+    expect(await find(/몇 세트 주문할까요/)).toBeTruthy();
+  });
+
   it("배달 메뉴에 없는 음식은 그 음식 식당을 대신 권한다", async () => {
     await renderChat();
     await say("짜장면 배달해줘");

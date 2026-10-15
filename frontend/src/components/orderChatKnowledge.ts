@@ -226,7 +226,20 @@ const KOREAN_COUNTS: [string, number][] = [
 // 숫자 뒤에 이런 단위가 붙으면 수량이 아니다 ("10월 3일", "7시", "331호")
 const NOT_COUNT_UNIT = /^\s*(월|일|시|분|초|호|동|번|층|원|년|km|m|cm|kg|g|ml)/;
 
-export function parseQuantity(text: string): number | undefined {
+// 메뉴 이름에 든 숫자는 수량이 아니다 ("2마리 치킨 세트", "치즈볼 20개"). 문장에서 메뉴 이름을 지운 뒤에 수량을 찾는다 (띄어쓰기는 달라도 된다)
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function withoutMenuNames(text: string): string {
+  let out = text;
+  for (const d of deliveryMenu()) {
+    if (!/\d/.test(d.name)) continue;
+    const pattern = d.name.split(/\s+/).map(escapeRegExp).join("\\s*");
+    out = out.replace(new RegExp(pattern, "g"), " ");
+  }
+  return out;
+}
+
+export function parseQuantity(said: string): number | undefined {
+  const text = withoutMenuNames(said);
   for (const m of text.matchAll(/\d+/g)) {
     if (!NOT_COUNT_UNIT.test(text.slice(m.index + m[0].length))) return parseInt(m[0], 10);
   }

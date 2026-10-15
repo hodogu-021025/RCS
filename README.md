@@ -158,6 +158,9 @@ deploy/Caddyfile              HTTPS 앞단 설정 (도메인은 .env 의 DOMAIN)
   - 목록에서 뺀 가게의 메뉴는 DB에 남아 있어도 화면과 메뉴 API에 나오지 않습니다.
   - 관리자 화면의 "계정 만들기"에서 아이디·비밀번호와 매장 정보(이름·음식 종류·영업시간, 주소는 선택)를 넣으면, 서버 DB에 매장이 생기고 그 매장 사장님 계정이 함께 만들어집니다. 사장님 이름은 "매장 이름 사장님"으로 자동으로 정해집니다. 목록 파일의 매장과 합쳐서 챗봇·사장님·관리자 화면에 똑같이 쓰이고, 거리·평점은 비워 둡니다. `export-catalog.mjs`로 내보내면 이 매장도 목록에 들어갑니다.
   - 테스트는 이 파일 대신 `server/test/catalog.fixture.json`을 읽으므로, 실제 목록을 바꿔도 테스트는 그대로 돕니다.
+- 가게의 메뉴를 한꺼번에 넣기: 메뉴를 `server/menus/가게.json`(이름·가격·단위·키워드)으로 정리한 뒤 `import-menu.mjs`로 넣습니다. 기본은 미리 보기이고 `--apply`를 붙여야 넣으며, 이미 판매 중인 같은 이름은 건너뜁니다.
+  - 운영 서버: `docker compose -f docker-compose.prod.yml exec -T api node import-menu.mjs --store <매장 id> [--apply] < server/menus/가게.json`
+  - 매장 id는 `https://sayloorder.com/api/stores`에서 확인합니다.
 - 배달 메뉴 추가·판매 중지: 사장님 화면의 "메뉴" 탭에서 바로 합니다 (추가하면 바로 판매). 서버가 켜질 때 `catalog.json`의 메뉴 중 DB에 없는 것만 채워 넣으므로, 사장님이 바꾼 내용은 그대로 유지됩니다.
 - 서버의 지금 메뉴 목록(사장님이 추가한 메뉴 포함)을 `catalog.json`에 되돌려 쓰기:
   - 운영 서버: `docker compose -f docker-compose.prod.yml exec -T api node export-catalog.mjs > server/catalog.new.json` 후 확인하고 `server/catalog.json`으로 바꿔 커밋

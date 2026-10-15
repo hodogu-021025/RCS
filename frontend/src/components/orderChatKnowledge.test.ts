@@ -70,6 +70,20 @@ describe("배달 메뉴", () => {
     expect(findDeliveryItems("짜장면")).toEqual([]);
   });
 
+  it("메뉴 이름에 든 숫자는 수량으로 보지 않는다 (\"2마리 치킨 세트\", \"치즈볼 20개\")", async () => {
+    const { server } = await import("../test/setup");
+    const { refresh } = await import("../data/db");
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트"] });
+    server.db.addMenuItem({ restaurantId: "h3", name: "치즈볼 20개", price: 4000, unit: "인분", keywords: ["치즈볼"] });
+    await refresh(["menu"]);
+    expect(parseQuantity("2마리 치킨 세트 시켜줘")).toBeUndefined();
+    expect(parseQuantity("2마리치킨세트 하나")).toBe(1); // 띄어쓰기가 달라도 이름으로 본다
+    expect(parseQuantity("2마리 치킨 세트 3개")).toBe(3);
+    expect(parseQuantity("치즈볼 20개 2인분")).toBe(2);
+    // 메뉴 이름이 아니면 그대로 수량
+    expect(parseQuantity("치킨 2마리")).toBe(2);
+  });
+
   it("숫자·한글 수량을 읽고, 수량이 없으면 undefined", () => {
     expect(parseQuantity("2")).toBe(2);
     expect(parseQuantity("3마리")).toBe(3);
