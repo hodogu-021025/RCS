@@ -851,6 +851,31 @@ describe("세트 메뉴 맛 고르기", () => {
     expect(await find(/맛을 2가지 골라 주세요/)).toBeTruthy();
   });
 
+  it("맛을 짧게 말해도('간장') 그 맛으로 고르고, 다른 가게의 간장치킨으로 넘어가지 않는다", async () => {
+    await renderChat();
+    await say("2마리 치킨 세트 1세트");
+    expect(await find(/맛을 2가지 골라 주세요/)).toBeTruthy();
+    await type("간장");
+    expect(await find(/2가지를 골라 주세요. 지금 1가지를 말씀하셨어요/)).toBeTruthy();
+    await type("간장이랑 양념");
+    await wait();
+    expect(inCard("간장 파닭, 양념 파닭")).toBe(true);
+    expect(inCard("26,000원")).toBe(true);
+  });
+
+  it("'간장'만 말하면 간장치킨과 간장 맛을 고를 수 있는 메뉴를 함께 보여 주고, 가게 이름을 줄여 말하면 그 가게 메뉴만 보여 준다", async () => {
+    const store = server.db.addStore({ name: "못말리는파닭 세명대점", food: "chicken", hours: "00:00 - 24:00" });
+    server.db.addMenuItem({ restaurantId: store.id, name: "1마리 치킨", price: 18000, unit: "마리", keywords: ["한마리", "치킨"], choice: { label: "맛", count: 1, options: FLAVORS } });
+    await renderChat();
+    await say("간장");
+    expect(await find(/이런 메뉴를 추천해요/)).toBeTruthy();
+    const listed = buttonsIn(/이런 메뉴를 추천해요/);
+    expect(listed).toEqual(expect.arrayContaining(["간장치킨", "1마리 치킨", "2마리 치킨 세트"]));
+
+    await say("못말리는 파닭에서 간장 치킨 시켜줘");
+    expect(await find(/1마리 치킨은 못말리는파닭 세명대점에서 1마리 18,000원이에요/)).toBeTruthy();
+  });
+
   it("채팅창을 끈 동안에도 맛을 채팅창과 같은 체크 표에서 고른다", async () => {
     render(<OrderChatbot />); // 채팅창은 처음에 꺼져 있다
     await act(() => refresh(["settings", "popular", "menu"]));

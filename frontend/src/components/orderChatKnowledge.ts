@@ -117,10 +117,18 @@ export function withStoreSettings(r: Restaurant): Restaurant {
 // 띄어쓰기·대소문자를 무시하고 비교할 때
 export const squash = (s: string) => s.replace(/\s+/g, "").toLowerCase();
 
-// 목록 버튼을 누르거나 식당 이름을 입력하면 고른 것으로 본다 (띄어쓰기는 무시)
+// 가게 이름을 줄여 부르는 말: 끝의 지점 이름을 뗀 이름 ("못말리는파닭 세명대점" → "못말리는파닭")
+const shortStoreName = (name: string) => {
+  const w = name.trim().split(/\s+/);
+  const short = w.length > 1 && /점$/.test(w.at(-1)!) ? squash(w.slice(0, -1).join(" ")) : "";
+  return [...short].length >= 3 ? short : "";
+};
+
+// 목록 버튼을 누르거나 식당 이름을 입력하면 고른 것으로 본다 (띄어쓰기는 무시).
+// 전체 이름을 먼저 보고, 없으면 지점 이름을 뗀 이름으로 ("못말리는 파닭" → 못말리는파닭 세명대점)
 export function findRestaurant(text: string, list: Restaurant[]): Restaurant | undefined {
   const typed = squash(text);
-  return list.find((r) => typed.includes(squash(r.name)));
+  return list.find((r) => typed.includes(squash(r.name))) ?? list.find((r) => shortStoreName(r.name) && typed.includes(shortStoreName(r.name)));
 }
 
 export const restaurantById = (id: string) => withStoreSettings(RESTAURANTS.find((r) => r.id === id)!);
@@ -199,21 +207,37 @@ export const choicesExtra = (choices: ChosenOption[] | undefined) => (choices ??
 export const orderItemText = (order: Pick<Order, "item" | "qty" | "unit" | "choices">) =>
   `${order.item} ${order.qty}${order.unit}${order.choices?.length ? ` (${choicesText(order.choices)})` : ""}`;
 
-// 말이나 버튼 글자에서 고를 것 이름을 찾는다. 긴 이름부터 찾고 찾은 부분은 지워서,
+// 고를 것을 부르는 말 (띄어쓰기 없이): 전체 이름과, 여러 맛이 같이 쓰는 끝말("파닭", "치킨")을 뗀 짧은 이름.
+// "간장 파닭" → "간장", "뿌링클 치킨" → "뿌링클". 한 맛에만 있는 끝말("굽는 불닭"의 "불닭")은 떼지 않는다
+export function choiceKeys(options: ChoiceOption[]): { option: ChoiceOption; key: string }[] {
+  const words = (o: ChoiceOption) => o.name.trim().split(/\s+/);
+  const tails = new Map<string, number>();
+  for (const o of options) {
+    const w = words(o);
+    if (w.length > 1) tails.set(w.at(-1)!, (tails.get(w.at(-1)!) ?? 0) + 1);
+  }
+  return options.flatMap((o) => {
+    const w = words(o);
+    const keys = [squash(o.name)];
+    if (w.length > 1 && (tails.get(w.at(-1)!) ?? 0) >= 2) keys.push(squash(w.slice(0, -1).join(" ")));
+    return keys.filter((key) => [...key].length >= 2).map((key) => ({ option: o, key }));
+  });
+}
+
+// 말이나 버튼 글자에서 고를 것 이름을 찾는다 (짧은 이름 "간장"도). 긴 이름부터 찾고 찾은 부분은 지워서,
 // "핫간장 파닭"을 말했을 때 "간장 파닭"이 또 잡히지 않게 한다 (띄어쓰기는 무시)
 export function matchChoices(text: string, options: ChoiceOption[]): ChoiceOption[] {
   let rest = squash(text);
-  const found: ChoiceOption[] = [];
-  for (const o of [...options].sort((a, b) => squash(b.name).length - squash(a.name).length)) {
-    const key = squash(o.name);
-    if (rest.includes(key)) {
-      found.push(o);
-      rest = rest.split(key).join("|");
-    }
+  const found: { option: ChoiceOption; at: number }[] = [];
+  for (const { option, key } of choiceKeys(options).sort((a, b) => b.key.length - a.key.length)) {
+    if (found.some((f) => f.option === option)) continue;
+    const at = rest.indexOf(key);
+    if (at < 0) continue;
+    found.push({ option, at });
+    rest = rest.slice(0, at) + "|".repeat(key.length) + rest.slice(at + key.length); // 자리는 그대로 두고 지운다
   }
   // 말한 순서대로
-  const at = (o: ChoiceOption) => squash(text).indexOf(squash(o.name));
-  return found.sort((a, b) => at(a) - at(b));
+  return found.sort((a, b) => a.at - b.at).map((f) => f.option);
 }
 
 // 판매 중인 배달 메뉴. 서버의 메뉴 목록을 쓰므로 사장님이 추가하거나 판매 중지하면 바로 바뀐다
@@ -247,12 +271,17 @@ export function availableDeliveryMenu(): DeliveryItem[] {
 export const priceText = (d: DeliveryItem) =>
   d.discountPct ? `${won(d.price)} (${d.discountPct}% 할인, 원래 ${won(d.listPrice ?? d.price)})` : won(d.price);
 
-export function findDeliveryItems(text: string): DeliveryItem[] {
+// 맛 고르기가 있는 메뉴는 맛 이름으로도 찾는다 ("간장" → 간장 파닭을 고를 수 있는 1마리 치킨·세트)
+const flavorNamed = (d: DeliveryItem, typed: string) => !!d.choice && choiceKeys(d.choice.options).some(({ key }) => typed.includes(key));
+
+// storeId: 그 가게 메뉴 중에서만 찾는다 ("못말리는파닭 간장"처럼 가게 이름을 말했을 때)
+export function findDeliveryItems(text: string, storeId?: string): DeliveryItem[] {
   const typed = squash(text);
-  const menu = availableDeliveryMenu();
+  const inStore = (d: DeliveryItem) => !storeId || d.restaurantId === storeId;
+  const menu = availableDeliveryMenu().filter(inStore);
   // 메뉴 이름을 그대로 말했는데 품절이면, 비슷한 다른 메뉴로 바꿔치기하지 않고 못 찾은 것으로 본다
-  if (deliveryMenu().some((d) => typed.includes(squash(d.name)))) return menu.filter((d) => typed.includes(squash(d.name)));
-  return menu.filter((d) => d.keywords.some((k) => typed.includes(k)));
+  if (deliveryMenu().some((d) => inStore(d) && typed.includes(squash(d.name)))) return menu.filter((d) => typed.includes(squash(d.name)));
+  return menu.filter((d) => d.keywords.some((k) => typed.includes(k)) || flavorNamed(d, typed));
 }
 
 // 버튼 글자: 오늘의 메뉴·할인 중이면 짧게 표시한다 (누르면 메뉴 이름으로 처리)

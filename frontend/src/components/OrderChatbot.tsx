@@ -1395,7 +1395,7 @@ export function OrderChatbot() {
         return;
       }
       const storeMenu = availableDeliveryMenu().filter((d) => d.restaurantId === place.id);
-      const named = findDeliveryItems(text).filter((d) => d.restaurantId === place.id);
+      const named = findDeliveryItems(text, place.id); // 그 가게 메뉴 중에서 ("못말리는파닭 간장" → 간장 파닭을 고를 수 있는 메뉴)
       if (!wantsBooking && storeMenu.length && (named.length || menu === "배달")) {
         startFresh();
         setLastPlace(place);

@@ -9,6 +9,7 @@ import {
   orderCardRows,
   accountDigits,
   findRestaurant,
+  matchChoices,
   formatDate,
   datePrompt,
   FOOD_PROMPT,
@@ -161,6 +162,14 @@ describe("식당 찾기", () => {
     expect(findRestaurant("장락반점", list)).toBeUndefined();
   });
 
+  it("지점 이름(…점)을 떼고 불러도 그 가게로 찾고, 전체 이름이 맞는 가게를 먼저 본다", () => {
+    const store = (id: string, name: string) => ({ id, name, food: "chicken" }) as (typeof RESTAURANTS)[number];
+    const list = [store("a", "못말리는파닭 세명대점"), store("b", "못말리는파닭 장락점")];
+    expect(findRestaurant("못말리는 파닭에서 간장", list)?.id).toBe("a");
+    expect(findRestaurant("못말리는파닭 장락점", list)?.id).toBe("b");
+    expect(findRestaurant("파닭", list)).toBeUndefined(); // 이름 일부만으로는 아니다
+  });
+
   it("받침에 맞춰 을/를을 붙인다", () => {
     expect(withObjectParticle("장락반점")).toBe("장락반점을");
     expect(withObjectParticle("하소 피자키친")).toBe("하소 피자키친을");
@@ -174,6 +183,25 @@ describe("식당 찾기", () => {
     expect(withTopicParticle("간장치킨")).toBe("간장치킨은");
     expect(withTopicParticle("마르게리따 피자")).toBe("마르게리따 피자는");
     expect(km(0.5)).toBe("0.5km");
+  });
+});
+
+describe("맛 고르기 이름 찾기", () => {
+  const options = ["간장 파닭", "핫간장 파닭", "양념 파닭", "꿀바른 간장 파닭", "치즈스노윙 치킨", "매콤 치즈스노윙 치킨", "뿌링클 치킨", "굽는 핫간장", "굽는 불닭"].map((name) => ({ name, extra: 0 }));
+  const names = (text: string) => matchChoices(text, options).map((o) => o.name);
+
+  it("여러 맛이 같이 쓰는 끝말(파닭·치킨)을 떼고 짧게 불러도 찾는다", () => {
+    expect(names("간장이랑 양념")).toEqual(["간장 파닭", "양념 파닭"]);
+    expect(names("뿌링클")).toEqual(["뿌링클 치킨"]);
+    expect(names("굽는 불닭")).toEqual(["굽는 불닭"]); // 한 맛에만 있는 끝말은 떼지 않는다
+    expect(names("불닭")).toEqual([]);
+  });
+
+  it("긴 이름부터 찾아 짧은 이름이 겹쳐 잡히지 않는다", () => {
+    expect(names("핫간장")).toEqual(["핫간장 파닭"]);
+    expect(names("꿀바른 간장")).toEqual(["꿀바른 간장 파닭"]);
+    expect(names("매콤 치즈스노윙이랑 치즈스노윙")).toEqual(["매콤 치즈스노윙 치킨", "치즈스노윙 치킨"]);
+    expect(names("굽는 핫간장, 간장")).toEqual(["굽는 핫간장", "간장 파닭"]);
   });
 });
 

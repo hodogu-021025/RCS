@@ -2,6 +2,7 @@
 // 외부 AI 없이 규칙과 가게·메뉴 목록(catalog.json)만 쓴다. 가게·메뉴 이름을 코드에 직접 적지 않는다
 import {
   deliveryMenu,
+  findRestaurant,
   foodsOnOffer,
   filledRows,
   orderItemText,
@@ -135,8 +136,7 @@ export const nearestRestaurants = (n = 3) =>
 
 // 문장에 들어 있는 식당 이름 (띄어쓰기 무시)
 export function restaurantNamed(text: string): Restaurant | undefined {
-  const typed = squash(text);
-  return allRestaurants().find((r) => typed.includes(squash(r.name)));
+  return findRestaurant(text, allRestaurants());
 }
 
 // ---- 예약 정보 한 번에 받기 ----
