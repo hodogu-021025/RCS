@@ -61,7 +61,6 @@ cd frontend && npm install && npm run dev   # 화면 http://localhost:5173 (/api
 | `npm test` | 테스트 전체 실행 |
 | `npm run lint` | 린트 |
 | `npm run build` | 타입 검사 후 배포용 빌드 → `frontend/dist/` |
-| `npm run build:html` | 로고·영상까지 넣은 **HTML 한 파일** → 저장소 루트의 `saylo.html` (더블클릭으로 열림) |
 
 ### Docker로 띄우기 (저장소 루트에서)
 
@@ -134,7 +133,6 @@ frontend/
     index.css                 챗봇 스타일 (평면 디자인, 브랜드 파란색 #007cfc)
     dashboard.css             로그인·사장님·관리자 페이지 스타일
     image/                    로고, 배경 영상
-  scripts/build-html.mjs      HTML 한 파일 만들기
   Dockerfile
 server/
   index.mjs                   서버 시작 (환경변수, DB 열기, 관리자 계정 만들기)

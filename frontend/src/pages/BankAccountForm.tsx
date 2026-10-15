@@ -9,7 +9,7 @@ interface Props {
   deleteLabel?: string; // 지우기 버튼 글자
 }
 
-// 입금 계좌 보기·등록·바꾸기·지우기 (사장님 매장 계좌, 관리자 기본 계좌). 결제는 계좌이체 하나라 고객님이 이 계좌로 입금한다.
+// 매장 입금 계좌 보기·등록·바꾸기·지우기 (사장님 화면, 관리자 화면의 매장별 계좌). 결제는 계좌이체 하나라 고객님이 이 계좌로 입금한다.
 // 서버가 다시 검사한다 (계좌번호는 숫자와 '-'만, 숫자 8~16자리)
 export function BankAccountForm({ account, onSave, onDelete, deleteLabel = "지우기" }: Props) {
   const [editing, setEditing] = useState(false);

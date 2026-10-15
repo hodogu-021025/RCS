@@ -153,7 +153,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
   }
   // 그 매장의 주문·예약·설정을 바꿀 수 있는지: 관리자, 또는 승인된 그 매장 사장님
   // 사장님 계정이 없어지면(탈퇴·관리자 삭제) 그 매장에 다른 사장님이 남지 않았을 때 매장 입금 계좌(예금주 이름이 든 사장님 정보)도 지운다.
-  // 그 뒤 그 매장 주문은 관리자 기본 계좌로 받는다
+  // 그 뒤 그 매장은 새 계좌가 등록될 때까지 배달 주문을 받지 않는다
   function forgetStoreBank(storeId) {
     if (storeId && !db.listByRole("owner").some((o) => o.storeId === storeId)) db.setBankAccount(storeId, null);
   }
@@ -366,7 +366,7 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
         address,
         phone,
       };
-      // 결제는 계좌이체: 그 매장의 입금 계좌(없으면 관리자 기본 계좌)를 주문에 적어 두고, 사장님이 입금을 확인할 때까지 "입금 대기"
+      // 결제는 계좌이체: 그 매장의 입금 계좌를 주문에 적어 두고, 사장님이 입금을 확인할 때까지 "입금 대기". 계좌가 없는 매장은 주문을 받지 않는다
       const bank = db.bankAccount(o.storeId);
       if (!bank) throw bad(`${withTopic(restaurantName(o.storeId))} 아직 입금 계좌를 등록하지 않아 주문을 받을 수 없어요.`);
       // 입금 기한은 주문 시각 기준: 기한이 지났는지도 같은 주문 시각(created_at)으로 본다

@@ -25,7 +25,7 @@ export interface Order {
   phone?: string; // 가게가 연락할 전화번호
   storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
   // 아래는 서버가 주문을 받을 때 채운다 (계좌이체)
-  bank?: BankAccount; // 입금할 계좌 (그 매장 계좌, 없으면 관리자 기본 계좌. 주문할 때의 것 그대로)
+  bank?: BankAccount; // 입금할 계좌 (그 매장 계좌. 주문할 때의 것 그대로)
   depositor?: string; // 입금자명 (주문한 회원 이름)
   payBy?: number; // 입금 기한 (밀리초). 지나면 서버가 자동으로 취소한다
   paidAt?: number; // 사장님이 입금을 확인한 시각

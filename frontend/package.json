@@ -9,8 +9,7 @@
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview",
-    "build:html": "tsc -b && node scripts/build-html.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.8",
