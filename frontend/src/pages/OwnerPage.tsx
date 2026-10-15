@@ -23,6 +23,7 @@ import {
   type StoreSettings,
 } from "../data/db";
 import { BankAccountForm } from "./BankAccountForm";
+import { isStandalone } from "../pwa";
 import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
@@ -177,6 +178,13 @@ export function OwnerPage() {
   return (
     <DashLayout title={`${store.name} 사장님`}>
       {isNew && <NewOrderToast key={latest.id} record={latest} />}
+      {/* 앱 받기 (안드로이드 앱 파일·아이폰 홈 화면 추가). 이미 앱으로 열었으면 보이지 않는다 */}
+      {!isStandalone() && (
+        <a className="app-strip" href="#/app">
+          <span>Saylo 앱으로 열면 주문을 더 빨리 볼 수 있어요</span>
+          <b>앱 받기</b>
+        </a>
+      )}
       <Tabs
         tabs={[
           { key: "orders", label: "주문·예약", badge: pending },

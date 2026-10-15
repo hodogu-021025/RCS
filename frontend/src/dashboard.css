@@ -213,6 +213,16 @@
 .pause-card .form-error { margin: 12px 0 0; }
 .pause-actions { display: flex; gap: 8px; margin-top: 12px; }
 .pause-actions .btn { flex: 1; height: 44px; }
+/* 사장님 화면 헤더 바로 밑의 앱 받기 띠 (OwnerPage.tsx). 납작한 면 하나에 글 + 오른쪽 "앱 받기" */
+.app-strip {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+  color: var(--text); font-size: 13px; text-decoration: none; word-break: keep-all;
+}
+.app-strip span { flex: 1; min-width: 0; }
+.app-strip b { flex-shrink: 0; color: var(--accent); font-weight: 700; }
+.app-strip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* 다른 탭 위의 일시 중지 안내 띠 */
 .pause-banner {
   display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 10px 12px;
