@@ -467,7 +467,9 @@ describe("관리자 페이지", () => {
     const cards = () => document.querySelectorAll(".record-list .record");
     await waitFor(() => expect(cards()).toHaveLength(2));
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "식당 예약" }));
+    // 종류는 위 탭 아래 붙은 두 번째 탭 줄(세부 메뉴)로 거른다
+    expect(screen.getByRole("tablist", { name: "세부 메뉴" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "식당 예약" }));
     expect(cards()).toHaveLength(1);
     expect(within(cards()[0] as HTMLElement).getByText("장락반점")).toBeInTheDocument();
     expect(document.querySelector(".dash")).toHaveClass("dash-mobile");
@@ -479,18 +481,22 @@ describe("관리자 페이지", () => {
     await loginAs("adminuser");
     open("#/admin");
     fireEvent.click(await screen.findByRole("tab", { name: "매장·사장님" }));
-    expect(await screen.findByText("11:00 - 18:00")).toBeInTheDocument(); // 사장님이 바꾼 영업시간이 보인다
+    expect(await screen.findByText("11:00 - 18:00")).toBeInTheDocument(); // 사장님이 바꾼 영업시간이 보인다 (세부 메뉴는 매장 목록부터)
+    expect(screen.queryByRole("button", { name: "계정 만들기" })).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("tab", { name: "계정 만들기" }));
     fill({ 아이디: "jangrakboss", 비밀번호: "password1" });
     choose("매장", "장락반점");
     await click("계정 만들기");
-    expect(await screen.findByText("jangrakboss (장락반점 사장님)")).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent("jangrakboss 계정을 만들었어요");
     expect(server.db.findUser("jangrakboss")).toMatchObject({ role: "owner", storeId: "c1" });
 
     fill({ 아이디: "jangrakboss", 비밀번호: "password1" });
     await click("계정 만들기");
     expect(await screen.findByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
 
+    fireEvent.click(screen.getByRole("tab", { name: "매장 목록" }));
+    expect(await screen.findByText("jangrakboss (장락반점 사장님)")).toBeInTheDocument();
     await click("jangrakboss 삭제");
     await waitFor(() => expect(server.db.findUser("jangrakboss")).toBeNull());
   });
@@ -507,6 +513,9 @@ describe("관리자 페이지", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "사용자" }));
     expect(await screen.findByText("kim@example.com")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "이용 내역" }));
+    expect(await screen.findByText("이용 내역 (1)")).toBeInTheDocument();
+    expect(screen.queryByText("kim@example.com")).not.toBeInTheDocument(); // 세부 메뉴마다 한 화면씩
     expect(screen.getAllByText("customer01").length).toBeGreaterThan(0);
   });
 });
@@ -667,10 +676,13 @@ describe("점검에서 찾은 사장님·관리자 화면 문제", () => {
     await loginAs("adminuser");
     open("#/admin");
     fireEvent.click(await screen.findByRole("tab", { name: "사용자" }));
-    expect(await screen.findByText("이용 내역 (2)")).toBeInTheDocument();
     // 가입 목록과 이용 내역 양쪽에 아이디가 보인다 (이름이 같은 두 사람이 한 줄로 합쳐지지 않는다)
-    expect(screen.getAllByText("kim00001").length).toBe(2);
-    expect(screen.getAllByText("kim00002").length).toBe(2);
+    expect(await screen.findByText("kim00001")).toBeInTheDocument();
+    expect(screen.getByText("kim00002")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "이용 내역" }));
+    expect(await screen.findByText("이용 내역 (2)")).toBeInTheDocument();
+    expect(screen.getByText("kim00001")).toBeInTheDocument();
+    expect(screen.getByText("kim00002")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /매장·사장님/ }));
     expect(await screen.findByText("매장을 찾을 수 없는 사장님 (1)")).toBeInTheDocument();
@@ -688,11 +700,14 @@ describe("사장님 승인 (관리자)", () => {
     open("#/admin");
 
     fireEvent.click(await screen.findByRole("tab", { name: /매장·사장님/ }));
+    // 기다리는 사장님이 있으면 세부 메뉴 "승인 대기"부터 열린다
     expect(await screen.findByText("승인 대기 (1)")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "승인 대기1" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("wait@example.com")).toBeInTheDocument();
     await click("승인");
     await waitFor(() => expect(db.findUser("waitboss1")?.approved).toBe(true));
-    await waitFor(() => expect(screen.queryByText(/승인 대기 \(/)).not.toBeInTheDocument());
+    expect(await screen.findByText("승인을 기다리는 사장님이 없어요.")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "승인 대기" })).toBeInTheDocument(); // 배지도 사라진다
   });
 });
 
@@ -757,8 +772,7 @@ describe("로그인한 고객님의 연락처·배달지", () => {
     openChat();
     sayInChat("간장치킨 2마리");
     expect(await findBot(/배달 주문은 로그인한 뒤에 할 수 있어요/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "로그인하러 가기" }));
-    await waitFor(() => expect(window.location.hash).toBe("#/login"));
+    await waitFor(() => expect(window.location.hash).toBe("#/login"), { timeout: 6000 }); // 잠시 뒤 저절로 넘어간다
 
     await screen.findByLabelText("아이디"); // 로그인 화면은 따로 받아 온다
     typeLogin(KIM.username, "password1");

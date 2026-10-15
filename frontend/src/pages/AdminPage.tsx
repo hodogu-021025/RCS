@@ -9,6 +9,8 @@ import { PasswordField } from "./PasswordField";
 
 type Tab = "all" | "stores" | "stats" | "users";
 type KindFilter = "all" | "delivery" | "reservation";
+type StoresView = "stores" | "approve" | "create";
+type UsersView = "members" | "history";
 
 const KIND_LABEL: Record<Exclude<KindFilter, "all">, string> = { delivery: "배달", reservation: "식당 예약" };
 const DAY = 86_400_000;
@@ -84,46 +86,51 @@ function AllTab({ rows }: { rows: Row[] }) {
     (r) => (kind === "all" || r.kind === kind) && (!needle || [r.what, r.where, r.who, r.status].some((s) => s.toLowerCase().includes(needle))),
   );
   return (
-    <section className="dash-section">
-      <div className="section-head">
-        <div className="chips">
-          {(["all", "delivery", "reservation"] as KindFilter[]).map((k) => (
-            <button key={k} type="button" className={kind === k ? "chip active" : "chip"} onClick={() => setKind(k)}>
-              {k === "all" ? "전체" : KIND_LABEL[k]}
-            </button>
-          ))}
+    <>
+      <Tabs
+        sub
+        tabs={[
+          { key: "all", label: "전체" },
+          { key: "delivery", label: KIND_LABEL.delivery },
+          { key: "reservation", label: KIND_LABEL.reservation },
+        ]}
+        value={kind}
+        onChange={setKind}
+      />
+      <section className="dash-section">
+        <div className="section-head">
+          <input className="search" placeholder="메뉴·매장·이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="검색" />
         </div>
-        <input className="search" placeholder="메뉴·매장·이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="검색" />
-      </div>
-      <p className="hint">{shown.length}건</p>
-      {/* 휴대폰 폭이라 표 대신 한 건에 카드 한 장 */}
-      <ul className="record-list">
-        {shown.map((r) => (
-          <li key={r.id} className="record">
-            <div className="record-head">
-              <span className={"chip kind-" + r.kind}>{KIND_LABEL[r.kind]}</span>
-              <b>{r.what}</b>
-              {r.amount !== undefined && <span className="price">{r.amountLabel ?? won(r.amount)}</span>}
-              <span className={"status s-" + r.status}>{r.status}</span>
-            </div>
-            <dl>
-              <div>
-                <dt>매장</dt>
-                <dd>{r.where}</dd>
+        <p className="hint">{shown.length}건</p>
+        {/* 휴대폰 폭이라 표 대신 한 건에 카드 한 장 */}
+        <ul className="record-list">
+          {shown.map((r) => (
+            <li key={r.id} className="record">
+              <div className="record-head">
+                <span className={"chip kind-" + r.kind}>{KIND_LABEL[r.kind]}</span>
+                <b>{r.what}</b>
+                {r.amount !== undefined && <span className="price">{r.amountLabel ?? won(r.amount)}</span>}
+                <span className={"status s-" + r.status}>{r.status}</span>
               </div>
-              <div>
-                <dt>고객</dt>
-                <dd>{r.who}</dd>
-              </div>
-              <div>
-                <dt>시각</dt>
-                <dd>{formatDateTime(r.createdAt)}</dd>
-              </div>
-            </dl>
-          </li>
-        ))}
-      </ul>
-    </section>
+              <dl>
+                <div>
+                  <dt>매장</dt>
+                  <dd>{r.where}</dd>
+                </div>
+                <div>
+                  <dt>고객</dt>
+                  <dd>{r.who}</dd>
+                </div>
+                <div>
+                  <dt>시각</dt>
+                  <dd>{formatDateTime(r.createdAt)}</dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
   );
 }
 
@@ -135,9 +142,11 @@ function StoresTab() {
   const [name, setName] = useState("");
   const [storeId, setStoreId] = useState(RESTAURANTS[0].id);
   const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<string | null>(null); // 방금 만든 계정 안내
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    setCreated(null);
     const u = username.trim();
     const invalid = usernameError(u) ?? passwordError(password);
     if (invalid) return setError(invalid);
@@ -150,24 +159,40 @@ function StoresTab() {
     setPassword("");
     setName("");
     setError(null);
+    setCreated(`${u} 계정을 만들었어요. 매장 목록에서 볼 수 있어요.`);
   }
 
   const waiting = owners.filter((o) => o.approved === false);
+  // 세부 메뉴: 직접 고르기 전에는 승인을 기다리는 사장님이 있으면 그것부터 보여 준다 (계정 목록이 늦게 와도 따라간다)
+  const [picked, setView] = useState<StoresView | null>(null);
+  const view: StoresView = picked ?? (waiting.length > 0 ? "approve" : "stores");
   const orphans = owners.filter((o) => !RESTAURANTS.some((r) => r.id === o.storeId));
   const storeName = (id?: string) => RESTAURANTS.find((r) => r.id === id)?.name ?? id;
   const [actionError, setActionError] = useState<string | null>(null);
   // 승인·삭제가 실패하면(서버 거절, 연결 끊김) 이유를 보여 준다
   const run = (work: Promise<unknown>) => {
+    setView(view); // 마지막 사장님을 승인해도 보던 세부 메뉴에 머문다
     setActionError(null);
     work.catch((err: unknown) => setActionError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요."));
   };
 
   return (
     <>
-      {waiting.length > 0 && (
+      <Tabs
+        sub
+        tabs={[
+          { key: "stores", label: "매장 목록" },
+          { key: "approve", label: "승인 대기", badge: waiting.length },
+          { key: "create", label: "계정 만들기" },
+        ]}
+        value={view}
+        onChange={setView}
+      />
+      {view === "approve" && (
         <section className="dash-section">
           <h2>승인 대기 ({waiting.length})</h2>
           <p className="hint">스스로 가입한 사장님이에요. 그 매장의 사장님이 맞는지 확인한 뒤 승인하세요. 승인 전에는 매장 주문·예약을 볼 수 없어요.</p>
+          {waiting.length === 0 && <p className="empty">승인을 기다리는 사장님이 없어요.</p>}
           <ul className="record-list">
             {waiting.map((o) => (
               <li key={o.username} className="record pending">
@@ -200,116 +225,127 @@ function StoresTab() {
           </ul>
         </section>
       )}
-      {actionError && (
+      {actionError && view !== "create" && (
         <p className="form-error" role="alert">
           {actionError}
         </p>
       )}
-      <section className="dash-section">
-        <h2>매장과 사장님 계정</h2>
-        <ul className="record-list">
-          {RESTAURANTS.map((r) => {
-            const mine = owners.filter((o) => o.storeId === r.id);
-            const pause = storePause(r.id);
-            const removable = mine;
-            return (
-              <li key={r.id} className="record">
-                <div className="record-head">
-                  <b>{r.name}</b>
-                </div>
-                <dl>
-                  <div>
-                    <dt>영업시간</dt>
-                    <dd>{withStoreSettings(r).hours}</dd>
-                  </div>
-                  <div>
-                    <dt>영업 상태</dt>
-                    <dd>
-                      {!pause ? (
-                        "주문 받는 중"
-                      ) : pause.active ? (
-                        <span className="status-pill paused">일시 중지 · {untilText(pause.until)}까지</span>
-                      ) : (
-                        <span className="status-pill paused">
-                          일시 중지 예정 · {untilText(pause.from)}~{untilText(pause.until)}
-                        </span>
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>사장님</dt>
-                    <dd>
-                      {mine.length ? (
-                        mine.map((o) => `${o.username} (${o.name})${o.approved === false ? " · 승인 대기" : ""}`).join(", ")
-                      ) : (
-                        <span className="muted">없음</span>
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-                {removable.length > 0 && (
-                  <div className="record-actions">
-                    {removable.map((o) => (
-                      <button key={o.username} type="button" className="btn small" onClick={() => run(removeOwner(o.username))}>
+      {view === "stores" && (
+        <>
+          <section className="dash-section">
+            <h2>매장과 사장님 계정</h2>
+            <ul className="record-list">
+              {RESTAURANTS.map((r) => {
+                const mine = owners.filter((o) => o.storeId === r.id);
+                const pause = storePause(r.id);
+                const removable = mine;
+                return (
+                  <li key={r.id} className="record">
+                    <div className="record-head">
+                      <b>{r.name}</b>
+                    </div>
+                    <dl>
+                      <div>
+                        <dt>영업시간</dt>
+                        <dd>{withStoreSettings(r).hours}</dd>
+                      </div>
+                      <div>
+                        <dt>영업 상태</dt>
+                        <dd>
+                          {!pause ? (
+                            "주문 받는 중"
+                          ) : pause.active ? (
+                            <span className="status-pill paused">일시 중지 · {untilText(pause.until)}까지</span>
+                          ) : (
+                            <span className="status-pill paused">
+                              일시 중지 예정 · {untilText(pause.from)}~{untilText(pause.until)}
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>사장님</dt>
+                        <dd>
+                          {mine.length ? (
+                            mine.map((o) => `${o.username} (${o.name})${o.approved === false ? " · 승인 대기" : ""}`).join(", ")
+                          ) : (
+                            <span className="muted">없음</span>
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                    {removable.length > 0 && (
+                      <div className="record-actions">
+                        {removable.map((o) => (
+                          <button key={o.username} type="button" className="btn small" onClick={() => run(removeOwner(o.username))}>
+                            {o.username} 삭제
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          {/* 매장 목록(catalog.json)이 바뀌어 지금은 없는 매장에 묶인 사장님: 그대로 두면 보이지도 지워지지도 않으므로 따로 보여 준다 */}
+          {orphans.length > 0 && (
+            <section className="dash-section">
+              <h2>매장을 찾을 수 없는 사장님 ({orphans.length})</h2>
+              <p className="hint">이 계정들이 가리키는 매장이 지금 매장 목록에 없어요. 매장 목록을 다시 확인하거나 계정을 지워 주세요.</p>
+              <ul className="record-list">
+                {orphans.map((o) => (
+                  <li key={o.username} className="record">
+                    <div className="record-head">
+                      <b>
+                        {o.username} ({o.name})
+                      </b>
+                      <span className="muted">매장 id {o.storeId ?? "-"}</span>
+                    </div>
+                    <div className="record-actions">
+                      <button type="button" className="btn small" onClick={() => run(removeOwner(o.username))}>
                         {o.username} 삭제
                       </button>
-                    ))}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-
-      {/* 매장 목록(catalog.json)이 바뀌어 지금은 없는 매장에 묶인 사장님: 그대로 두면 보이지도 지워지지도 않으므로 따로 보여 준다 */}
-      {orphans.length > 0 && (
-        <section className="dash-section">
-          <h2>매장을 찾을 수 없는 사장님 ({orphans.length})</h2>
-          <p className="hint">이 계정들이 가리키는 매장이 지금 매장 목록에 없어요. 매장 목록을 다시 확인하거나 계정을 지워 주세요.</p>
-          <ul className="record-list">
-            {orphans.map((o) => (
-              <li key={o.username} className="record">
-                <div className="record-head">
-                  <b>
-                    {o.username} ({o.name})
-                  </b>
-                  <span className="muted">매장 id {o.storeId ?? "-"}</span>
-                </div>
-                <div className="record-actions">
-                  <button type="button" className="btn small" onClick={() => run(removeOwner(o.username))}>
-                    {o.username} 삭제
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
       )}
 
-      <section className="dash-section">
-        <h2>사장님 계정 만들기</h2>
-        <form className="form-grid" onSubmit={onSubmit}>
-          <label>
-            <span>아이디</span>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
-          </label>
-          <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-          <label>
-            <span>이름 (비우면 "매장 사장님")</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <Select label="매장" options={RESTAURANTS.map((r) => ({ value: r.id, label: r.name }))} value={storeId} onChange={setStoreId} />
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <button className="btn primary" type="submit">
-            계정 만들기
-          </button>
-        </form>
-      </section>
+      {view === "create" && (
+        <section className="dash-section">
+          <h2>사장님 계정 만들기</h2>
+          <form className="form-grid" onSubmit={onSubmit}>
+            <label>
+              <span>아이디</span>
+              <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
+            </label>
+            <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+            <label>
+              <span>이름 (비우면 "매장 사장님")</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+            <Select label="매장" options={RESTAURANTS.map((r) => ({ value: r.id, label: r.name }))} value={storeId} onChange={setStoreId} />
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            {created && (
+              <p className="form-notice" role="status">
+                {created}
+              </p>
+            )}
+            <button className="btn primary" type="submit">
+              계정 만들기
+            </button>
+          </form>
+        </section>
+      )}
     </>
   );
 }
@@ -391,56 +427,71 @@ function UsersTab({ rows }: { rows: Row[] }) {
   }
   const users = [...byUser.entries()].sort((a, b) => b[1].last - a[1].last);
   const members = [...useDb(["accounts"]).users].sort((a, b) => b.createdAt - a.createdAt);
+  const [view, setView] = useState<UsersView>("members");
   return (
     <>
-      <section className="dash-section">
-        <h2>가입한 고객님 ({members.length})</h2>
-        {members.length === 0 && <p className="empty">아직 회원가입한 고객님이 없어요.</p>}
-        <ul className="record-list">
-          {members.map((m) => (
-            <li key={m.username} className="record">
-              <div className="record-head">
-                <b>{m.name}</b>
-                <span className="muted">{m.username}</span>
-              </div>
-              <dl>
-                <div>
-                  <dt>이메일</dt>
-                  <dd>{m.email ?? "-"}</dd>
+      <Tabs
+        sub
+        tabs={[
+          { key: "members", label: "가입 회원" },
+          { key: "history", label: "이용 내역" },
+        ]}
+        value={view}
+        onChange={setView}
+      />
+      {view === "members" && (
+        <section className="dash-section">
+          <h2>가입한 고객님 ({members.length})</h2>
+          {members.length === 0 && <p className="empty">아직 회원가입한 고객님이 없어요.</p>}
+          <ul className="record-list">
+            {members.map((m) => (
+              <li key={m.username} className="record">
+                <div className="record-head">
+                  <b>{m.name}</b>
+                  <span className="muted">{m.username}</span>
                 </div>
-                <div>
-                  <dt>가입</dt>
-                  <dd>{formatDateTime(m.createdAt)}</dd>
+                <dl>
+                  <div>
+                    <dt>이메일</dt>
+                    <dd>{m.email ?? "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>가입</dt>
+                    <dd>{formatDateTime(m.createdAt)}</dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {view === "history" && (
+        <section className="dash-section">
+          <h2>이용 내역 ({users.length})</h2>
+          {users.length === 0 && <p className="empty">아직 주문·예약한 고객님이 없어요.</p>}
+          <ul className="record-list">
+            {users.map(([customer, u]) => (
+              <li key={customer} className="record">
+                <div className="record-head">
+                  <b>{u.name}</b>
+                  {customer !== u.name && <span className="muted">{customer}</span>}
+                  <span className="price">{won(u.spent)}</span>
                 </div>
-              </dl>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section className="dash-section">
-        <h2>이용 내역 ({users.length})</h2>
-        <ul className="record-list">
-          {users.map(([customer, u]) => (
-            <li key={customer} className="record">
-              <div className="record-head">
-                <b>{u.name}</b>
-                {customer !== u.name && <span className="muted">{customer}</span>}
-                <span className="price">{won(u.spent)}</span>
-              </div>
-              <dl>
-                <div>
-                  <dt>주문·예약</dt>
-                  <dd>{u.count}건</dd>
-                </div>
-                <div>
-                  <dt>마지막 이용</dt>
-                  <dd>{formatDateTime(u.last)}</dd>
-                </div>
-              </dl>
-            </li>
-          ))}
-        </ul>
-      </section>
+                <dl>
+                  <div>
+                    <dt>주문·예약</dt>
+                    <dd>{u.count}건</dd>
+                  </div>
+                  <div>
+                    <dt>마지막 이용</dt>
+                    <dd>{formatDateTime(u.last)}</dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </>
   );
 }

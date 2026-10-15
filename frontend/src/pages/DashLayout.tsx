@@ -53,11 +53,12 @@ interface TabsProps<T extends string> {
   tabs: { key: T; label: string; badge?: number }[];
   value: T;
   onChange: (key: T) => void;
+  sub?: boolean; // 위 탭 바로 아래 붙는 두 번째 탭 줄 (고른 메뉴 안의 세부 메뉴)
 }
 
-export function Tabs<T extends string>({ tabs, value, onChange }: TabsProps<T>) {
+export function Tabs<T extends string>({ tabs, value, onChange, sub = false }: TabsProps<T>) {
   return (
-    <div className="dash-tabs" role="tablist">
+    <div className={sub ? "dash-subtabs" : "dash-tabs"} role="tablist" aria-label={sub ? "세부 메뉴" : "메뉴"}>
       {tabs.map((t) => (
         <button
           key={t.key}

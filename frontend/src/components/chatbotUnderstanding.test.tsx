@@ -299,17 +299,30 @@ describe("5. 주문한 뒤의 질문", () => {
 });
 
 describe("로그인과 배달지", () => {
-  it("로그인하지 않았으면 배달을 고를 때 로그인하러 가자고 하고, 주소를 챗봇에서 묻지 않는다", async () => {
+  it("로그인하지 않았으면 배달을 고를 때 로그인 화면으로 이동한다고 말하고 잠시 뒤 저절로 넘어간다", async () => {
+    window.location.hash = "#/chat";
     await logout();
     await renderChat();
     await say("배달");
     expect(await find(/배달 주문은 로그인한 뒤에 할 수 있어요/)).toBeTruthy();
+    expect(await find(/로그인 화면으로 이동시켜드릴게요/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "로그인하러 가기" })).not.toBeInTheDocument(); // 고를 것 없이 바로 간다
     expect(screen.queryByText(/오늘은 이런 메뉴 어떠세요/)).not.toBeInTheDocument();
-    await say("간장치킨 2마리 시켜줘");
-    expect((await find(/배달 주문은 로그인한 뒤에 할 수 있어요/)).length).toBe(2);
     expect(screen.queryByText(ORDER_TITLE)).not.toBeInTheDocument();
-    await click("로그인하러 가기");
+    expect(window.location.hash).toBe("#/chat"); // 안내를 읽을 틈을 둔다
+    await wait(3200);
     expect(window.location.hash).toBe("#/login");
+  });
+
+  it("로그인 안내 뒤 넘어가기 전에 새 대화를 누르면 로그인 화면으로 가지 않는다", async () => {
+    window.location.hash = "#/chat";
+    await logout();
+    await renderChat();
+    await say("간장치킨 2마리 시켜줘");
+    await find(/로그인 화면으로 이동시켜드릴게요/);
+    fireEvent.click(screen.getByRole("button", { name: "새 대화" }));
+    await wait(3500);
+    expect(window.location.hash).toBe("#/chat");
   });
 
   it("로그인하지 않아도 식당 예약은 된다", async () => {

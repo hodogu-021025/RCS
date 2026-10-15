@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import backgroundVideo from "../image/saylo_background.mp4";
 import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
+import { AccountIcon, ChatIcon, HelpIcon, MenuIcon, MicIcon, PlusIcon, SpeakerIcon } from "./icons";
+import { Tutorial } from "./Tutorial";
+import { markTutorialSeen, tutorialSeen } from "./tutorialSeen";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { useSession } from "../auth/auth";
 import { addOrder, addReservation, cancelMyOrder, fetchMyOrders, getReceipts, refresh, storePausedUntil, useDb, type OrderRecord } from "../data/db";
@@ -187,6 +190,7 @@ const DEFAULT_PLACEHOLDER = "메시지를 입력하세요";
 const RESTAURANT_PICKS_HEADING = "오늘은 이런 식당 어떠세요?\n드시고 싶은 음식을 말씀해 주시면 그 음식 맛집을 찾아 드릴게요.";
 // 로그인 전인 손님을 로그인 화면으로, 계정에 배달지·연락처가 없는 고객님을 계정 관리로 보내는 버튼
 const LOGIN_CHOICE: Choice = { label: "로그인하러 가기", value: "로그인할게요" };
+const LOGIN_REDIRECT_MS = 3000; // 로그인 안내를 보여 준 뒤 로그인 화면으로 넘어가기까지
 const ACCOUNT_CHOICE: Choice = { label: "계정 관리로 가기", value: "계정 관리로 갈게요" };
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
 
@@ -412,26 +416,6 @@ function captionLine(m: Message): string {
   }
 }
 
-// 헤더 아이콘 (선으로 그린 마이크·스피커)
-const ICON = { stroke: "currentColor", strokeWidth: 1.5, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" } as const;
-const MicIcon = () => (
-  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-    <rect x="5.5" y="1.5" width="5" height="8" rx="2.5" {...ICON} />
-    <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" {...ICON} />
-  </svg>
-);
-const ChatIcon = ({ hidden }: { hidden: boolean }) => (
-  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-    <path d="M3 3h10a1.5 1.5 0 0 1 1.5 1.5v5.5a1.5 1.5 0 0 1-1.5 1.5H7.5L4.5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V4.5A1.5 1.5 0 0 1 3 3z" {...ICON} />
-    {hidden && <path d="M2 1.5l12 13" {...ICON} />}
-  </svg>
-);
-const SpeakerIcon = ({ muted }: { muted: boolean }) => (
-  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-    <path d="M2.5 6h2.5l3-2.5v9l-3-2.5H2.5z" {...ICON} />
-    {muted ? <path d="M10.5 6l3 4M13.5 6l-3 4" {...ICON} /> : <path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9" {...ICON} />}
-  </svg>
-);
 
 // 마지막으로 나온 해당 종류 메시지의 id. 버튼은 가장 최근 말풍선에서만 누를 수 있다
 function lastIdOf(messages: Message[], kinds: string[]): number | undefined {
@@ -472,6 +456,8 @@ export function OrderChatbot() {
   const [pickerOpenFor, setPickerOpenFor] = useState<number | null>(null);
   // 음성 입력에 대한 짧은 안내 ("답하는 중이에요" 등). 잠시 보였다가 사라진다
   const [notice, setNotice] = useState<string | null>(null);
+  // 사용법 안내: 이 브라우저에서 처음 열면 저절로 띄운다
+  const [tutorialOpen, setTutorialOpen] = useState(() => !tutorialSeen());
   const quickMenuId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -672,7 +658,7 @@ export function OrderChatbot() {
   // 고르던 메뉴·수량은 기억해 두었다가 로그인하거나 배달지를 등록하고 돌아오면 이어 간다
   function deliveryBlocked(resume: ResumeDelivery): boolean {
     if (!session) {
-      sendAway("login", "배달 주문은 로그인한 뒤에 할 수 있어요.\n로그인하시면 고르신 메뉴로 이어서 주문해 드릴게요.", resume);
+      sendAway("login", "배달 주문은 로그인한 뒤에 할 수 있어요.\n로그인 화면으로 이동시켜드릴게요.", resume);
       return true;
     }
     if (session.role !== "user") {
@@ -687,12 +673,21 @@ export function OrderChatbot() {
     return true;
   }
 
-  // 로그인 화면이나 계정 관리로 가자고 안내한다 (버튼을 누르거나 "응"이라고 하면 간다)
+  // 로그인 화면이나 계정 관리로 보낸다. 로그인은 안내를 읽을 틈을 두고 저절로 넘어가고,
+  // 계정 관리는 버튼을 누르거나 "응"이라고 하면 간다
   function sendAway(to: "login" | "account", text: string, resume: ResumeDelivery) {
     startFresh();
     rememberResume(session?.username ?? null, resume);
     setStage(to === "login" ? "needLogin" : "needContact");
-    botReply(() => push(botPrompt({ text, choices: [to === "login" ? LOGIN_CHOICE : ACCOUNT_CHOICE], noDirect: true })));
+    if (to === "login") {
+      botReply(() => {
+        push(botText(text));
+        // 해시 주소라 주소만 바꾸면 그 화면으로 간다. "새 대화"를 누르거나 화면을 떠나면 타이머째 취소된다
+        later(() => window.location.assign("#/login"), LOGIN_REDIRECT_MS);
+      });
+      return;
+    }
+    botReply(() => push(botPrompt({ text, choices: [ACCOUNT_CHOICE], noDirect: true })));
   }
 
   // 로그인하거나 배달지를 등록하고 돌아왔을 때: 메뉴·수량을 다 골랐으면 주문서로, 메뉴만 골랐으면 수량부터, 아니면 메뉴부터
@@ -1569,6 +1564,17 @@ export function OrderChatbot() {
     inputRef.current?.focus();
   }
 
+  function closeTutorial() {
+    markTutorialSeen();
+    setTutorialOpen(false);
+  }
+
+  // 안내의 예시 문장을 누르면 안내를 닫고 그 말을 보낸 것처럼 바로 해 본다
+  function tryTutorialExample(text: string) {
+    closeTutorial();
+    handle(text);
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setMenuOpen(false);
@@ -1931,6 +1937,10 @@ export function OrderChatbot() {
         {/* 글자 로고 */}
         <h1 className="title">Saylo</h1>
         <div className="header-tools">
+          {/* 사용법 안내를 다시 연다 (처음 열 때는 저절로 뜬다) */}
+          <button className="icon-btn" type="button" aria-label="사용법 보기" title="사용법 보기" onClick={() => setTutorialOpen(true)}>
+            <HelpIcon />
+          </button>
           {/* 계정: 비로그인은 로그인 페이지로, 로그인 상태면 내 주문 페이지로 (해시 주소라 링크만으로 이동한다) */}
           <a
             className={"icon-btn" + (session ? " on" : "")}
@@ -1938,10 +1948,7 @@ export function OrderChatbot() {
             aria-label={!session ? "로그인" : session.role === "admin" ? `${session.name} · 관리자 화면` : `${session.name} · 내 주문`}
             title={!session ? "로그인" : session.role === "admin" ? `${session.name} · 관리자 화면` : `${session.name} · 내 주문`}
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <circle cx="8" cy="5.5" r="3" {...ICON} />
-              <path d="M2.5 14.5a5.5 5.5 0 0 1 11 0" {...ICON} />
-            </svg>
+            <AccountIcon />
           </a>
           {/* 채팅창(말풍선 목록) 보이기·숨기기. 숨기면 배경 구체만 남고 말·글로 계속 주문할 수 있다 */}
           <button
@@ -1978,9 +1985,7 @@ export function OrderChatbot() {
           </button>
         </div>
         <button className="new-chat" type="button" onClick={reset} disabled={stage === "paying"}>
-          <svg viewBox="0 0 16 16" width="12.6" height="12.6" aria-hidden="true">
-            <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none" />
-          </svg>
+          <PlusIcon />
           새 대화
         </button>
       </header>
@@ -2089,9 +2094,7 @@ export function OrderChatbot() {
                 aria-controls={quickMenuId}
                 onClick={() => setMenuOpen((open) => !open)}
               >
-                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-                  <path d="M8 3v10M3 8h10" {...ICON} strokeWidth={2} />
-                </svg>
+                <MenuIcon />
               </button>
             </div>
           </div>
@@ -2104,6 +2107,7 @@ export function OrderChatbot() {
       {payMethod && order && (
         <PaymentSheet ref={sheetRef} method={payMethod} order={order} onCancel={onPayCancel} onPaid={onPaid} />
       )}
+      {tutorialOpen && <Tutorial onClose={closeTutorial} onTry={tryTutorialExample} />}
     </div>
   );
 }

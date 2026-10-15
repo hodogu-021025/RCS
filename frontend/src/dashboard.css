@@ -331,6 +331,25 @@
 /* 탭 글자는 한 줄로 두고, 글자가 긴 탭(배지가 붙은 "매장·사장님" 등)이 더 넓게 갖는다 */
 .dash-mobile .dash-tabs button { flex: 1 1 auto; justify-content: center; gap: 4px; padding: 0 4px; white-space: nowrap; font-size: 13.5px; }
 .dash-mobile .dash-tabs .badge { min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; }
+/* 두 번째 탭 줄: 고른 메뉴 안의 세부 메뉴. 위 탭 바로 아래 붙어 같이 고정되고, 위 탭보다 한 단계 가볍게(회색 바탕 위 흰 알약) */
+.dash-tabs:has(+ .dash-subtabs) { margin-bottom: 0; }
+.dash-subtabs {
+  position: sticky; top: 43px; z-index: 4; /* 위 탭 높이(42px + 밑줄 1px) 바로 아래 */
+  display: flex; gap: 4px;
+  margin: 0 -12px 14px; padding: 8px 12px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.dash-subtabs button {
+  flex: 1 1 0; min-width: 0; height: 34px; padding: 0 6px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  border: none; border-radius: 10px; background: var(--surface);
+  color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.dash-subtabs button:hover:not(.active) { color: var(--text); }
+.dash-subtabs button.active { background: var(--accent-weak); color: var(--accent); font-weight: 700; }
+.dash-subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dash-subtabs .badge { min-width: 17px; height: 17px; padding: 0 5px; font-size: 10.5px; }
 .dash-mobile .dash-main > .dash-section:first-child { margin-top: 14px; } /* 탭이 없는 화면(내 주문) */
 .dash-mobile .dash-section { padding: 14px; margin-bottom: 14px; border-radius: 16px; }
 .dash-mobile .record dl { grid-template-columns: 1fr; }

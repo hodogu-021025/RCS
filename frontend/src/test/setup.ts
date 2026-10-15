@@ -12,6 +12,8 @@ export { TEST_CODE } from "./testServer.mjs";
 export let server: TestServer;
 
 beforeEach(async () => {
+  // 처음 열 때 뜨는 사용법 안내는 이미 본 것으로 둔다 (안내 자체는 Tutorial.test.tsx 에서 본다)
+  localStorage.setItem("saylo.tutorialSeen", "1");
   server = await startTestServer();
   setApiBase(server.base);
 });
