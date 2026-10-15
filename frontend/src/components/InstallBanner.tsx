@@ -4,9 +4,10 @@ import "./installBanner.css";
 
 // 채팅 입력창 바로 위의 작은 "앱으로 설치" 띠 (pwa.ts 가 띄울지 정한다).
 // 안드로이드: 앱 받기 화면(#/app)으로 가서 앱 파일(APK)을 받는다 (크롬이 아닌 브라우저에서도).
-// 아이폰: 설치 창이 없어서 홈 화면에 추가하는 순서를 알려 준다. 데스크톱 크롬 등: "설치"를 누르면 브라우저의 설치 창이 열린다
-export function InstallBanner() {
-  const mode = useSyncExternalStore(subscribeInstall, () => installMode(), () => null);
+// 아이폰: 설치 창이 없어서 홈 화면에 추가하는 순서를 알려 준다. 데스크톱 크롬 등: "설치"를 누르면 브라우저의 설치 창이 열린다.
+// linkFallback: 그 밖의 기기에서도 앱 받기 링크를 띄운다 (사장님 화면 헤더 밑)
+export function InstallBanner({ linkFallback = false }: { linkFallback?: boolean }) {
+  const mode = useSyncExternalStore(subscribeInstall, () => installMode(Date.now(), linkFallback), () => null);
   const [busy, setBusy] = useState(false);
   if (!mode) return null;
 

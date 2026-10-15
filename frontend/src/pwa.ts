@@ -61,17 +61,18 @@ export const isAndroid = () => /android/i.test(navigator.userAgent);
 export const isInAppBrowser = () => /kakaotalk|naver\(inapp|instagram|fban|fbav|line\//i.test(navigator.userAgent);
 
 // 띠를 어떤 모양으로 띄울지 (null 이면 띄우지 않는다). 판단만 하는 함수라 테스트에서 상황을 바꿔 가며 부른다.
-// 안드로이드는 브라우저(크롬·삼성 인터넷·카카오톡 안 등)와 상관없이 앱 파일 받기로 안내한다
-export function decideInstallMode(env: { standalone: boolean; installed: boolean; ios: boolean; android: boolean; hasPrompt: boolean; dismissedAt: number | null; now: number }): InstallMode {
+// 안드로이드는 브라우저(크롬·삼성 인터넷·카카오톡 안 등)와 상관없이 앱 파일 받기로 안내한다.
+// linkFallback: 설치 창도 아이폰도 아닌 기기(데스크톱 등)에서도 앱 받기 화면 링크를 띄운다 (사장님 화면)
+export function decideInstallMode(env: { standalone: boolean; installed: boolean; ios: boolean; android: boolean; hasPrompt: boolean; dismissedAt: number | null; now: number; linkFallback?: boolean }): InstallMode {
   if (env.standalone || env.installed) return null;
   if (env.dismissedAt !== null && env.now - env.dismissedAt < DISMISS_DAYS * 24 * 60 * 60_000) return null;
   if (env.android) return "android";
   if (env.hasPrompt) return "prompt";
   if (env.ios) return "ios";
-  return null;
+  return env.linkFallback ? "android" : null;
 }
 
-export function installMode(now = Date.now()): InstallMode {
+export function installMode(now = Date.now(), linkFallback = false): InstallMode {
   const dismissed = Number(read(DISMISSED_KEY));
   return decideInstallMode({
     standalone: isStandalone(),
@@ -81,6 +82,7 @@ export function installMode(now = Date.now()): InstallMode {
     hasPrompt: hasInstallPrompt(),
     dismissedAt: Number.isFinite(dismissed) && dismissed > 0 ? dismissed : null,
     now,
+    linkFallback,
   });
 }
 

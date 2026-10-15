@@ -17,6 +17,10 @@ describe("앱으로 설치 띠를 띄울지 정하기", () => {
     // 안드로이드는 브라우저 설치 창이 있어도 앱 파일 받기로 안내한다 (크롬이 아닌 브라우저에서도 같게)
     expect(decideInstallMode({ ...base, android: true })).toBe("android");
     expect(decideInstallMode({ ...base, android: true, hasPrompt: true })).toBe("android");
+    // 사장님 화면: 데스크톱 등에서도 앱 받기 링크를 띄우지만, 앱으로 열었거나 닫은 뒤에는 띄우지 않는다
+    expect(decideInstallMode({ ...base, linkFallback: true })).toBe("android");
+    expect(decideInstallMode({ ...base, linkFallback: true, standalone: true })).toBeNull();
+    expect(decideInstallMode({ ...base, linkFallback: true, dismissedAt: base.now - DAY })).toBeNull();
   });
 
   it("이미 앱으로 열었거나 설치했거나, 닫기를 누르고 며칠이 안 지났으면 띄우지 않는다", () => {
