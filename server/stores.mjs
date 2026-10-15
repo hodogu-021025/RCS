@@ -79,7 +79,8 @@ export function hoursError(hours) {
   return null;
 }
 export const MAX_PEOPLE = 20;
-export const MAX_QTY = 10;
+export const MAX_QTY = 10; // 한 메뉴의 수량 상한
+export const MAX_ORDER_ITEMS = 10; // 한 주문에 담을 수 있는 메뉴 가짓수 상한 (장바구니)
 
 // ---- 할인·오늘의 메뉴 (화면 frontend/src/components/deals.ts 도 같은 규칙) ----
 export const DISCOUNT_MAX = 90; // 할인율 상한 (%)
