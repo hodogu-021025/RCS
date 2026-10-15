@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.sayloorder.app",
+      "sha256_cert_fingerprints": ["09:EE:AE:47:A3:ED:31:C1:6F:EC:46:FE:97:8E:BF:99:10:19:F7:6B:93:C4:7E:99:C2:B7:A8:07:DB:49:D1:14"]
+    }
+  }
+]

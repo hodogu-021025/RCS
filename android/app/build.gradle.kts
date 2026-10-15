@@ -7,7 +7,8 @@ plugins {
 // 서명 키 정보는 저장소에 넣지 않는다: android/keystore.properties (git 제외)에 storeFile·storePassword·keyAlias·keyPassword 를 적는다
 val keyProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
+    // UTF-8 로 읽는다 (기본은 ISO-8859-1 이라 한글이 든 경로가 깨진다)
+    if (f.exists()) f.reader(Charsets.UTF_8).use { load(it) }
 }
 
 android {

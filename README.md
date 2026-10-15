@@ -106,7 +106,10 @@ docker compose -f docker-compose.prod.yml up -d --build
 - 페이지 이동은 해시 주소(`#/owner`)를 써서 별도 리라이트 설정이 필요 없습니다.
 - `frontend/Dockerfile` + `deploy/nginx.conf`는 같은 결과물을 nginx 이미지로 만듭니다 (빌드 컨텍스트는 저장소 루트).
 - 음성 인식은 HTTPS(또는 localhost)에서만 마이크가 열립니다.
-- 앱으로 설치: 배포한 사이트(HTTPS)에서만 서비스 워커(`frontend/public/sw.js`)가 등록됩니다. 안드로이드 크롬 계열은 채팅 입력창 위에 "앱으로 설치" 띠가 뜨고, 아이폰은 "공유 → 홈 화면에 추가" 안내가 뜹니다. 닫으면 7일 동안 다시 띄우지 않습니다 (`frontend/src/pwa.ts`). 서비스 워커는 화면·데이터를 저장하지 않고, 인터넷이 끊겼을 때 안내 화면만 보여 줍니다.
+- 앱으로 설치: 배포한 사이트(HTTPS)에서만 서비스 워커(`frontend/public/sw.js`)가 등록됩니다. 채팅 입력창 위에 띠가 뜨는데, 안드로이드는 "앱 받기"(앱 받기 화면 `#/app`으로), 아이폰은 "공유 → 홈 화면에 추가" 안내, 데스크톱 크롬은 "설치"입니다. 닫으면 7일 동안 다시 띄우지 않습니다 (`frontend/src/pwa.ts`). 서비스 워커는 화면·데이터를 저장하지 않고, 인터넷이 끊겼을 때 안내 화면만 보여 줍니다.
+- 안드로이드 앱 파일(APK): `android/`는 sayloorder.com 채팅 화면을 주소창 없이 여는 앱(Trusted Web Activity)입니다. 사이트를 고치면 앱에도 바로 반영되므로 앱을 다시 만들 일은 드뭅니다. 만든 파일은 `frontend/public/download/saylo.apk`로 넣어 사이트에서 받게 합니다.
+  - 다시 만들기: 안드로이드 SDK(platforms;android-35, build-tools;35.0.0)와 JDK 17이 필요합니다. `android/local.properties`(sdk.dir)와 `android/keystore.properties`(서명 키, git 제외)를 둔 뒤 `android/app/build.gradle.kts`의 `versionCode`를 1 올리고 `cd android && gradle assembleRelease`, 결과 `android/app/build/outputs/apk/release/app-release.apk`를 `frontend/public/download/saylo.apk`로 복사합니다.
+  - 서명 키: 이 키로 서명해야 이미 설치한 앱이 업데이트됩니다. 키를 잃어버리면 손님이 앱을 지우고 새로 설치해야 하므로 키 파일과 `keystore.properties`를 따로 안전하게 보관합니다. 키의 SHA-256 지문은 `frontend/public/.well-known/assetlinks.json`에 있어야 앱이 주소창 없이 열립니다.
 
 ## 폴더 구조
 
