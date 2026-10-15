@@ -226,10 +226,10 @@
 .section-head.hours-head { gap: 8px; align-items: baseline; }
 .section-head.hours-head h2 { flex: 0 0 auto; }
 .menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.menu-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
-.menu-list li b { flex: 1; min-width: 120px; }
-.menu-list li.sold-out b { color: var(--muted); text-decoration: line-through; }
-.menu-list li.stopped { background: var(--surface); }
+.menu-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.menu-list > li b { flex: 1; min-width: 120px; }
+.menu-list > li.sold-out b { color: var(--muted); text-decoration: line-through; }
+.menu-list > li.stopped { background: var(--surface); }
 /* 오늘의 메뉴 고르기와 메뉴별 할인율 */
 .special-field { display: block; margin: 0 0 12px; }
 .special-field small { display: block; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
@@ -244,14 +244,43 @@
 .dash .price-grid input.sale-input, .dash .price-grid input.sale-input:focus { background: #fff; border-color: var(--line); font-weight: 700; cursor: default; }
 .dash .price-grid input.sale-input.discounted { border-color: var(--accent); color: var(--accent); }
 /* 사장님 화면에서 판매 중인 메뉴 카드는 칸 순서가 늘 같게: 이름·품절·판매 중지(한 줄) / 가격·할인율(한 줄) / 판매가 */
-.dash-section .menu-list li:not(.stopped) { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.dash-section .menu-list > li:not(.stopped) { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .menu-head { display: flex; align-items: center; gap: 8px; }
 .menu-head b { flex: 1; min-width: 0; }
 .menu-head .menu-actions { flex-shrink: 0; }
 .menu-actions { display: flex; gap: 8px; }
 /* 품절처럼 눌러서 켜고 끄는 버튼이 켜진 상태 */
 .btn.on, .btn.on:hover { border-color: var(--accent); background: var(--accent-weak); color: var(--accent); }
-.menu-list li.stopped b { color: var(--muted); }
+/* 세트 메뉴의 맛 고르기 (ChoiceEditor.tsx): 메뉴 추가 폼과 메뉴 카드에서 같이 쓴다. 440px 휴대폰 폭에 맞춘 납작한 표 */
+.menu-form label.choice-switch { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.menu-form label.choice-switch > span { display: inline; margin: 0; color: var(--text); font-size: 14px; }
+.choice-switch input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.choice-editor { margin: 0 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.dash .choice-editor label { display: block; min-width: 0; margin: 0; }
+.dash .choice-editor label > span { display: block; margin-bottom: 4px; font-size: 12.5px; color: var(--muted); }
+.choice-editor-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.dash .choice-editor input:not([type="checkbox"]) { width: 100%; min-width: 0; height: 40px; padding: 0 10px; }
+.choice-editor .hint { margin: 6px 0 10px; }
+.choice-rows-head, .choice-rows li { display: grid; grid-template-columns: minmax(0, 1fr) 84px 48px; gap: 6px; align-items: center; }
+.choice-rows-head { margin-bottom: 4px; font-size: 12.5px; color: var(--muted); }
+.choice-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.choice-rows .btn.small { padding: 0; }
+.choice-rows-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12.5px; }
+.choice-bulk { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.choice-bulk summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--accent); }
+.dash .choice-bulk textarea {
+  display: block; width: 100%; margin: 8px 0; padding: 10px 12px;
+  border: 1.5px solid transparent; border-radius: 12px; background: var(--surface); color: var(--text);
+  font: inherit; font-size: 14px; line-height: 1.45; resize: vertical; outline: none;
+}
+.dash .choice-bulk textarea:focus { background: #fff; border-color: var(--accent); }
+/* 메뉴 카드의 맛 고르기 한 줄 요약과 편집 칸 */
+.choice-summary { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.choice-summary span { flex: 1; min-width: 0; }
+.choice-edit .choice-editor { margin-bottom: 8px; }
+.choice-edit .form-error { margin: 0 0 8px; }
+.choice-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.menu-list > li.stopped b { color: var(--muted); }
 /* 메뉴 추가 칸: 휴대폰 폭이라 한 줄에 하나, 가격·단위만 나란히 */
 .menu-form label { display: block; margin-bottom: 12px; }
 .menu-form label > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }

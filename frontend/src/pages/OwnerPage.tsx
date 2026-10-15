@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { choicesText, clockText, findRestaurantById, untilText, formatDate, orderItemText, orderPriceLabel, won, type DeliveryItem, type Restaurant } from "../components/orderChatKnowledge";
+import { choicesText, clockText, findRestaurantById, untilText, formatDate, orderItemText, orderPriceLabel, won, type DeliveryItem, type MenuChoice, type Restaurant } from "../components/orderChatKnowledge";
 import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
@@ -9,6 +9,7 @@ import {
   fetchStoreBank,
   saveStoreBank,
   setMenuActive,
+  setMenuChoice,
   setMenuItem,
   setSpecialMenu,
   setOrderStatus,
@@ -23,6 +24,8 @@ import {
   type StoreSettings,
 } from "../data/db";
 import { BankAccountForm } from "./BankAccountForm";
+import { ChoiceEditor } from "./ChoiceEditor";
+import { choiceFromDraft, choiceSummary, draftFromChoice, emptyDraft, type ChoiceDraft } from "./menuChoice";
 import { InstallBanner } from "../components/InstallBanner";
 import { Select } from "../components/Select";
 import { DashLayout, Tabs } from "./DashLayout";
@@ -437,12 +440,15 @@ const UNITS = ["마리", "판", "인분", "개", "그릇", "세트", "잔", "병
 const PRICE_MIN = 100;
 const PRICE_MAX = 1_000_000;
 
-// 메뉴 추가: 이름·가격·단위·손님이 부를 다른 이름. 추가하면 바로 판매되고 소비자 챗봇에 나온다
+// 메뉴 추가: 이름·가격·단위·손님이 부를 다른 이름, 세트 메뉴면 맛 고르기. 추가하면 바로 판매되고 소비자 챗봇에 나온다
 function AddMenuForm({ storeId }: { storeId: string }) {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [unit, setUnit] = useState(UNITS[0]);
   const [aliases, setAliases] = useState("");
+  // 세트 메뉴: 손님이 세트마다 맛을 고른다 (켜면 맛 목록 칸이 열린다)
+  const [withChoice, setWithChoice] = useState(false);
+  const [draft, setDraft] = useState<ChoiceDraft>(emptyDraft);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -458,13 +464,21 @@ function AddMenuForm({ storeId }: { storeId: string }) {
         ? `가격은 ${PRICE_MIN.toLocaleString("ko-KR")}원부터 ${PRICE_MAX.toLocaleString("ko-KR")}원까지 적어 주세요.`
         : null;
     if (invalid) return setError(invalid);
+    let choice: MenuChoice | undefined;
+    if (withChoice) {
+      const checked = choiceFromDraft(draft);
+      if ("error" in checked) return setError(checked.error);
+      choice = checked.choice;
+    }
     setBusy(true);
     try {
       const keywords = aliases.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
-      await addMenuItem(storeId, { name: n, price: p, unit, keywords });
+      await addMenuItem(storeId, { name: n, price: p, unit, keywords, ...(choice ? { choice } : {}) });
       setName("");
       setPrice("");
       setAliases("");
+      setWithChoice(false);
+      setDraft(emptyDraft());
       setError(null);
       setDone(`${n} 메뉴를 추가했어요. 소비자 챗봇에 바로 보여요.`);
     } catch (err) {
@@ -494,6 +508,11 @@ function AddMenuForm({ storeId }: { storeId: string }) {
           <input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="예) 양념, 양념통닭" />
         </label>
         <p className="hint">매장 음식 종류 이름(예: 치킨)은 자동으로 들어가서, 손님이 "치킨"이라고만 말해도 이 메뉴를 추천해요.</p>
+        <label className="choice-switch">
+          <input type="checkbox" checked={withChoice} onChange={(e) => setWithChoice(e.target.checked)} />
+          <span>세트 메뉴예요 (손님이 맛을 골라요)</span>
+        </label>
+        {withChoice && <ChoiceEditor draft={draft} onChange={setDraft} />}
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -523,6 +542,7 @@ function MenuCard({
   onSave,
   onStop,
   onError,
+  onChoice,
 }: {
   item: DeliveryItem;
   setting: ItemSetting;
@@ -530,6 +550,7 @@ function MenuCard({
   onSave: (patch: ItemSetting) => void;
   onStop: () => void;
   onError: (message: string) => void;
+  onChoice: (choice: MenuChoice | null) => Promise<void>;
 }) {
   const listPrice = setting.price ?? item.price;
   const pct = setting.discountPct ?? 0;
@@ -556,6 +577,29 @@ function MenuCard({
   function savePrice() {
     if (typedPrice > 0 && typedPrice !== listPrice) onSave({ price: typedPrice });
     else if (!(typedPrice > 0)) setPrice(String(listPrice));
+  }
+
+  // 맛 고르기: 고치는 동안만 편집 칸을 연다 (열 때의 맛 목록으로 시작하고, 저장해야 서버에 간다)
+  const [choiceDraft, setChoiceDraft] = useState<ChoiceDraft | null>(null);
+  const [choiceError, setChoiceError] = useState<string | null>(null);
+  const [choiceBusy, setChoiceBusy] = useState(false);
+  async function saveChoice(next: MenuChoice | null) {
+    setChoiceBusy(true);
+    setChoiceError(null);
+    try {
+      await onChoice(next);
+      setChoiceDraft(null);
+    } catch (err) {
+      setChoiceError(err instanceof Error ? err.message : "잠시 후 다시 시도해 주세요.");
+    } finally {
+      setChoiceBusy(false);
+    }
+  }
+  function submitChoice() {
+    if (!choiceDraft) return;
+    const checked = choiceFromDraft(choiceDraft);
+    if ("error" in checked) setChoiceError(checked.error);
+    else void saveChoice(checked.choice);
   }
 
   function saveDiscount() {
@@ -630,6 +674,46 @@ function MenuCard({
           />
         </label>
       </div>
+      {/* 세트 메뉴의 맛 고르기: 한 줄 요약 + 넣기·고치기. 고쳐도 지난 주문에 남은 고른 맛은 그대로다 */}
+      <div className="choice-summary">
+        <span className={item.choice ? undefined : "muted"}>{item.choice ? choiceSummary(item.choice) : "맛 고르기 없음"}</span>
+        {!choiceDraft && (
+          <button
+            type="button"
+            className="btn small"
+            aria-label={`${item.name} 맛 고르기 ${item.choice ? "고치기" : "넣기"}`}
+            onClick={() => {
+              setChoiceError(null);
+              setChoiceDraft(item.choice ? draftFromChoice(item.choice) : emptyDraft());
+            }}
+          >
+            {item.choice ? "고치기" : "넣기"}
+          </button>
+        )}
+      </div>
+      {choiceDraft && (
+        <div className="choice-edit">
+          <ChoiceEditor draft={choiceDraft} onChange={setChoiceDraft} />
+          {choiceError && (
+            <p className="form-error" role="alert">
+              {choiceError}
+            </p>
+          )}
+          <div className="choice-edit-actions">
+            <button type="button" className="btn primary small" onClick={submitChoice} disabled={choiceBusy} aria-label={`${item.name} 맛 고르기 저장`}>
+              {choiceBusy ? "저장하는 중…" : "저장"}
+            </button>
+            <button type="button" className="btn small" onClick={() => setChoiceDraft(null)} disabled={choiceBusy}>
+              취소
+            </button>
+            {item.choice && (
+              <button type="button" className="btn small" onClick={() => void saveChoice(null)} disabled={choiceBusy} aria-label={`${item.name} 맛 고르기 없애기`}>
+                맛 고르기 없애기
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </li>
   );
 }
@@ -928,6 +1012,7 @@ function MenuTab({ view, storeId }: { view: MenuView; storeId: string }) {
               onSave={(patch) => run(setMenuItem(storeId, d.id, patch))}
               onStop={() => toggle(d.id, false)}
               onError={setMenuError}
+              onChoice={(choice) => setMenuChoice(storeId, d.id, choice)}
             />
           ))}
         </ul>

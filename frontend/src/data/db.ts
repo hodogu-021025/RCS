@@ -4,7 +4,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../api/client";
 import { getSession } from "../auth/auth";
 import catalog from "../../../server/catalog.json";
-import type { BankAccount, DeliveryItem, Order, Restaurant } from "../components/orderChatKnowledge";
+import type { BankAccount, DeliveryItem, MenuChoice, Order, Restaurant } from "../components/orderChatKnowledge";
 
 // 서버에서 메뉴 목록을 받기 전에 쓰는 처음 목록 (서버도 이 파일로 시작한다)
 const CATALOG_MENU = catalog.deliveryMenu as DeliveryItem[];
@@ -186,7 +186,8 @@ export const getMenu = (): DeliveryItem[] => db.menu;
 
 // ---- 사장님 배달 메뉴 관리 ----
 // 메뉴 추가: 바로 판매되고 챗봇에 나온다. keywords 는 손님이 부를 다른 이름 (매장 음식 종류 이름은 서버가 넣는다)
-export async function addMenuItem(storeId: string, item: { name: string; price: number; unit: string; keywords: string[] }) {
+// choice: 세트 메뉴의 맛 고르기 (없으면 보통 메뉴)
+export async function addMenuItem(storeId: string, item: { name: string; price: number; unit: string; keywords: string[]; choice?: MenuChoice }) {
   const rec = await api<DeliveryItem>("POST", `/api/stores/${storeId}/menu`, item);
   await refresh(["menu"]);
   return rec;
@@ -195,6 +196,12 @@ export async function addMenuItem(storeId: string, item: { name: string; price: 
 // 판매 중지(false)·다시 판매(true). 지우지 않고 숨긴다 (지난 주문 기록은 그대로)
 export async function setMenuActive(storeId: string, itemId: string, active: boolean) {
   await api("PATCH", `/api/stores/${storeId}/menu/${itemId}`, { active });
+  await refresh(["menu"]);
+}
+
+// 세트 메뉴의 맛 고르기 넣기·고치기 (null 이면 없앤다). 지난 주문에 남은 고른 맛은 그대로다
+export async function setMenuChoice(storeId: string, itemId: string, choice: MenuChoice | null) {
+  await api("PATCH", `/api/stores/${storeId}/menu/${itemId}`, { choice });
   await refresh(["menu"]);
 }
 

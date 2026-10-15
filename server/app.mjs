@@ -22,7 +22,10 @@
 //   GET    /api/stores                 누구나: 매장 목록 (목록 파일 + 관리자가 만든 매장)
 //   GET    /api/stores/settings        누구나 (챗봇이 영업시간·품절을 본다)
 //   GET    /api/menu                   누구나: 배달 메뉴 전체 (판매 중지는 active: false)
-//   POST   /api/stores/:id/menu        { name, price, unit, keywords? }  그 매장 사장님(승인)·관리자: 메뉴 추가, 바로 판매
+//   GET    /api/stats/popular
+//   POST   /api/stores/:id/menu        { name, price, unit, keywords?, choice? }  그 매장 사장님(승인)·관리자: 메뉴 추가, 바로 판매
+//                                      (choice: 세트 메뉴의 맛 고르기 { label, count, options: [{ name, extra }] })
+//   PATCH  /api/stores/:id/menu/:itemId  { active?, choice? }       판매 중지(false)·다시 판매(true) · 맛 고르기 붙이기·고치기(choice)·없애기(null)
 //   PATCH  /api/stores/:id/menu/:itemId  { active }                 판매 중지(false)·다시 판매(true)
 //   GET    /api/stats/popular          누구나: 최근 30일 메뉴별 주문 수·식당별 예약 수 (챗봇 추천 순서)
 //   PATCH  /api/stores/:id/settings    { hours? } · { item: { id, patch: { price?, soldOut?, discountPct? } } } · { special: { itemId } | null }
@@ -72,6 +75,7 @@ import {
   sameStoreName,
   hasStore,
   pickedChoices,
+  cleanChoice,
   discountedPrice,
   foodLabel,
   listedMenu,
@@ -510,7 +514,13 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       const given = Array.isArray(body.keywords) ? body.keywords : [];
       const squash = (s) => String(s).replace(/\s+/g, "").toLowerCase();
       const keywords = [...new Set([...given.map(squash), squash(foodLabel(findStore(db, params.id)?.food) ?? "")])].filter((k) => k && k.length <= 15).slice(0, MENU_KEYWORDS_MAX);
-      return db.addMenuItem({ restaurantId: params.id, name, price, unit, keywords });
+      // 세트 메뉴면 맛 고르기 { label, count, options: [{ name, extra }] } 를 같이 받는다 (없거나 null 이면 보통 메뉴)
+      let choice;
+      if (body.choice !== undefined && body.choice !== null) {
+        choice = cleanChoice(body.choice);
+        if (choice.error) throw bad(choice.error);
+      }
+      return db.addMenuItem({ restaurantId: params.id, name, price, unit, keywords, choice });
     }],
     // 판매 중지·다시 판매. 지운 것처럼 챗봇과 주문에서 빠지지만, 지난 주문 기록은 그대로 남는다
     ["PATCH", "/api/stores/:id/menu/:itemId", ({ params, body, user }) => {
@@ -518,11 +528,25 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       assertManages(user, params.id);
       const item = db.menuItem(params.itemId);
       if (!item || item.restaurantId !== params.id) throw new HttpError(404, "없는 메뉴예요.");
-      if (typeof body.active !== "boolean") throw bad("판매 여부(active)를 보내 주세요.");
-      if (body.active && !item.active && activeMenuItem(params.id, item.name)) throw bad("같은 이름의 메뉴가 이미 판매 중이에요.");
-      const updated = db.updateMenuItem(item.id, { active: body.active });
+      if (body.active === undefined && body.choice === undefined) throw bad("바꿀 내용(판매 여부·맛 고르기)을 보내 주세요.");
+      const patch = {};
+      if (body.active !== undefined) {
+        if (typeof body.active !== "boolean") throw bad("판매 여부(active)를 보내 주세요.");
+        if (body.active && !item.active && activeMenuItem(params.id, item.name)) throw bad("같은 이름의 메뉴가 이미 판매 중이에요.");
+        patch.active = body.active;
+      }
+      // 맛 고르기 붙이기·고치기 (choice), 없애기 (null). 지난 주문에 남은 고른 맛(order.choices)은 그대로다
+      if (body.choice !== undefined) {
+        if (body.choice === null) patch.choice = null;
+        else {
+          const choice = cleanChoice(body.choice);
+          if (choice.error) throw bad(choice.error);
+          patch.choice = choice;
+        }
+      }
+      const updated = db.updateMenuItem(item.id, patch);
       // 오늘의 메뉴였던 걸 내리면 오늘의 메뉴도 푼다
-      if (!body.active && db.allStoreSettings()[params.id]?.special?.itemId === item.id) db.updateStoreSettings(params.id, { special: null });
+      if (patch.active === false && db.allStoreSettings()[params.id]?.special?.itemId === item.id) db.updateStoreSettings(params.id, { special: null });
       return updated;
     }],
 

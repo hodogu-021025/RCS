@@ -1063,3 +1063,93 @@ describe("세트 메뉴 맛 고르기 주문", () => {
     assert.equal(r.body.order.choices, undefined);
   });
 });
+
+describe("사장님이 세트 메뉴의 맛 목록을 넣고 고치기", () => {
+  let storeId;
+  let owner;
+  let otherOwner;
+  const FLAVORS = { label: "맛", count: 2, options: [{ name: " 간장  파닭 ", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }] };
+  before(async () => {
+    storeId = db.addStore({ name: "맛 목록 파닭", food: "chicken", hours: "00:00 - 24:00" }).id;
+    db.setBankAccount(storeId, { bank: "국민은행", account: "123456-01-234567", holder: "김사장" });
+    owner = await signup({ role: "owner", username: "flavorboss1", email: "flavorboss1@example.com", storeId, name: "맛 사장" });
+    db.approveOwner("flavorboss1");
+    otherOwner = await signup({ role: "owner", username: "flavorboss2", email: "flavorboss2@example.com", storeId: "p2", name: "피자 사장" });
+    db.approveOwner("flavorboss2");
+  });
+  const add = (body, token = owner) => call("POST", `/api/stores/${storeId}/menu`, body, token);
+  const patchMenu = (id, body, token = owner) => call("PATCH", `/api/stores/${storeId}/menu/${id}`, body, token);
+
+  it("메뉴를 추가할 때 맛 목록을 같이 넣으면 정리해 저장하고, 챗봇 메뉴 목록에 나온다", async () => {
+    const r = await add({ name: "2마리 세트", price: 26000, unit: "세트", choice: FLAVORS });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.choice, { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }] });
+    assert.deepEqual((await call("GET", "/api/menu")).body.find((d) => d.id === r.body.id).choice, r.body.choice);
+    // 맛 목록을 비워 보내면(null) 보통 메뉴
+    const plain = await add({ name: "치킨무", price: 500, unit: "개", choice: null });
+    assert.equal(plain.body.choice, undefined);
+  });
+
+  it("맛 목록이 규칙에 맞지 않으면 한국어로 거절하고 메뉴를 만들지 않는다", async () => {
+    const tries = [
+      [{ ...FLAVORS, count: 0 }, /1세트에 고를 수는 1~10/],
+      [{ ...FLAVORS, count: 4 }, /맛을 고를 수\(4가지\)만큼은/],
+      [{ ...FLAVORS, options: [{ name: "간장", extra: 0 }, { name: "", extra: 0 }] }, /맛 이름을 1~30자/],
+      [{ ...FLAVORS, options: [{ name: "간장", extra: 0 }, { name: "간장", extra: 500 }] }, /같은 맛 이름이 두 번/],
+      [{ ...FLAVORS, options: [{ name: "간장", extra: 0 }, { name: "양념", extra: -100 }] }, /추가금은 0~100,000원/],
+      [{ ...FLAVORS, options: Array.from({ length: 41 }, (_, i) => ({ name: `맛${i}`, extra: 0 })) }, /맛은 40가지까지/],
+      [{ ...FLAVORS, label: "아주아주긴고르기이름이에요" }, /고르기 이름은 10자까지/],
+    ];
+    for (const [choice, error] of tries) {
+      const r = await add({ name: "잘못된 세트", price: 26000, unit: "세트", choice });
+      assert.equal(r.status, 400);
+      assert.match(r.body.error, error);
+    }
+    assert.ok(!(await call("GET", "/api/menu")).body.some((d) => d.name === "잘못된 세트"));
+  });
+
+  it("판매 중인 메뉴의 맛 목록을 고치거나 없애도, 지난 주문에 남은 고른 맛은 그대로다", async () => {
+    const set = (await call("GET", "/api/menu")).body.find((d) => d.restaurantId === storeId && d.name === "2마리 세트");
+    const ordered = await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "2마리 세트", qty: 1, choices: ["간장 파닭", "블랙스완 파닭"] } }, buyer);
+    assert.equal(ordered.status, 200, JSON.stringify(ordered.body));
+
+    // 블랙스완을 빼고 추가금이 있는 새 맛을 넣고, 3가지 고르기로
+    const changed = await patchMenu(set.id, { choice: { label: "맛", count: 3, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "굽는 불닭", extra: 2000 }] } });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.equal(changed.body.choice.count, 3);
+    assert.equal(changed.body.active, true); // 판매 여부는 그대로
+    // 새 목록대로 주문을 받는다 (뺀 맛은 고를 수 없다)
+    assert.match((await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "2마리 세트", qty: 1, choices: ["간장 파닭", "양념 파닭", "블랙스완 파닭"] } }, buyer)).body.error, /고를 수 없는 맛/);
+    const fresh = await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "2마리 세트", qty: 1, choices: ["간장 파닭", "양념 파닭", "굽는 불닭"] } }, buyer);
+    assert.equal(fresh.body.order.price, 28000);
+
+    // 맛 고르기를 없애면 보통 메뉴로 팔린다
+    const removed = await patchMenu(set.id, { choice: null });
+    assert.equal(removed.body.choice, undefined);
+    const plain = await call("POST", "/api/orders", { order: { ...chicken, storeId, item: "2마리 세트", qty: 1 } }, buyer);
+    assert.equal(plain.status, 200, JSON.stringify(plain.body));
+    assert.equal(plain.body.order.choices, undefined);
+
+    // 지난 주문 기록은 주문할 때의 맛·추가금 그대로
+    const old = db.orderById(ordered.body.id);
+    assert.deepEqual(old.order.choices, [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }]);
+    assert.equal(old.order.price, 27000);
+  });
+
+  it("DB 목록을 catalog.json 모양으로 내보낼 때 맛 목록도 같이 나간다", async () => {
+    const set = (await call("GET", "/api/menu")).body.find((d) => d.restaurantId === storeId && d.name === "2마리 세트");
+    await patchMenu(set.id, { choice: FLAVORS });
+    assert.equal(catalogWithMenu(db).deliveryMenu.find((d) => d.id === set.id).choice.options.length, 3);
+    await patchMenu(set.id, { choice: null });
+    assert.equal(catalogWithMenu(db).deliveryMenu.find((d) => d.id === set.id).choice, undefined);
+  });
+
+  it("맛 목록 고치기도 규칙과 권한을 검사한다", async () => {
+    const set = (await call("GET", "/api/menu")).body.find((d) => d.restaurantId === storeId && d.name === "2마리 세트");
+    assert.match((await patchMenu(set.id, { choice: { ...FLAVORS, count: 5 } })).body.error, /고를 수\(5가지\)만큼은/);
+    assert.equal((await call("GET", "/api/menu")).body.find((d) => d.id === set.id).choice, undefined); // 거절하면 그대로
+    assert.match((await patchMenu(set.id, {})).body.error, /바꿀 내용/);
+    assert.equal((await patchMenu(set.id, { choice: FLAVORS }, otherOwner)).status, 403); // 다른 매장 사장님
+    assert.equal((await patchMenu(set.id, { choice: FLAVORS }, null)).status, 401);
+  });
+});

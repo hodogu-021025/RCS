@@ -100,6 +100,12 @@ export function withTopic(word) {
   if (code < 0 || code > 11171) return `${word}은(는)`;
   return word + (code % 28 ? "은" : "는");
 }
+// 받침에 맞춘 을/를 ("맛을", "토핑을", "소스를")
+export function withObject(word) {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  if (code < 0 || code > 11171) return `${word}을(를)`;
+  return word + (code % 28 ? "을" : "를");
+}
 // 일시 중지가 끝나는 때: 오늘이면 "15:30", 내일이면 "내일 09:00" (한국 날짜 기준)
 export const pauseEndText = (until, now = Date.now()) => `${todayKST(new Date(until)) === todayKST(new Date(now)) ? "" : "내일 "}${timeKST(until)}`;
 
@@ -117,19 +123,22 @@ export const MENU_KEYWORDS_MAX = 10;
 export const CHOICE_OPTIONS_MAX = 40;
 export const CHOICE_COUNT_MAX = 10;
 export const CHOICE_EXTRA_MAX = 100_000;
+export const CHOICE_LABEL_MAX = 10;
 
-// 메뉴 목록 파일의 choice 를 검사해 정리한 값을 돌려준다. 문제가 있으면 { error }
+// 메뉴 목록 파일이나 사장님 화면이 보낸 choice 를 검사해 정리한 값을 돌려준다. 문제가 있으면 { error } (사장님 화면에 그대로 보여 주는 문장)
+// (화면 frontend/src/pages/menuChoice.ts 도 같은 규칙으로 미리 검사한다)
 export function cleanChoice(input) {
-  const label = String(input?.label ?? "맛").trim() || "맛";
+  const label = String(input?.label ?? "맛").trim().replace(/\s+/g, " ") || "맛";
   const count = Number(input?.count);
   const raw = Array.isArray(input?.options) ? input.options : [];
   const options = raw.map((o) => ({ name: String(o?.name ?? "").trim().replace(/\s+/g, " "), extra: Number(o?.extra ?? 0) }));
-  if (label.length > 10) return { error: "고르기 이름(label)은 10자까지" };
-  if (!Number.isInteger(count) || count < 1 || count > CHOICE_COUNT_MAX) return { error: `고를 수(count)는 1~${CHOICE_COUNT_MAX}` };
-  if (options.length < count || options.length > CHOICE_OPTIONS_MAX) return { error: `고를 것(options)은 ${count}~${CHOICE_OPTIONS_MAX}가지` };
-  if (options.some((o) => !o.name || o.name.length > MENU_NAME_MAX)) return { error: `고를 것 이름은 1~${MENU_NAME_MAX}자` };
-  if (new Set(options.map((o) => o.name)).size !== options.length) return { error: "고를 것(options)에 같은 이름이 있어요" };
-  if (options.some((o) => !Number.isInteger(o.extra) || o.extra < 0 || o.extra > CHOICE_EXTRA_MAX)) return { error: `추가금(extra)은 0~${CHOICE_EXTRA_MAX}원 정수` };
+  if (label.length > CHOICE_LABEL_MAX) return { error: `고르기 이름은 ${CHOICE_LABEL_MAX}자까지 적을 수 있어요.` };
+  if (!Number.isInteger(count) || count < 1 || count > CHOICE_COUNT_MAX) return { error: `1세트에 고를 수는 1~${CHOICE_COUNT_MAX} 사이로 적어 주세요.` };
+  if (options.length > CHOICE_OPTIONS_MAX) return { error: `${withTopic(label)} ${CHOICE_OPTIONS_MAX}가지까지 적을 수 있어요.` };
+  if (options.length < count) return { error: `${withObject(label)} 고를 수(${count}가지)만큼은 적어 주세요.` };
+  if (options.some((o) => !o.name || o.name.length > MENU_NAME_MAX)) return { error: `${label} 이름을 1~${MENU_NAME_MAX}자로 적어 주세요.` };
+  if (new Set(options.map((o) => o.name)).size !== options.length) return { error: `같은 ${label} 이름이 두 번 있어요.` };
+  if (options.some((o) => !Number.isInteger(o.extra) || o.extra < 0 || o.extra > CHOICE_EXTRA_MAX)) return { error: `추가금은 0~${CHOICE_EXTRA_MAX.toLocaleString("ko-KR")}원 사이 정수로 적어 주세요.` };
   return { label, count, options };
 }
 
@@ -155,7 +164,7 @@ export const listedMenu = (db) => {
   return db.listMenu().filter((d) => ids.has(d.restaurantId));
 };
 
-// DB 의 매장·메뉴 목록을 catalog.json 모양으로 (관리자가 만든 매장 포함, 사장님이 바꾼 가격은 그 가격으로, 판매 중지한 메뉴는 active: false)
+// DB 의 매장·메뉴 목록을 catalog.json 모양으로 (관리자가 만든 매장 포함, 사장님이 바꾼 가격은 그 가격으로, 판매 중지한 메뉴는 active: false, 세트 메뉴는 맛 고르기 choice 포함)
 export function catalogWithMenu(db) {
   const restaurants = allStores(db).map(({ source: _source, ...s }) => s);
   const settings = db.allStoreSettings();
@@ -166,6 +175,7 @@ export function catalogWithMenu(db) {
     price: settings[d.restaurantId]?.items?.[d.id]?.price ?? d.price,
     unit: d.unit,
     keywords: d.keywords,
+    ...(d.choice ? { choice: d.choice } : {}), // 세트 메뉴의 맛 고르기 (사장님이 화면에서 넣은 것도)
     ...(d.active ? {} : { active: false }),
   }));
   return { ...catalog, restaurants, deliveryMenu };

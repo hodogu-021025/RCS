@@ -462,6 +462,152 @@ describe("사장님 페이지", () => {
   });
 });
 
+describe("세트 메뉴 맛 고르기 (사장님 화면)", () => {
+  const boss = { username: "chickenboss", name: "치킨 사장", role: "owner" as const, storeId: "h3" };
+  type Choice = { label: string; count: number; options: { name: string; extra: number }[] };
+  type MenuRow = { id: string; name: string; restaurantId: string; choice?: Choice };
+  const menuRows = () => (server.db as unknown as { listMenu(): MenuRow[] }).listMenu();
+  const openMenuTab = async () => {
+    server.createAccount(boss);
+    await loginAs("chickenboss");
+    open("#/owner");
+    fireEvent.click(await screen.findByRole("tab", { name: "메뉴" }));
+  };
+
+  it("메뉴 추가에서 세트 메뉴를 켜고 맛 이름·추가금 줄을 넣고 빼면, 맛 고르기가 붙은 메뉴로 저장된다", async () => {
+    await openMenuTab();
+    fireEvent.click(screen.getByRole("tab", { name: "메뉴 추가" }));
+    fill({ "메뉴 이름": "2마리 치킨 세트", "가격 (원)": "26000" });
+    choose("단위", "세트");
+    expect(screen.queryByRole("group", { name: "맛 고르기 편집" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /세트 메뉴예요/ }));
+    expect(screen.getByRole("group", { name: "맛 고르기 편집" })).toBeInTheDocument();
+    expect(screen.getByLabelText("1세트에 고를 수")).toHaveValue(2);
+
+    // 빈 줄 두 개로 시작한다. 하나만 적으면 고를 수(2가지)보다 적어 화면에서 먼저 거른다
+    fill({ "맛 1 이름": "간장 파닭" });
+    await click("메뉴 추가");
+    expect(await screen.findByRole("alert")).toHaveTextContent("맛을 고를 수(2가지)만큼은 적어 주세요.");
+    // 같은 이름은 안 된다
+    fill({ "맛 2 이름": "간장 파닭" });
+    await click("메뉴 추가");
+    expect(await screen.findByRole("alert")).toHaveTextContent("같은 맛 이름이 두 번 있어요.");
+    fill({ "맛 2 이름": "양념 파닭" });
+
+    // 한 줄 추가 → 추가금 적기, 그리고 한 줄 빼기
+    fireEvent.click(screen.getByRole("button", { name: "맛 한 줄 추가" }));
+    fill({ "맛 3 이름": "블랙스완 파닭", "맛 3 추가금": "1000" });
+    fireEvent.click(screen.getByRole("button", { name: "맛 한 줄 추가" }));
+    fill({ "맛 4 이름": "뺄 맛" });
+    fireEvent.click(screen.getByRole("button", { name: "맛 4 빼기" }));
+    expect(screen.queryByLabelText("맛 4 이름")).not.toBeInTheDocument();
+
+    // 여러 개 한 번에 넣기: 쉼표·줄바꿈, 이름 뒤 +금액은 추가금. 이미 있는 이름은 건너뛴다
+    fireEvent.change(screen.getByLabelText("맛 여러 개 한 번에 넣기"), { target: { value: "굽는 불닭 +2,000\n간장 파닭, 핫간장 파닭" } });
+    fireEvent.click(screen.getByRole("button", { name: "목록에 넣기" }));
+    expect(screen.getByLabelText("맛 4 이름")).toHaveValue("굽는 불닭");
+    expect(screen.getByLabelText("맛 4 추가금")).toHaveValue(2000);
+    expect(screen.getByLabelText("맛 5 이름")).toHaveValue("핫간장 파닭");
+    expect(screen.queryByLabelText("맛 6 이름")).not.toBeInTheDocument();
+
+    await click("메뉴 추가");
+    expect(await screen.findByRole("status")).toHaveTextContent("2마리 치킨 세트 메뉴를 추가했어요");
+    const added = menuRows().find((d) => d.name === "2마리 치킨 세트")!;
+    expect(added.choice).toEqual({
+      label: "맛",
+      count: 2,
+      options: [
+        { name: "간장 파닭", extra: 0 },
+        { name: "양념 파닭", extra: 0 },
+        { name: "블랙스완 파닭", extra: 1000 },
+        { name: "굽는 불닭", extra: 2000 },
+        { name: "핫간장 파닭", extra: 0 },
+      ],
+    });
+    // 폼은 비워지고 맛 고르기 칸도 닫힌다
+    expect(screen.queryByRole("group", { name: "맛 고르기 편집" })).not.toBeInTheDocument();
+
+    // 판매 중 카드에 한 줄 요약이 보인다
+    fireEvent.click(screen.getByRole("tab", { name: "판매 중" }));
+    expect(await screen.findByText("맛 2가지 고르기 · 5가지 중")).toBeInTheDocument();
+  });
+
+  it("판매 중인 세트의 맛 목록을 고치고 없앨 수 있고, 지난 주문에 남은 고른 맛은 그대로다", async () => {
+    const set = server.db.addMenuItem({
+      restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트"],
+      choice: { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }] },
+    });
+    const item = { ...chicken, id: set.id, name: "2마리 치킨 세트", price: 26000, unit: "세트" as typeof chicken.unit, keywords: [] };
+    const old = server.db.addOrder({
+      customer: KIM.username, customerName: KIM.name, payment: "계좌이체", storeId: "h3", status: "완료",
+      order: makeOrder(item, 1, TEST_DELIVERY, [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }]),
+    });
+    await openMenuTab();
+    expect(await screen.findByText("맛 2가지 고르기 · 3가지 중")).toBeInTheDocument();
+    // 맛 고르기가 없는 메뉴는 "넣기"
+    expect(screen.getByRole("button", { name: "간장치킨 맛 고르기 넣기" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "2마리 치킨 세트 맛 고르기 고치기" }));
+    expect(screen.getByLabelText("맛 3 이름")).toHaveValue("블랙스완 파닭");
+    expect(screen.getByLabelText("맛 3 추가금")).toHaveValue(1000);
+    // 잘못 적으면 저장하지 않고 이유를 보여 준다
+    fill({ "1세트에 고를 수": "11" });
+    await click("2마리 치킨 세트 맛 고르기 저장");
+    expect(await screen.findByRole("alert")).toHaveTextContent("1세트에 고를 수는 1~10 사이로 적어 주세요.");
+    // 블랙스완을 빼고 새 맛을 넣어 3가지 고르기로
+    fill({ "1세트에 고를 수": "3" });
+    fireEvent.click(screen.getByRole("button", { name: "맛 3 빼기" }));
+    fireEvent.click(screen.getByRole("button", { name: "맛 한 줄 추가" }));
+    fill({ "맛 3 이름": "굽는 불닭", "맛 3 추가금": "2000" });
+    await click("2마리 치킨 세트 맛 고르기 저장");
+    await waitFor(() =>
+      expect(menuRows().find((d) => d.id === set.id)?.choice).toEqual({ label: "맛", count: 3, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "굽는 불닭", extra: 2000 }] }),
+    );
+    expect(await screen.findByText("맛 3가지 고르기 · 3가지 중")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "맛 고르기 편집" })).not.toBeInTheDocument();
+
+    // 없애면 보통 메뉴
+    fireEvent.click(screen.getByRole("button", { name: "2마리 치킨 세트 맛 고르기 고치기" }));
+    await click("2마리 치킨 세트 맛 고르기 없애기");
+    await waitFor(() => expect(menuRows().find((d) => d.id === set.id)?.choice).toBeUndefined());
+    expect(await screen.findByRole("button", { name: "2마리 치킨 세트 맛 고르기 넣기" })).toBeInTheDocument();
+
+    // 지난 주문은 주문할 때의 맛 그대로
+    const kept = server.db.orderById(old.id) as unknown as { order: { choices: { name: string; extra: number }[]; price: number } };
+    expect(kept.order.choices).toEqual([{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }]);
+    expect(kept.order.price).toBe(27000);
+    fireEvent.click(screen.getByRole("tab", { name: "주문·예약" }));
+    expect(await screen.findByText("간장 파닭, 블랙스완 파닭(+1,000원)")).toBeInTheDocument();
+  });
+
+  it("사장님이 화면에서 넣은 맛 목록으로 챗봇이 맛 표를 띄운다", async () => {
+    await openMenuTab();
+    fireEvent.click(screen.getByRole("tab", { name: "메뉴 추가" }));
+    fill({ "메뉴 이름": "2마리 치킨 세트", "가격 (원)": "26000" });
+    choose("단위", "세트");
+    fireEvent.click(screen.getByRole("checkbox", { name: /세트 메뉴예요/ }));
+    fill({ "맛 1 이름": "간장 파닭", "맛 2 이름": "양념 파닭" });
+    fireEvent.click(screen.getByRole("button", { name: "맛 한 줄 추가" }));
+    fill({ "맛 3 이름": "블랙스완 파닭", "맛 3 추가금": "1000" });
+    await click("메뉴 추가");
+    expect(await screen.findByRole("status")).toHaveTextContent("메뉴를 추가했어요");
+    cleanup();
+    await act(async () => void (await logout()));
+
+    server.createAccount({ ...KIM, ...TEST_DELIVERY });
+    await loginAs(KIM.username);
+    open("#/chat");
+    await act(() => refresh(["settings", "popular", "menu"]));
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "2마리 치킨 세트 1세트" } });
+    fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
+    expect((await screen.findAllByText(/맛을 2가지 골라 주세요/, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
+    const picker = screen.getByRole("group", { name: "맛 고르기" });
+    expect(within(picker).getByRole("button", { name: "블랙스완 파닭" })).toBeInTheDocument();
+    expect(within(picker).getByText("1,000원 추가")).toBeInTheDocument();
+  });
+});
+
 describe("관리자 페이지", () => {
   const admin = { username: "adminuser", name: "관리자", role: "admin" as const };
 
