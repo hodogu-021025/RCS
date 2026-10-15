@@ -35,8 +35,8 @@
 //   DELETE /api/stores/:id/bank        (지우면 배달 주문을 받지 않는다)
 //   GET    /api/bank                   관리자 → { 매장 id: 계좌 }  등록된 매장 계좌 전체
 //   GET    /api/owners                 관리자
-//   POST   /api/owners                 { username, password, name?, storeId | newStore }   관리자
-//                                      newStore: { name, food, hours?, address?, signature? } 새 매장을 만들고 그 매장 사장님으로
+//   POST   /api/owners                 { username, password, newStore | storeId }   관리자. 사장님 이름은 "매장 이름 사장님"
+//                                      newStore: { name, food, hours?, address? } 새 매장을 만들고 그 매장 사장님으로
 //   POST   /api/owners/:username/approve  관리자: 스스로 가입한 사장님 승인 (승인 전에는 매장 주문·예약·설정에 접근할 수 없다)
 //   DELETE /api/owners/:username       관리자 (승인 거절도 이것으로)
 //   GET    /api/users                  관리자 (가입한 고객님)
@@ -578,18 +578,20 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     }],
     ["POST", "/api/owners", ({ body, user }) => {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();
-      // 매장은 있는 매장(storeId)을 고르거나, 새 매장(newStore: 이름·음식 종류·영업시간·주소·대표 메뉴)을 직접 입력한다
+      // 관리자 화면은 새 매장(newStore: 이름·음식 종류·영업시간·주소)을 입력해 매장과 사장님 계정을 함께 만든다.
+      // 이미 있는 매장(storeId)에 붙이는 것도 API 로는 받는다 (목록 파일의 매장처럼 사장님이 아직 없는 매장).
+      // 사장님 이름은 늘 "매장 이름 사장님"으로 정한다
       if (body.newStore) {
         const store = cleanNewStore(body.newStore);
         if (store.error) throw bad(store.error);
-        if (allStores(db).some((s) => sameStoreName(s.name, store.name))) throw bad("같은 이름의 매장이 이미 있어요. 목록에서 골라 주세요.");
+        if (allStores(db).some((s) => sameStoreName(s.name, store.name))) throw bad("같은 이름의 매장이 이미 있어요.");
         // 계정 입력을 먼저 검사해서, 아이디가 겹치는 등으로 계정을 못 만들면 매장도 만들지 않는다
-        checkAccount({ role: "user", username: body.username, password: body.password, name: str(body.name, 40) || "사장님" });
+        checkAccount({ role: "user", username: body.username, password: body.password, name: `${store.name} 사장님` });
         const created = db.addStore(store);
-        return createAccount({ role: "owner", username: body.username, password: body.password, name: str(body.name, 40) || `${created.name} 사장님`, storeId: created.id });
+        return createAccount({ role: "owner", username: body.username, password: body.password, name: `${created.name} 사장님`, storeId: created.id });
       }
       const storeId = str(body.storeId, 40);
-      return createAccount({ role: "owner", username: body.username, password: body.password, name: str(body.name, 40) || "사장님", storeId });
+      return createAccount({ role: "owner", username: body.username, password: body.password, name: `${storeName(storeId) ?? "매장"} 사장님`, storeId });
     }],
     ["POST", "/api/owners/:username/approve", ({ params, user }) => {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();

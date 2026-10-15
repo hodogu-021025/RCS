@@ -474,7 +474,7 @@ describe("관리자 페이지", () => {
     expect(document.querySelector(".dash")).toHaveClass("dash-mobile");
   });
 
-  it("사장님 계정을 만들면 목록에 뜨고 그 계정으로 로그인되며, 지우면 사라진다", async () => {
+  it("매장 정보를 입력해 새 매장과 그 사장님 계정을 함께 만들면 목록에 뜨고, 지우면 계정이 사라진다", async () => {
     server.createAccount(admin);
     server.db.updateStoreSettings("c1", { hours: "11:00 - 18:00" });
     await loginAs("adminuser");
@@ -483,56 +483,42 @@ describe("관리자 페이지", () => {
     expect(await screen.findByText("11:00 - 18:00")).toBeInTheDocument(); // 사장님이 바꾼 영업시간이 보인다 (세부 메뉴는 매장 목록부터)
     expect(screen.queryByRole("button", { name: "계정 만들기" })).not.toBeInTheDocument();
 
+    // 매장을 고르는 칸·이름 칸·대표 메뉴 칸 없이 매장 정보 입력칸이 바로 보인다
     fireEvent.click(screen.getByRole("tab", { name: "계정 만들기" }));
-    fill({ 아이디: "jangrakboss", 비밀번호: "password1" });
-    choose("매장", "장락반점");
-    await click("계정 만들기");
-    expect(await screen.findByRole("status")).toHaveTextContent("jangrakboss 계정을 만들었어요");
-    expect(server.db.findUser("jangrakboss")).toMatchObject({ role: "owner", storeId: "c1" });
+    expect(screen.getByLabelText("매장 이름")).toBeInTheDocument();
+    expect(screen.queryByText("매장", { selector: ".select-label" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^이름/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/대표 메뉴/)).not.toBeInTheDocument();
 
-    fill({ 아이디: "jangrakboss", 비밀번호: "password1" });
-    await click("계정 만들기");
-    expect(await screen.findByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
-
-    fireEvent.click(screen.getByRole("tab", { name: "매장 목록" }));
-    expect(await screen.findByText("jangrakboss (장락반점 사장님)")).toBeInTheDocument();
-    await click("jangrakboss 삭제");
-    await waitFor(() => expect(server.db.findUser("jangrakboss")).toBeNull());
-  });
-
-  it("목록에 없는 매장은 직접 입력해 새 매장과 그 사장님 계정을 함께 만든다", async () => {
-    server.createAccount(admin);
-    await loginAs("adminuser");
-    open("#/admin");
-    fireEvent.click(await screen.findByRole("tab", { name: "매장·사장님" }));
-    fireEvent.click(screen.getByRole("tab", { name: "계정 만들기" }));
-    fill({ 아이디: "newstoreboss", 비밀번호: "password1" });
-    choose("매장", "새 매장 직접 입력");
     // 매장 이름·음식 종류가 비어 있으면 보내지 않는다
+    fill({ 아이디: "newstoreboss", 비밀번호: "password1" });
     await click("계정 만들기");
     expect(await screen.findByRole("alert")).toHaveTextContent("매장 이름을 적어 주세요");
-    fill({ "매장 이름": "하소 닭강정", "주소 (선택)": "제천시 하소동 1-2" });
+    fill({ "매장 이름": "  하소   닭강정 ", "주소 (선택)": "제천시 하소동 1-2" });
     await click("계정 만들기");
     expect(await screen.findByRole("alert")).toHaveTextContent("음식 종류를 골라 주세요");
     choose("음식 종류", "치킨");
     await click("계정 만들기");
-    expect(await screen.findByRole("status")).toHaveTextContent("newstoreboss 계정과 하소 닭강정 매장을 만들었어요");
+    expect(await screen.findByRole("status")).toHaveTextContent('newstoreboss 계정과 하소 닭강정 매장을 만들었어요. 사장님 이름은 "하소 닭강정 사장님"이에요.');
     const owner = server.db.findUser("newstoreboss")!;
-    expect(owner.name).toBe("하소 닭강정 사장님");
+    expect(owner).toMatchObject({ role: "owner", name: "하소 닭강정 사장님" });
     expect(server.db.storeById(owner.storeId!)).toMatchObject({ name: "하소 닭강정", food: "chicken", hours: "11:00 - 21:00", address: "제천시 하소동 1-2" });
+    // 입력칸은 비워진다
+    expect(screen.getByLabelText("매장 이름")).toHaveValue("");
 
-    // 같은 이름으로 또 만들면 서버가 거절한다
-    fill({ 아이디: "newstoreboss2", 비밀번호: "password1", "매장 이름": "하소닭강정" });
-    choose("음식 종류", "치킨");
+    // 이미 있는 아이디, 이미 있는 매장 이름(띄어쓰기 차이도 같은 이름)은 서버가 거절한다
+    fill({ 아이디: "newstoreboss", 비밀번호: "password1", "매장 이름": "다른 가게" });
+    choose("음식 종류", "한식");
     await click("계정 만들기");
-    expect(await screen.findByRole("alert")).toHaveTextContent("같은 이름의 매장이 이미 있어요");
+    expect(await screen.findByRole("alert")).toHaveTextContent("이미 있는 아이디예요");
+    fill({ 아이디: "newstoreboss2", "매장 이름": "청전치킨공방" });
+    await click("계정 만들기");
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("같은 이름의 매장이 이미 있어요"));
 
-    // 매장 목록과 매장 고르기에 새 매장이 들어간다
     fireEvent.click(screen.getByRole("tab", { name: "매장 목록" }));
     expect(await screen.findByText("newstoreboss (하소 닭강정 사장님)")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "계정 만들기" }));
-    choose("매장", "하소 닭강정");
-    expect(screen.queryByLabelText("매장 이름")).not.toBeInTheDocument();
+    await click("newstoreboss 삭제");
+    await waitFor(() => expect(server.db.findUser("newstoreboss")).toBeNull());
   });
 
   it("관리자가 만든 매장의 사장님은 사장님 화면에서 자기 매장을 본다 (주소·대표 메뉴가 없으면 그 줄을 뺀다)", async () => {

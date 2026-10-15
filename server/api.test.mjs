@@ -247,7 +247,7 @@ describe("주문·예약과 권한", () => {
     assert.equal((await call("POST", "/api/owners", { username: "jangrakboss", password: "password1", storeId: "c1" }, ownerH3)).status, 403);
     const made = await call("POST", "/api/owners", { username: "jangrakboss", password: "password1", storeId: "c1" }, admin);
     assert.equal(made.status, 200);
-    assert.equal(made.body.name, "사장님");
+    assert.equal(made.body.name, "장락반점 사장님"); // 사장님 이름은 "매장 이름 사장님"
     const login = await call("POST", "/api/auth/login", { username: "jangrakboss", password: "password1" });
     assert.equal(login.body.session.storeId, "c1");
 
@@ -959,9 +959,10 @@ describe("관리자가 새 매장을 직접 입력해 사장님 계정 만들기
   const newOwner = (username, newStore, extra = {}) => call("POST", "/api/owners", { username, password: "password1", newStore, ...extra }, admin);
 
   it("새 매장을 만들고 그 매장 사장님 계정을 만든다. 매장 목록과 메뉴·주문·계좌에 그대로 쓰인다", async () => {
-    const made = await newOwner("newstore01", { name: "  하소   닭강정  ", food: "chicken", address: "제천시 하소동 1-2" });
+    // 보낸 사장님 이름과 대표 메뉴는 쓰지 않는다 (이름은 매장 이름으로 정하고, 대표 메뉴는 받지 않는다)
+    const made = await newOwner("newstore01", { name: "  하소   닭강정  ", food: "chicken", address: "제천시 하소동 1-2", signature: "순살" }, { name: "다른 이름" });
     assert.equal(made.status, 200, JSON.stringify(made.body));
-    assert.equal(made.body.name, "하소 닭강정 사장님"); // 이름을 비우면 "매장 이름 사장님"
+    assert.equal(made.body.name, "하소 닭강정 사장님"); // 사장님 이름은 "매장 이름 사장님" (보낸 이름은 쓰지 않는다)
     const storeId = made.body.storeId;
     assert.match(storeId, /^s/);
 

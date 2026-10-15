@@ -252,15 +252,15 @@ export async function setSpecialMenu(storeId: string, itemId: string | null) {
   await refresh(["settings"]);
 }
 
-// 매장은 있는 매장(storeId)을 고르거나 새 매장(newStore)을 직접 입력한다. 새 매장은 매장 목록에 바로 들어간다
+// 관리자: 매장 정보(newStore)를 입력해 새 매장과 그 사장님 계정을 함께 만든다. 사장님 이름은 서버가 "매장 이름 사장님"으로 정하고,
+// 새 매장은 매장 목록에 바로 들어간다
 export interface NewStore {
   name: string;
   food: string;
   hours?: string;
   address?: string;
-  signature?: string;
 }
-export async function addOwner(account: { username: string; password: string; name: string } & ({ storeId: string } | { newStore: NewStore })) {
+export async function addOwner(account: { username: string; password: string; newStore: NewStore }) {
   await api("POST", "/api/owners", account);
   await refresh(["accounts", "settings"]);
 }

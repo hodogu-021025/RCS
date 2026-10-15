@@ -24,7 +24,7 @@ export const allStores = (db) => [...RESTAURANTS, ...db.listStores().filter((s) 
 export const findStore = (db, id) => RESTAURANTS.find((r) => r.id === id) ?? db.storeById(String(id ?? "")) ?? undefined;
 export const hasStore = (db, id) => findStore(db, id) !== undefined;
 
-// 관리자가 새로 만드는 매장 { name, food, hours?, address?, signature? } 를 검사해 정리한 값을 돌려준다. 문제가 있으면 { error }
+// 관리자가 새로 만드는 매장 { name, food, hours?, address? } 를 검사해 정리한 값을 돌려준다. 문제가 있으면 { error }
 // 거리·평점은 받지 않는다 (모르는 값을 지어내지 않는다). 영업시간을 비우면 11:00 - 21:00 으로 시작하고, 사장님이 사장님 화면에서 바꾼다
 export const STORE_NAME_MAX = 30;
 export const STORE_ADDRESS_MAX = 100;
@@ -39,9 +39,7 @@ export function cleanNewStore(input) {
   if (hoursProblem) return { error: hoursProblem };
   const address = String(input?.address ?? "").trim().replace(/\s+/g, " ");
   if (address.length > STORE_ADDRESS_MAX) return { error: `주소는 ${STORE_ADDRESS_MAX}자까지 적을 수 있어요.` };
-  const signature = String(input?.signature ?? "").trim().replace(/\s+/g, " ");
-  if (signature.length > STORE_NAME_MAX) return { error: `대표 메뉴는 ${STORE_NAME_MAX}자까지 적을 수 있어요.` };
-  return { name, food, hours, ...(address ? { address } : {}), ...(signature ? { signature } : {}) };
+  return { name, food, hours, ...(address ? { address } : {}) };
 }
 // 이름 비교용 (띄어쓰기·대소문자 차이는 같은 이름으로 본다)
 export const sameStoreName = (a, b) => a.replace(/\s+/g, "").toLowerCase() === b.replace(/\s+/g, "").toLowerCase();

@@ -253,23 +253,18 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
 }
 
 // 계정 만들기에서 "새 매장 직접 입력"을 고른 값 (매장 id 와 겹치지 않는 글자)
-const NEW_STORE = "__new";
-const EMPTY_NEW_STORE = { name: "", food: "", open: "11:00", close: "21:00", address: "", signature: "" };
+const EMPTY_STORE = { name: "", food: "", open: "11:00", close: "21:00", address: "" };
 
 // 식당마다 사장님 계정을 보여 주고, 새 사장님 계정을 만든다.
-// 매장은 목록에서 고르거나, 목록에 없는 매장이면 이름·음식 종류·영업시간을 직접 입력해 새로 만든다
+// 계정을 만들 때 매장 정보(이름·음식 종류·영업시간·주소)를 입력하면 그 매장도 함께 만든다. 사장님 이름은 "매장 이름 사장님"
 function StoresTab() {
   const owners = useDb(["settings", "accounts"]).owners;
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  // 매장이 하나도 없으면 처음부터 직접 입력
-  const [storeId, setStoreId] = useState(RESTAURANTS[0]?.id ?? NEW_STORE);
-  const [newStore, setNewStore] = useState(EMPTY_NEW_STORE);
+  const [store, setStore] = useState(EMPTY_STORE);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null); // 방금 만든 계정 안내
-  const typing = storeId === NEW_STORE || !RESTAURANTS.some((r) => r.id === storeId);
-  const setStoreField = (field: keyof typeof EMPTY_NEW_STORE) => (value: string) => setNewStore((s) => ({ ...s, [field]: value }));
+  const setStoreField = (field: keyof typeof EMPTY_STORE) => (value: string) => setStore((s) => ({ ...s, [field]: value }));
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -277,26 +272,20 @@ function StoresTab() {
     const u = username.trim();
     const invalid = usernameError(u) ?? passwordError(password);
     if (invalid) return setError(invalid);
-    const storeName = typing ? newStore.name.trim().replace(/s+/g, " ") : RESTAURANTS.find((r) => r.id === storeId)!.name;
-    if (typing && !storeName) return setError("매장 이름을 적어 주세요.");
-    if (typing && !newStore.food) return setError("음식 종류를 골라 주세요.");
-    const ownerName = name.trim() || `${storeName} 사장님`;
+    const storeName = store.name.trim().replace(/\s+/g, " ");
+    if (!storeName) return setError("매장 이름을 적어 주세요.");
+    if (!store.food) return setError("음식 종류를 골라 주세요.");
     try {
-      if (typing) {
-        const { open, close, ...store } = newStore;
-        await addOwner({ username: u, password, name: ownerName, newStore: { ...store, name: storeName, hours: `${open} - ${close}` } });
-      } else {
-        await addOwner({ username: u, password, name: ownerName, storeId });
-      }
+      const { open, close, ...rest } = store;
+      await addOwner({ username: u, password, newStore: { ...rest, name: storeName, hours: `${open} - ${close}` } });
     } catch (err) {
       return setError((err as Error).message); // 이미 있는 아이디·같은 이름의 매장 등 서버가 거절한 이유
     }
     setUsername("");
     setPassword("");
-    setName("");
-    setNewStore(EMPTY_NEW_STORE);
+    setStore(EMPTY_STORE);
     setError(null);
-    setCreated(typing ? `${u} 계정과 ${storeName} 매장을 만들었어요. 매장 목록에서 볼 수 있어요.` : `${u} 계정을 만들었어요. 매장 목록에서 볼 수 있어요.`);
+    setCreated(`${u} 계정과 ${storeName} 매장을 만들었어요. 사장님 이름은 "${storeName} 사장님"이에요.`);
   }
 
   const waiting = owners.filter((o) => o.approved === false);
@@ -484,50 +473,32 @@ function StoresTab() {
               <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
             </label>
             <PasswordField label="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+            <p className="form-hint muted">매장 정보를 입력하면 새 매장과 그 매장 사장님 계정을 함께 만들어요. 사장님 이름은 "매장 이름 사장님"으로 정해지고, 메뉴와 입금 계좌는 사장님이 사장님 화면에서 등록해요.</p>
             <label>
-              <span>이름 (비우면 "매장 사장님")</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} />
+              <span>매장 이름</span>
+              <input value={store.name} onChange={(e) => setStoreField("name")(e.target.value)} maxLength={30} placeholder="예) 하소 닭강정" />
             </label>
             <Select
-              label="매장"
-              options={[...RESTAURANTS.map((r) => ({ value: r.id, label: r.name })), { value: NEW_STORE, label: "새 매장 직접 입력" }]}
-              value={typing ? NEW_STORE : storeId}
-              onChange={setStoreId}
+              label="음식 종류"
+              options={FOODS.map((f) => ({ value: f.key, label: f.label }))}
+              value={store.food}
+              onChange={setStoreField("food")}
+              placeholder="골라 주세요"
             />
-            {typing && (
-              <div className="new-store">
-                <p className="muted">목록에 없는 매장을 새로 만들어요. 거리·평점은 비워 두고, 메뉴와 입금 계좌는 사장님이 사장님 화면에서 등록해요.</p>
-                <label>
-                  <span>매장 이름</span>
-                  <input value={newStore.name} onChange={(e) => setStoreField("name")(e.target.value)} maxLength={30} placeholder="예) 하소 닭강정" />
-                </label>
-                <Select
-                  label="음식 종류"
-                  options={FOODS.map((f) => ({ value: f.key, label: f.label }))}
-                  value={newStore.food}
-                  onChange={setStoreField("food")}
-                  placeholder="골라 주세요"
-                />
-                <div className="hours-row">
-                  <label>
-                    <span>여는 시간</span>
-                    <input type="time" value={newStore.open} onChange={(e) => e.target.value && setStoreField("open")(e.target.value)} />
-                  </label>
-                  <label>
-                    <span>닫는 시간</span>
-                    <input type="time" value={newStore.close} onChange={(e) => e.target.value && setStoreField("close")(e.target.value)} />
-                  </label>
-                </div>
-                <label>
-                  <span>주소 (선택)</span>
-                  <input value={newStore.address} onChange={(e) => setStoreField("address")(e.target.value)} maxLength={100} />
-                </label>
-                <label>
-                  <span>대표 메뉴 (선택)</span>
-                  <input value={newStore.signature} onChange={(e) => setStoreField("signature")(e.target.value)} maxLength={30} />
-                </label>
-              </div>
-            )}
+            <div className="hours-row">
+              <label>
+                <span>여는 시간</span>
+                <input type="time" value={store.open} onChange={(e) => e.target.value && setStoreField("open")(e.target.value)} />
+              </label>
+              <label>
+                <span>닫는 시간</span>
+                <input type="time" value={store.close} onChange={(e) => e.target.value && setStoreField("close")(e.target.value)} />
+              </label>
+            </div>
+            <label>
+              <span>주소 (선택)</span>
+              <input value={store.address} onChange={(e) => setStoreField("address")(e.target.value)} maxLength={100} />
+            </label>
             {error && (
               <p className="form-error" role="alert">
                 {error}
