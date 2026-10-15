@@ -106,6 +106,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 - 페이지 이동은 해시 주소(`#/owner`)를 써서 별도 리라이트 설정이 필요 없습니다.
 - `frontend/Dockerfile` + `deploy/nginx.conf`는 같은 결과물을 nginx 이미지로 만듭니다 (빌드 컨텍스트는 저장소 루트).
 - 음성 인식은 HTTPS(또는 localhost)에서만 마이크가 열립니다.
+- 앱으로 설치: 배포한 사이트(HTTPS)에서만 서비스 워커(`frontend/public/sw.js`)가 등록됩니다. 안드로이드 크롬 계열은 채팅 입력창 위에 "앱으로 설치" 띠가 뜨고, 아이폰은 "공유 → 홈 화면에 추가" 안내가 뜹니다. 닫으면 7일 동안 다시 띄우지 않습니다 (`frontend/src/pwa.ts`). 서비스 워커는 화면·데이터를 저장하지 않고, 인터넷이 끊겼을 때 안내 화면만 보여 줍니다.
 
 ## 폴더 구조
 

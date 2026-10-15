@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import backgroundVideo from "../image/saylo_background.mp4";
 import { CopyButton } from "./CopyButton";
+import { InstallBanner } from "./InstallBanner";
 import { AccountIcon, ChatIcon, HelpIcon, MenuIcon, MicIcon, PlusIcon, SpeakerIcon } from "./icons";
 import { Tutorial } from "./Tutorial";
 import { markTutorialSeen, tutorialSeen } from "./tutorialSeen";
@@ -1998,6 +1999,9 @@ export function OrderChatbot() {
           </div>
         )}
       </div>
+
+      {/* 앱으로 설치 안내 (설치할 수 있을 때만, 입력창 바로 위에 작게) */}
+      <InstallBanner />
 
       {/* 선택지 질문이 떠 있으면 입력창을 접어 두고, "직접 입력" 을 누르면 올라온다 */}
       <div className={"composer" + (composerOpen ? "" : " collapsed")}>
