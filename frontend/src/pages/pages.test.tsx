@@ -1006,19 +1006,21 @@ describe("사장님 승인 (관리자)", () => {
   });
 });
 
-describe("로그인 시도 제한", () => {
-  it("같은 아이디로 5번 틀리면 잠시 로그인을 막고 안내한다", async () => {
+describe("로그인 틀린 횟수", () => {
+  it("틀릴 때마다 오류 문구 옆에 횟수를 붙이고, 여러 번 틀려도 막지 않는다. 다른 아이디면 1부터 센다", async () => {
     server.createAccount({ ...KIM });
     open("#/login");
-    for (let i = 0; i < 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       await screen.findByRole("button", { name: "로그인" }); // 앞 시도가 끝나 버튼이 돌아온 뒤에
       typeLogin(KIM.username, "wrongpass" + i);
-      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("아이디 또는 비밀번호가 맞지 않아요"));
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(`아이디 또는 비밀번호가 맞지 않아요. (${i})`));
     }
     await screen.findByRole("button", { name: "로그인" });
+    typeLogin("someoneelse", "wrongpass");
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("아이디 또는 비밀번호가 맞지 않아요. (1)"));
+    await screen.findByRole("button", { name: "로그인" });
     typeLogin(KIM.username, "password1");
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("로그인을 너무 여러 번 실패했어요"));
-    expect(window.location.hash).toBe("#/login");
+    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
   });
 });
 

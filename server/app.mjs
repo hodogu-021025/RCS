@@ -123,10 +123,6 @@ const PHONE_ERROR = "전화번호를 010-1234-5678 형식으로 적어 주세요
 const PENDING_OWNER = "관리자 승인을 기다리고 있어요. 승인되면 매장 주문·예약을 볼 수 있어요.";
 const OWNER_SIGNUP_CLOSED = "사장님 계정은 관리자가 만들어 드려요. 관리자에게 요청해 주세요.";
 
-// 로그인 시도 제한: 비밀번호를 계속 대입해 보는 걸 막는다 (15분 안에 아이디별 5번, IP별 20번 실패하면 잠시 막는다)
-export const LOGIN_WINDOW_MS = 15 * 60_000;
-export const LOGIN_MAX_PER_USER = 5;
-export const LOGIN_MAX_PER_IP = 20;
 const str = (v, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 // db: openDb() 결과, verifier: createVerifier() 결과, mailer: createMailer() 결과
@@ -185,24 +181,6 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
     throw forbidden();
   }
 
-  // ---- 로그인 시도 제한 ----
-  const loginFails = new Map(); // "u:아이디" 또는 "ip:주소" → [실패 시각…]
-  const recentFails = (key) => (loginFails.get(key) ?? []).filter((at) => now() - at < LOGIN_WINDOW_MS);
-  function checkLoginLimit(keys) {
-    for (const [key, max] of keys) {
-      const fails = recentFails(key);
-      if (fails.length < max) continue;
-      const retryAfter = Math.max(1, Math.ceil((fails[0] + LOGIN_WINDOW_MS - now()) / 1000));
-      const err = new HttpError(429, `로그인을 너무 여러 번 실패했어요. ${Math.ceil(retryAfter / 60)}분 뒤에 다시 시도해 주세요.`);
-      err.extra = { retryAfter };
-      throw err;
-    }
-  }
-  function recordLoginFail(keys) {
-    if (loginFails.size > 10_000) for (const k of loginFails.keys()) if (recentFails(k).length === 0) loginFails.delete(k);
-    for (const [key] of keys) loginFails.set(key, [...recentFails(key), now()]);
-  }
-  const userKey = (username) => `u:${String(username).toLowerCase()}`;
 
   // ---- 계정 ----
   // 입력을 검사해 정리된 값을 돌려준다. 문제가 있으면 400
@@ -267,16 +245,11 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       const user = db.createUser({ ...account, phone, passwordHash: hashPassword(account.password), privacyVersion: PRIVACY_VERSION });
       return startSession(user);
     }],
-    ["POST", "/api/auth/login", ({ body, ip }) => {
+    // 로그인 잠금은 두지 않는다 (몇 번 틀렸는지는 로그인 화면이 세어 보여 준다)
+    ["POST", "/api/auth/login", ({ body }) => {
       const username = str(body.username, 20);
-      const keys = [[userKey(username), LOGIN_MAX_PER_USER], [`ip:${ip}`, LOGIN_MAX_PER_IP]];
-      checkLoginLimit(keys);
       const row = db.findUserWithHash(username);
-      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) {
-        recordLoginFail(keys);
-        throw new HttpError(401, "아이디 또는 비밀번호가 맞지 않아요.");
-      }
-      loginFails.delete(userKey(username));
+      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) throw new HttpError(401, "아이디 또는 비밀번호가 맞지 않아요.");
       return startSession(db.findUser(row.username));
     }],
     // 비밀번호 찾기: 가입된 이메일로 인증번호를 보내고, 인증을 마치면 새 비밀번호로 바꾼다
@@ -302,7 +275,6 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       // 증표는 맨 마지막에 쓴다 (틀린 입력 때문에 다시 인증하지 않게)
       if (!verifier.consumeProof(email, body.proof)) throw bad("이메일 인증을 마쳐 주세요.");
       db.setPassword(user.username, hashPassword(body.password));
-      loginFails.delete(userKey(user.username));
       return { ok: true, username: user.username };
     }],
     ["POST", "/api/auth/logout", ({ token }) => {
@@ -330,13 +302,8 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       if (!user) throw needLogin();
       if (user.role === "admin") throw new HttpError(403, "관리자 계정은 탈퇴할 수 없어요.");
       // 401 은 화면이 "로그인이 풀렸다"로 받아들이므로, 비밀번호가 틀리면 400 으로 알린다
-      const keys = [[userKey(user.username), LOGIN_MAX_PER_USER]];
-      checkLoginLimit(keys);
       const row = db.findUserWithHash(user.username);
-      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) {
-        recordLoginFail(keys);
-        throw bad("비밀번호가 맞지 않아요.");
-      }
+      if (!row || !verifyPassword(String(body.password ?? ""), row.password_hash)) throw bad("비밀번호가 맞지 않아요.");
       db.withdrawUser(user.username);
       if (user.role === "owner") forgetStoreBank(user.storeId);
       return { ok: true };

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
-import { LOGIN_MAX_PER_IP, LOGIN_MAX_PER_USER, LOGIN_WINDOW_MS, PRIVACY_VERSION, createApp } from "./app.mjs";
+import { PRIVACY_VERSION, createApp } from "./app.mjs";
 import { normalizePhone } from "./contact.mjs";
 import { ORDER_KEEP_YEARS, WITHDRAWN, openDb } from "./db.mjs";
 import { STORE_IDS } from "./stores.mjs";
@@ -319,28 +319,13 @@ describe("사장님 승인", () => {
   });
 });
 
-describe("로그인 시도 제한", () => {
-  it("한 아이디로 5번 틀리면 맞는 비밀번호도 잠시 막고, 시간이 지나면 다시 된다", async () => {
+describe("로그인 잠금 없음", () => {
+  it("여러 번 틀려도 막지 않고, 맞는 비밀번호를 넣으면 바로 로그인된다", async () => {
     db.createUser({ username: "lockeduser", passwordHash: hashPassword("password1"), name: "잠김", role: "user" });
-    for (let i = 0; i < LOGIN_MAX_PER_USER; i++) {
-      assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "wrongpass" + i }, undefined, `10.1.0.${i}`)).status, 401);
+    for (let i = 0; i < 25; i++) {
+      assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "wrongpass" + i }, undefined, "10.1.0.1")).status, 401);
     }
-    const locked = await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.1.1.1");
-    assert.equal(locked.status, 429);
-    assert.match(locked.body.error, /15분 뒤에 다시 시도/);
-    assert.ok(locked.body.retryAfter > 0);
-
-    clock += LOGIN_WINDOW_MS;
-    assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.1.1.1")).status, 200);
-  });
-
-  it("한 IP 가 여러 아이디로 계속 틀리면 그 IP 를 잠시 막는다", async () => {
-    for (let i = 0; i < LOGIN_MAX_PER_IP; i++) {
-      await call("POST", "/api/auth/login", { username: `guessuser${i}`, password: "wrongpass" }, undefined, "10.2.2.2");
-    }
-    assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.2.2.2")).status, 429);
-    assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.2.2.3")).status, 200);
-    clock += LOGIN_WINDOW_MS;
+    assert.equal((await call("POST", "/api/auth/login", { username: "lockeduser", password: "password1" }, undefined, "10.1.0.1")).status, 200);
   });
 });
 

@@ -82,11 +82,12 @@ function start({ token, session }: { token: string; session: Session }) {
 }
 
 // 아이디·비밀번호가 맞으면 로그인하고 세션을 돌려준다. 틀리면 안내 문구
-export async function login(username: string, password: string): Promise<{ session: Session } | { error: string }> {
+// wrong: 아이디나 비밀번호가 틀렸을 때 true (연결이 끊긴 것과 구분해 로그인 화면이 틀린 횟수를 센다)
+export async function login(username: string, password: string): Promise<{ session: Session } | { error: string; wrong: boolean }> {
   try {
     return { session: start(await api("POST", "/api/auth/login", { username: username.trim(), password })) };
   } catch (e) {
-    return { error: (e as ApiError).message };
+    return { error: (e as ApiError).message, wrong: (e as ApiError).status === 401 };
   }
 }
 

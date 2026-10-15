@@ -12,6 +12,8 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 같은 아이디로 아이디·비밀번호를 틀린 횟수. 오류 문구 옆에 "(2)"처럼 붙인다 (로그인 잠금은 없다)
+  const [wrong, setWrong] = useState({ username: "", count: 0 });
   // 탈퇴 직후처럼 다른 화면에서 넘겨준 안내 (처음 그릴 때 한 번만 받는다)
   const [notice] = useState(takeLoginNotice);
 
@@ -23,7 +25,11 @@ export function LoginPage() {
     const result = await login(username, password);
     setBusy(false);
     if ("error" in result) {
-      setError(result.error);
+      if (!result.wrong) return setError(result.error);
+      const who = username.trim();
+      const count = wrong.username === who ? wrong.count + 1 : 1;
+      setWrong({ username: who, count });
+      setError(`${result.error} (${count})`);
       return;
     }
     clearRecords(); // 전 계정이 받아 둔 기록을 비우고 새로 받는다
