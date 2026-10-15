@@ -115,6 +115,8 @@ const toMenuItem = (r) =>
     keywords: JSON.parse(r.keywords_json),
     active: r.active !== 0,
     source: r.source,
+    // 세트 메뉴의 맛 고르기 { label, count, options }: 1세트에 count 가지 맛을 options 중에서 하나씩 고른다
+    ...(r.choice_json ? { choice: JSON.parse(r.choice_json) } : {}),
   };
 
 const newId = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -174,6 +176,8 @@ export function openDb(path) {
   // 예전에 잠깐 있던 관리자 기본 계좌(store_id 'default')는 쓰지 않는다. 남아 있으면 지운다
   db.exec("DELETE FROM bank_accounts WHERE store_id = 'default'");
   // 회원가입 때 동의한 개인정보 처리방침 버전(시행일)과 동의 시각. 관리자가 만든 계정은 비어 있다
+  // 세트 메뉴의 맛 고르기 (없으면 그냥 메뉴)
+  if (!db.prepare("PRAGMA table_info(menu_items)").all().some((c) => c.name === "choice_json")) db.exec("ALTER TABLE menu_items ADD COLUMN choice_json TEXT");
   const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
   if (!userCols.includes("privacy_version")) db.exec("ALTER TABLE users ADD COLUMN privacy_version TEXT");
   if (!userCols.includes("privacy_agreed_at")) db.exec("ALTER TABLE users ADD COLUMN privacy_agreed_at INTEGER");
@@ -202,15 +206,15 @@ export function openDb(path) {
     deleteSessionsOf: q("DELETE FROM sessions WHERE username = ?"),
     privacyConsent: q("SELECT privacy_version, privacy_agreed_at FROM users WHERE username = ?"),
     deleteUser: q("DELETE FROM users WHERE username = ?"),
-    insertMenuIfMissing: q("INSERT OR IGNORE INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', ?)"),
-    insertMenu: q("INSERT INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'owner', ?)"),
+    insertMenuIfMissing: q("INSERT OR IGNORE INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at, choice_json) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', ?, ?)"),
+    insertMenu: q("INSERT INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at, choice_json) VALUES (?, ?, ?, ?, ?, ?, 1, 'owner', ?, ?)"),
     listMenu: q("SELECT * FROM menu_items ORDER BY rowid"),
     menuById: q("SELECT * FROM menu_items WHERE id = ?"),
     listStores: q("SELECT * FROM stores ORDER BY created_at, rowid"),
     storeById: q("SELECT * FROM stores WHERE id = ?"),
     insertStore: q("INSERT INTO stores (id, name, food, hours, address, signature, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
     menuByName: q("SELECT * FROM menu_items WHERE restaurant_id = ? AND name = ? ORDER BY active DESC, rowid DESC LIMIT 1"),
-    updateMenu: q("UPDATE menu_items SET name = ?, unit = ?, keywords_json = ?, active = ? WHERE id = ?"),
+    updateMenu: q("UPDATE menu_items SET name = ?, unit = ?, keywords_json = ?, active = ?, choice_json = ? WHERE id = ?"),
     anonymizeOrders: q("UPDATE orders SET customer = ?, customer_name = ?, receipt = NULL WHERE customer = ?"),
     ordersOf: q("SELECT id, order_json FROM orders WHERE customer = ?"),
     setOrderJson: q("UPDATE orders SET order_json = ? WHERE id = ?"),
@@ -296,7 +300,7 @@ export function openDb(path) {
     seedMenu(items) {
       const now = Date.now();
       for (const d of items) {
-        stmts.insertMenuIfMissing.run(d.id, d.restaurantId, d.name, d.price, d.unit, JSON.stringify(d.keywords ?? []), d.active === false ? 0 : 1, now);
+        stmts.insertMenuIfMissing.run(d.id, d.restaurantId, d.name, d.price, d.unit, JSON.stringify(d.keywords ?? []), d.active === false ? 0 : 1, now, d.choice ? JSON.stringify(d.choice) : null);
       }
     },
     listMenu: () => stmts.listMenu.all().map(toMenuItem),
@@ -311,16 +315,16 @@ export function openDb(path) {
       stmts.insertStore.run(id, name, food, hours, address ?? null, signature ?? null, Date.now());
       return toStore(stmts.storeById.get(id));
     },
-    addMenuItem({ restaurantId, name, price, unit, keywords }) {
+    addMenuItem({ restaurantId, name, price, unit, keywords, choice }) {
       const id = newId("m");
-      stmts.insertMenu.run(id, restaurantId, name, price, unit, JSON.stringify(keywords), Date.now());
+      stmts.insertMenu.run(id, restaurantId, name, price, unit, JSON.stringify(keywords), Date.now(), choice ? JSON.stringify(choice) : null);
       return toMenuItem(stmts.menuById.get(id));
     },
     updateMenuItem(id, patch) {
       const cur = toMenuItem(stmts.menuById.get(id));
       if (!cur) return null;
       const next = { ...cur, ...patch };
-      stmts.updateMenu.run(next.name, next.unit, JSON.stringify(next.keywords), next.active ? 1 : 0, id);
+      stmts.updateMenu.run(next.name, next.unit, JSON.stringify(next.keywords), next.active ? 1 : 0, next.choice ? JSON.stringify(next.choice) : null, id);
       return toMenuItem(stmts.menuById.get(id));
     },
     // 회원 탈퇴: 계정(과 세션)은 지우고, 법에 따라 보관하는 주문·예약 기록은 누구 것인지 알 수 없게 바꿔 남긴다.

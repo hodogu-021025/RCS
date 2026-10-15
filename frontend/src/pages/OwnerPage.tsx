@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { clockText, findRestaurantById, untilText, formatDate, orderPriceLabel, won, type DeliveryItem, type Restaurant } from "../components/orderChatKnowledge";
+import { choicesText, clockText, findRestaurantById, untilText, formatDate, orderItemText, orderPriceLabel, won, type DeliveryItem, type Restaurant } from "../components/orderChatKnowledge";
 import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
@@ -71,8 +71,7 @@ function NewOrderToast({ record }: { record: OrderRecord }) {
   if (!visible) return null;
   return (
     <div className="toast" role="status">
-      새 주문: {record.order.item} {record.order.qty}
-      {record.order.unit} · {orderPriceLabel(record.order)} · 입금을 확인해 주세요
+      새 주문: {orderItemText(record.order)} · {orderPriceLabel(record.order)} · 입금을 확인해 주세요
     </div>
   );
 }
@@ -308,6 +307,13 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
         <span className={statusClass(o.status)}>{o.status}</span>
       </div>
       <dl>
+        {/* 세트 메뉴의 고른 맛 */}
+        {o.order.choices?.length ? (
+          <div>
+            <dt>{o.order.choiceLabel ?? "맛"}</dt>
+            <dd>{choicesText(o.order.choices)}</dd>
+          </div>
+        ) : null}
         {o.order.address && (
           <div>
             <dt>배달지</dt>

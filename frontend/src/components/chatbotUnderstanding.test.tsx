@@ -771,3 +771,73 @@ describe("일시 중지 검토에서 찾은 문제", () => {
     expect(buttonsIn(/잠시 주문을 받지 않아요/)).toContain("옛날통닭");
   });
 });
+describe("세트 메뉴 맛 고르기", () => {
+  const FLAVORS = [
+    { name: "간장 파닭", extra: 0 },
+    { name: "핫간장 파닭", extra: 0 },
+    { name: "양념 파닭", extra: 0 },
+    { name: "블랙스완 파닭", extra: 1000 },
+    { name: "굽는 불닭", extra: 2000 },
+  ];
+  beforeEach(() => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트"], choice: { label: "맛", count: 2, options: FLAVORS } });
+    // 세트 메뉴가 여럿이면 "1세트"의 "세트"가 모든 세트 메뉴 키워드에 걸린다 (운영 가게와 같은 상태)
+    server.db.addMenuItem({ restaurantId: "h3", name: "3마리 치킨 세트", price: 33000, unit: "세트", keywords: ["세트"], choice: { label: "맛", count: 3, options: FLAVORS } });
+  });
+  const cell = (name: string) => screen.getAllByRole("button", { name }).at(-1)!;
+  const doneButton = () => screen.getAllByRole("button", { name: /선택 완료/ }).at(-1)!;
+  type SavedOrder = { order: { price: number; choices?: { name: string; extra: number }[] } };
+  const lastSaved = () => {
+    const last = server.db.listOrders().at(-1)!;
+    return server.db.orderById(last.id) as unknown as SavedOrder;
+  };
+
+  it("세트를 고르면 마리 수만큼 맛을 표에서 하나씩 고르고, 추가금을 더한 주문서로 주문된다", async () => {
+    await renderChat();
+    await say("2마리 치킨 세트 시켜줘");
+    expect(await find(/몇 세트 주문할까요/)).toBeTruthy();
+    await click(/1세트 · 26,000원 선택/);
+    expect(await find(/맛을 2가지 골라 주세요/)).toBeTruthy();
+    expect(doneButton()).toBeDisabled();
+
+    fireEvent.click(cell("간장 파닭"));
+    expect(cell("간장 파닭")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(cell("블랙스완 파닭"));
+    // 다 고르면 나머지 맛은 잠기고, 고른 맛을 다시 누르면 뺄 수 있다
+    expect(cell("양념 파닭")).toBeDisabled();
+    expect(screen.getByText(/2가지 중 2가지 · 27,000원/)).toBeInTheDocument();
+    fireEvent.click(doneButton());
+    await wait();
+    await wait();
+
+    expect(inCard("간장 파닭, 블랙스완 파닭(+1,000원)")).toBe(true);
+    expect(inCard("27,000원")).toBe(true);
+    await click("응 해줘");
+    expect(await find(/주문을 받았어요/)).toBeTruthy();
+    const saved = lastSaved();
+    expect(saved.order.price).toBe(27000);
+    expect(saved.order.choices).toEqual([{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }]);
+  });
+
+  it("맛 이름을 말해도 고르고, '핫간장 파닭'을 '간장 파닭'으로 잘못 잡지 않으며, 수가 모자라면 다시 묻는다", async () => {
+    await renderChat();
+    await say("2마리 치킨 세트 1세트");
+    expect(await find(/맛을 2가지 골라 주세요/)).toBeTruthy();
+    await type("핫간장 파닭");
+    expect(await find(/2가지를 골라 주세요\. 지금 1가지를 말씀하셨어요/)).toBeTruthy();
+    await type("핫간장 파닭이랑 굽는 불닭");
+    await wait();
+    expect(inCard("핫간장 파닭, 굽는 불닭(+2,000원)")).toBe(true);
+    expect(inCard("28,000원")).toBe(true);
+  });
+
+  it("주문서에서 세트 수를 바꾸면 맛을 다시 고른다", async () => {
+    await renderChat();
+    await say("2마리 치킨 세트 1세트");
+    await type("간장 파닭, 양념 파닭");
+    await wait();
+    expect(inCard("간장 파닭, 양념 파닭")).toBe(true);
+    await type("2세트로 해줘");
+    expect(await find(/맛을 4가지 골라 주세요/)).toBeTruthy();
+  });
+});

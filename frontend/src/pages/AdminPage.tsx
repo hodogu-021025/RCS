@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { FOODS, RESTAURANTS, formatDate, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
+import { FOODS, RESTAURANTS, choicesText, formatDate, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
 import {
   addOwner,
   approveOwner,
@@ -43,7 +43,7 @@ const toRow = (o: OrderRecord): Row => ({
   id: o.id,
   createdAt: o.createdAt,
   kind: "delivery",
-  what: `${o.order.item} ${o.order.qty}${o.order.unit}`,
+  what: orderItemText(o.order), // 세트 메뉴면 고른 맛까지
   where: o.order.store.name,
   who: o.customerName,
   customer: o.customer,
@@ -213,6 +213,12 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
                   <dt>매장</dt>
                   <dd>{o.order.store.name}</dd>
                 </div>
+                {o.order.choices?.length ? (
+                  <div>
+                    <dt>{o.order.choiceLabel ?? "맛"}</dt>
+                    <dd>{choicesText(o.order.choices)}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>입금 계좌</dt>
                   <dd>{o.order.bank ? `${o.order.bank.bank} ${o.order.bank.account} · ${o.order.bank.holder}` : "-"}</dd>

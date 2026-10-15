@@ -21,6 +21,8 @@ export interface Order {
   price: number; // 결제 금액 (할인했으면 할인한 금액)
   discountPct?: number; // 할인율 (%)
   listPrice?: number; // 할인 전 금액
+  choices?: ChosenOption[]; // 세트 메뉴에서 고른 맛 (추가금은 price 에 들어 있다)
+  choiceLabel?: string; // 고른 것의 이름 ("맛")
   address?: string; // 배달지
   phone?: string; // 가게가 연락할 전화번호
   storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
@@ -172,6 +174,45 @@ export interface DeliveryItem {
   discountPct?: number; // 할인율 (%)
   special?: boolean; // 오늘의 메뉴
   source?: "catalog" | "owner"; // 목록 파일의 메뉴인지, 사장님이 추가한 메뉴인지
+  // 세트 메뉴: 1세트에 서로 다른 맛 count 가지를 options 중에서 하나씩 고르고, 고른 맛의 추가금을 세트 값에 더한다
+  choice?: MenuChoice;
+}
+
+export interface ChoiceOption {
+  name: string;
+  extra: number; // 추가금 (원). 0 이면 추가금 없음
+}
+export interface MenuChoice {
+  label: string; // "맛"
+  count: number; // 1세트에 고를 수
+  options: ChoiceOption[];
+}
+export type ChosenOption = ChoiceOption;
+
+// 고른 맛을 글로: "간장 파닭, 블랙스완 파닭(+1,000원)"
+export const choicesText = (choices: ChosenOption[]) =>
+  choices.map((c) => (c.extra ? `${c.name}(+${won(c.extra)})` : c.name)).join(", ");
+export const choicesExtra = (choices: ChosenOption[] | undefined) => (choices ?? []).reduce((sum, c) => sum + c.extra, 0);
+
+// 주문한 메뉴를 한 줄로 (사장님·관리자·내 주문 화면): "2마리 치킨 세트 1세트 (간장 파닭, 양념 파닭)"
+export const orderItemText = (order: Pick<Order, "item" | "qty" | "unit" | "choices">) =>
+  `${order.item} ${order.qty}${order.unit}${order.choices?.length ? ` (${choicesText(order.choices)})` : ""}`;
+
+// 말이나 버튼 글자에서 고를 것 이름을 찾는다. 긴 이름부터 찾고 찾은 부분은 지워서,
+// "핫간장 파닭"을 말했을 때 "간장 파닭"이 또 잡히지 않게 한다 (띄어쓰기는 무시)
+export function matchChoices(text: string, options: ChoiceOption[]): ChoiceOption[] {
+  let rest = squash(text);
+  const found: ChoiceOption[] = [];
+  for (const o of [...options].sort((a, b) => squash(b.name).length - squash(a.name).length)) {
+    const key = squash(o.name);
+    if (rest.includes(key)) {
+      found.push(o);
+      rest = rest.split(key).join("|");
+    }
+  }
+  // 말한 순서대로
+  const at = (o: ChoiceOption) => squash(text).indexOf(squash(o.name));
+  return found.sort((a, b) => at(a) - at(b));
 }
 
 // 판매 중인 배달 메뉴. 서버의 메뉴 목록을 쓰므로 사장님이 추가하거나 판매 중지하면 바로 바뀐다
@@ -238,6 +279,14 @@ function withoutMenuNames(text: string): string {
   return out;
 }
 
+// 수량 표현("1세트", "두 마리", "3개")을 지운 말. 수량을 묻는 중에 "1세트"의 "세트"가 세트 메뉴 키워드로 잡혀
+// 다른 메뉴를 말한 것처럼 보이지 않게, 메뉴를 찾기 전에 쓴다
+export function withoutQuantity(text: string, unit: string): string {
+  const u = escapeRegExp(unit);
+  const counts = KOREAN_COUNTS.map(([w]) => w).join("|");
+  return text.replace(new RegExp(`(\\d+|${counts})\\s*${u}`, "g"), " ").replace(new RegExp(`(^|\\s)${u}(?=\\s|$)`, "g"), " ");
+}
+
 export function parseQuantity(said: string): number | undefined {
   const text = withoutMenuNames(said);
   for (const m of text.matchAll(/\d+/g)) {
@@ -263,16 +312,19 @@ export function quantityQuestion(item: DeliveryItem, lead?: string): string {
 }
 
 // delivery: 손님이 알려 준 배달지·연락처 (없으면 주문서에 비워 둔다. 챗봇은 받은 뒤에만 주문서를 만든다)
-export function makeOrder(item: DeliveryItem, qty: number, delivery?: { address: string; phone: string }): Order {
+// choices: 세트 메뉴에서 고른 맛 (추가금을 세트 값에 더한다. 할인은 세트 값에만)
+export function makeOrder(item: DeliveryItem, qty: number, delivery?: { address: string; phone: string }, choices?: ChosenOption[]): Order {
   const store = restaurantById(item.restaurantId);
+  const extra = choicesExtra(choices);
   return {
     store: { name: store.name, distance: km(store.distanceKm) },
     storeId: store.id,
     item: item.name,
     qty,
     unit: item.unit,
-    price: item.price * qty,
-    ...(item.discountPct ? { discountPct: item.discountPct, listPrice: (item.listPrice ?? item.price) * qty } : {}),
+    price: item.price * qty + extra,
+    ...(item.discountPct ? { discountPct: item.discountPct, listPrice: (item.listPrice ?? item.price) * qty + extra } : {}),
+    ...(choices?.length ? { choices, choiceLabel: item.choice?.label ?? "맛" } : {}),
     ...(delivery ? { address: delivery.address, phone: delivery.phone } : {}),
   };
 }
@@ -621,6 +673,7 @@ export function orderCardRows(order: Order): OrderRow[] {
   return [
     { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
     { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
+    ...(order.choices?.length ? [{ label: order.choiceLabel ?? "맛", value: choicesText(order.choices) }] : []),
     { label: "가격", value: orderPriceLabel(order), emphasis: true },
     { label: "결제", value: `${PAYMENT_LABEL} (주문 후 ${PAY_WINDOW_MIN}분 안에 입금)` },
     { label: "배달지", value: order.address ?? "" },

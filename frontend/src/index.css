@@ -403,6 +403,34 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 .count-confirm.selected:disabled { opacity: 1; background: var(--accent-weak); color: var(--accent); }
 .stepper button:focus-visible, .count-confirm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* 세트 메뉴의 맛 고르기 표 (ChoicePicker.tsx): 추가금별 묶음마다 두 칸씩, 칸 사이를 선으로 나눈 납작한 표.
+   고른 칸은 파란 테두리·옅은 파란 바탕, 다 고르면 나머지 칸은 흐려진다. 아래 줄에 고른 수·금액과 "선택 완료" */
+.bubble:has(.choice-picker) { max-width: 96%; }
+.choice-picker { margin-top: 12px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fff; }
+.choice-group + .choice-group { border-top: 1px solid var(--line); }
+.choice-group-head { padding: 7px 12px; background: #f6f8fb; color: var(--muted); font-size: 12px; font-weight: 700; }
+.choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.choice-cell {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 10px 12px; border: none; border-top: 1px solid var(--line); background: #fff;
+  color: var(--text); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.choice-grid .choice-cell:nth-child(odd) { border-right: 1px solid var(--line); }
+.choice-name { min-width: 0; word-break: keep-all; line-height: 1.35; }
+.choice-box { flex-shrink: 0; width: 16px; height: 16px; border: 1.5px solid #cbd5e1; border-radius: 5px; background: #fff; }
+.choice-cell.on { background: var(--accent-weak); color: var(--accent); font-weight: 700; }
+.choice-cell.on .choice-box { border-color: var(--accent); background: var(--accent); }
+.choice-cell:disabled { cursor: default; }
+.choice-cell:disabled:not(.on) { color: #94a3b8; }
+.choice-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.choice-foot {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.choice-foot span { flex-shrink: 0; }
+.choice-foot .count-confirm { flex: 1; }
+
 /* 날짜·시간 "직접 입력"으로 펼치는 고르기 화면 (말풍선 안, 한 단계 들어간 면) */
 .picker {
   margin-top: 10px; padding: 12px;

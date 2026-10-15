@@ -4,6 +4,7 @@ import {
   deliveryMenu,
   foodsOnOffer,
   filledRows,
+  orderItemText,
   byDistance,
   MAX_PEOPLE,
   RESTAURANTS,
@@ -295,7 +296,8 @@ const hhmm = (ms: number) => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 export const ETA_MINUTES = 40;
-export const orderLabel = (o: OrderRecord) => `${o.order.store.name} ${o.order.item} ${o.order.qty}${o.order.unit}`;
+// 주문을 한 줄로 (세트 메뉴면 고른 맛까지): "못말리는파닭 2마리 치킨 세트 1세트 (간장 파닭, 블랙스완 파닭(+1,000원))"
+export const orderLabel = (o: OrderRecord) => `${o.order.store.name} ${orderItemText(o.order)}`;
 
 const STATUS_TITLE: Record<OrderRecord["status"], string> = {
   "입금 대기": "입금을 기다리고 있어요.",

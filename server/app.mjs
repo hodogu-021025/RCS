@@ -71,6 +71,7 @@ import {
   findStore,
   sameStoreName,
   hasStore,
+  pickedChoices,
   discountedPrice,
   foodLabel,
   listedMenu,
@@ -355,6 +356,15 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       if (!item) throw bad(db.menuItemByName(o.storeId, str(o.item)) ? `${str(o.item)}은(는) 지금 판매하지 않아요.` : "메뉴를 알 수 없어요.");
       const setting = db.allStoreSettings()[o.storeId]?.items?.[item.id] ?? {};
       if (setting.soldOut) throw bad(`${item.name}은(는) 지금 품절이에요.`);
+      // 세트 메뉴: 고른 맛을 검사한다 (세트 수 × 마리 수만큼, 메뉴의 맛 목록 안에서 서로 다르게). 맛의 추가금은 세트 값에 더한다
+      let choices;
+      let extra = 0;
+      if (item.choice) {
+        const picked = pickedChoices(item.choice, o.choices, qty);
+        if (picked.error) throw bad(picked.error);
+        choices = picked.choices;
+        extra = picked.extra;
+      }
       // 1단위 가격: 사장님이 바꾼 가격, 그다음 할인율 (10원 단위로 반올림)
       const listPrice = setting.price ?? item.price;
       const discountPct = setting.discountPct ?? 0;
@@ -370,9 +380,11 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
         item: item.name,
         qty,
         unit: item.unit,
-        price: unitPrice * qty,
+        price: unitPrice * qty + extra, // 세트 메뉴면 고른 맛의 추가금을 더한다 (할인은 세트 값에만)
         // 할인했으면 할인율과 할인 전 금액도 남긴다 (영수증·사장님 화면에 보여 준다)
-        ...(discountPct > 0 ? { discountPct, listPrice: listPrice * qty } : {}),
+        ...(discountPct > 0 ? { discountPct, listPrice: listPrice * qty + extra } : {}),
+        // 세트 메뉴의 고른 맛 (사장님 화면·내 주문에 보여 준다)
+        ...(choices ? { choices, choiceLabel: item.choice.label } : {}),
         address,
         phone,
       };

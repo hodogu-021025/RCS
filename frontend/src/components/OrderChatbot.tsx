@@ -10,6 +10,7 @@ import { useSession } from "../auth/auth";
 import { addOrder, addReservation, cancelMyOrder, fetchMyOrders, refresh, storePausedUntil, useDb, type OrderRecord } from "../data/db";
 import { deliveryChange, hasDelivery, rememberResume, takeResume, type DeliveryInfo, type ResumeDelivery } from "./delivery";
 import { CalendarPicker } from "./CalendarPicker";
+import { ChoicePicker } from "./ChoicePicker";
 import { CountPicker } from "./CountPicker";
 import { TimePicker } from "./TimePicker";
 import { VoiceCaption } from "./VoiceCaption";
@@ -65,8 +66,11 @@ import {
   spokenTime,
   withObjectParticle,
   won,
+  matchChoices,
+  withoutQuantity,
   type BotPrompt,
   type Choice,
+  type ChosenOption,
   type DeliveryItem,
   type InfoCard,
   type Order,
@@ -104,14 +108,14 @@ import {
   type ReservationSlots,
 } from "./understanding";
 
-// 배달: idle → menu(메뉴 대기) → qty(수량 대기) → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
+// 배달: idle → menu(메뉴 대기) → qty(수량 대기) → [세트 메뉴면 choose(맛 고르기)] → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
 // 식당: idle → food(음식 종류 대기) → restaurant(식당 목록에서 선택 대기)
 //      → rsvDate(날짜) → rsvTime(시간) → rsvPeople(인원) → rsvConfirm(예약 확인) → idle
 // 배달 주문은 로그인한 고객님만, 계정의 배달지·연락처로 한다. 로그인 전이면 needLogin(로그인하러 갈지 묻는 중),
 //        계정에 배달지·연락처가 없으면 needContact(계정 관리로 갈지 묻는 중)에서 멈춘다
 // 그 밖: info(어느 가게 정보인지 고르는 중), cancelConfirm(내 주문 취소 확인)
 type Stage =
-  | "idle" | "menu" | "qty" | "confirm" | "done"
+  | "idle" | "menu" | "qty" | "choose" | "confirm" | "done"
   | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm"
   | "info" | "cancelConfirm" | "needLogin" | "needContact";
 
@@ -158,7 +162,9 @@ type Message =
   // 표로 보여 주는 안내: 예약 완료·결제 완료·주문 상태·가게 정보
   | { id: number; role: "bot"; kind: "info"; card: InfoCard }
   // 배달 수량 카운터 (마리·판·인분)
-  | { id: number; role: "bot"; kind: "qty"; text: string; unit: string; max: number; priceEach: number; picked?: number };
+  | { id: number; role: "bot"; kind: "qty"; text: string; unit: string; max: number; priceEach: number; picked?: number }
+  // 세트 메뉴의 맛 고르기 표. need: 고를 수, basePrice: 맛 추가금 전 금액, picked: 고르기를 마친 맛
+  | { id: number; role: "bot"; kind: "choices"; text: string; label: string; need: number; options: { name: string; extra: number }[]; basePrice: number; picked?: string[] };
 
 type NewMessage = Message extends infer M ? (M extends Message ? Omit<M, "id"> : never) : never;
 
@@ -202,6 +208,21 @@ const deliveryQty = (item: DeliveryItem, lead?: string): NewMessage => ({
   max: MAX_QTY,
   priceEach: item.price,
 });
+
+// 세트 메뉴의 맛 고르기 말풍선. 세트 수 × 1세트에 고를 수만큼, 같은 맛은 한 번만 고른다
+const choicePrompt = (item: DeliveryItem, qty: number, lead?: string): NewMessage => {
+  const c = item.choice!;
+  const need = c.count * qty;
+  return {
+    role: "bot",
+    kind: "choices",
+    text: `${lead ? `${lead}\n` : ""}${item.name} ${qty}${item.unit}의 ${withObjectParticle(c.label)} ${need}가지 골라 주세요.\n같은 ${withTopicParticle(c.label)} 한 번만 고를 수 있어요.`,
+    label: c.label,
+    need,
+    options: c.options,
+    basePrice: item.price * qty,
+  };
+};
 
 // "직접 입력" 버튼 아이콘: 글자 입력은 연필, 날짜는 달력, 시간은 시계
 function DirectInputIcon({ picker }: { picker?: BotPrompt["picker"] }) {
@@ -254,6 +275,8 @@ function spokenText(m: Message): string {
       return `${m.lead ? `${m.lead} ` : ""}${PEOPLE_QUESTION}`;
     case "qty":
       return line(m.text);
+    case "choices":
+      return `${line(m.text)} 표에서 고르시거나 ${m.label} 이름을 말씀해 주세요.`;
     case "info":
       return m.card.say ?? `${line(m.card.title)} ${m.card.rows.map((r) => `${r.label} ${r.value}`).join(", ")}.${m.card.note ? ` ${m.card.note}` : ""}`;
   }
@@ -356,6 +379,15 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
   switch (m.kind) {
     case "order":
       return { key, messageId, rows: orderCardRows(m.order) };
+    // 맛 고르기: 추가금이 같은 맛끼리 한 줄로 (채팅창을 끈 동안에는 맛 이름을 말해서 고른다)
+    case "choices":
+      return {
+        key,
+        messageId,
+        rows: [...new Set(m.options.map((o) => o.extra))]
+          .sort((a, b) => a - b)
+          .map((extra) => ({ label: extra ? `+${won(extra)}` : "추가금 없음", value: m.options.filter((o) => o.extra === extra).map((o) => o.name).join(", ") })),
+      };
     case "reservation": {
       const r = m.reservation;
       return {
@@ -437,6 +469,8 @@ export function OrderChatbot() {
   // 한 문장에 같이 말해 둔 것들: 메뉴를 고르기 전에 말한 수량("치킨 두 마리"),
   // 식당을 고르기 전에 말한 예약 날짜·시간·인원("내일 7시 4명")
   const [pendingQty, setPendingQty] = useState<number | null>(null);
+  // 세트 메뉴의 맛을 고르는 중인 메뉴와 세트 수
+  const [choosing, setChoosing] = useState<{ item: DeliveryItem; qty: number } | null>(null);
   const [rsvSlots, setRsvSlots] = useState<ReservationSlots>({});
   // "그 식당", "아까 그거"가 가리킬 마지막 식당·메뉴
   const [lastPlace, setLastPlace] = useState<Restaurant | null>(null);
@@ -514,7 +548,7 @@ export function OrderChatbot() {
   const lastBot = messages.findLast((m) => m.role === "bot");
   const activePrompt =
     lastBot?.role === "bot" &&
-    ((lastBot.kind === "text" && lastBot.choices) || lastBot.kind === "people" || lastBot.kind === "qty" || (lastBot.kind === "restaurants" && lastBot.choices))
+    ((lastBot.kind === "text" && lastBot.choices) || lastBot.kind === "people" || lastBot.kind === "qty" || lastBot.kind === "choices" || (lastBot.kind === "restaurants" && lastBot.choices))
       ? lastBot
       : undefined;
   // 채팅창을 끈 동안의 가운데 자막: 마지막으로 사용자가 말한 뒤에 나온 봇 말풍선들을 읽어 주는 문장 그대로
@@ -639,11 +673,19 @@ export function OrderChatbot() {
   }
 
   // 메뉴·수량이 정해지면 계정의 배달지·연락처로 주문서를 만든다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
-  function startOrder(item: DeliveryItem, qty: number) {
+  // 세트 메뉴(맛 고르기가 있는 메뉴)는 맛부터 고르고, 고른 맛(choices)으로 주문서를 만든다
+  function startOrder(item: DeliveryItem, qty: number, choices?: ChosenOption[]) {
     if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
     setPendingItem(null);
     setLastItem(item);
-    const next = makeOrder(item, qty, myDelivery);
+    if (item.choice && !choices) {
+      setChoosing({ item, qty });
+      setStage("choose");
+      botReply(() => push(choicePrompt(item, qty)));
+      return;
+    }
+    setChoosing(null);
+    const next = makeOrder(item, qty, myDelivery, choices);
     setOrder(next);
     setStage("confirm");
     botReply(() => push(botText("근처 매장을 찾았어요."), { role: "bot", kind: "order", order: next }), 1000);
@@ -769,6 +811,7 @@ export function OrderChatbot() {
     setStage("idle");
     setPendingItem(null);
     setPendingQty(null);
+    setChoosing(null);
     botReply(() => push(botText("배달 주문을 그만할게요. 다른 게 필요하면 말씀해 주세요!")));
   }
 
@@ -992,6 +1035,10 @@ export function OrderChatbot() {
       // 지금 계정의 배달지로 보낸다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
       return () => {
         if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
+        if (item.choice) {
+          startOrder(item, qty);
+          return;
+        }
         const next = makeOrder(item, qty, myDelivery);
         setLastItem(item);
         setOrder(next);
@@ -1118,9 +1165,16 @@ export function OrderChatbot() {
       // "3마리로 해줘": 수량만 바꿔 주문서를 다시 보여 준다 ("해줘"가 들어 있어도 '응'보다 먼저 본다)
       const newQty = parseQuantity(text);
       const item = availableDeliveryMenu().find((d) => d.restaurantId === order.storeId && d.name === order.item);
-      if (newQty !== undefined && item && findDeliveryItems(text).length === 0) {
+      // 수량 표현("2세트")을 빼고도 다른 메뉴가 걸리지 않으면 수량을 바꾸는 말이다 ("세트"가 세트 메뉴 키워드라도)
+      if (newQty !== undefined && item && findDeliveryItems(withoutQuantity(text, item.unit)).every((d) => d.id === item.id)) {
         if (!qtyInRange(newQty)) {
           botReply(() => push(botText(rangeLead(item)), { role: "bot", kind: "confirm" }));
+          return;
+        }
+        // 세트 메뉴는 고를 맛 수가 바뀌므로 맛부터 다시 고른다
+        if (item.choice) {
+          setOrder(null);
+          startOrder(item, newQty);
           return;
         }
         // 배달지·연락처는 지금 주문서의 것을 그대로 둔다
@@ -1166,10 +1220,36 @@ export function OrderChatbot() {
       setRsv(null);
     }
 
+    // 세트 메뉴의 맛 고르는 중: 표에서 고른 맛(버튼)이나 말한 맛 이름이 고를 수만큼이면 주문서로. 모자라거나 넘치면 다시 고르게 한다
+    if (stage === "choose" && choosing) {
+      const c = choosing.item.choice!;
+      const need = c.count * choosing.qty;
+      const found = matchChoices(text, c.options);
+      if (found.length > 0) {
+        if (found.length === need) {
+          startOrder(choosing.item, choosing.qty, found);
+          return;
+        }
+        const lead = found.length < need ? `${need}가지를 골라 주세요. 지금 ${found.length}가지를 말씀하셨어요.` : `${need}가지만 고를 수 있어요.`;
+        botReply(() => push(choicePrompt(choosing.item, choosing.qty, lead)));
+        return;
+      }
+      if (isNo(text)) {
+        cancelDelivery();
+        return;
+      }
+      if (!quickMenuReply(text) && findDeliveryItems(text).length === 0 && !detectIntent(text)) {
+        botReply(() => push(choicePrompt(choosing.item, choosing.qty, `어떤 ${withTopicParticle(c.label)} 드실지 잘 모르겠어요.`)));
+        return;
+      }
+      setChoosing(null);
+    }
+
     // 배달 수량: 숫자만 오면 그 수량으로 주문서를 만든다. 다른 메뉴를 말하면 아래 일반 처리에서 메뉴부터 다시 받는다
     if (stage === "qty" && pendingItem) {
       const qty = parseQuantity(text);
-      if (qty !== undefined && findDeliveryItems(text).length === 0) {
+      // "1세트"처럼 단위가 메뉴 키워드("세트")와 같아도 수량으로 본다. 수량 표현을 빼고도 다른 메뉴가 걸릴 때만 메뉴를 다시 받는다
+      if (qty !== undefined && findDeliveryItems(withoutQuantity(text, pendingItem.unit)).every((d) => d.id === pendingItem.id)) {
         if (qtyInRange(qty)) startOrder(pendingItem, qty);
         else botReply(() => push(deliveryQty(pendingItem, rangeLead(pendingItem))));
         return;
@@ -1451,6 +1531,7 @@ export function OrderChatbot() {
   function startFresh() {
     setPendingItem(null);
     setPendingQty(null);
+    setChoosing(null);
     setOrder(null);
     setRsv(null);
     setRsvSlots({});
@@ -1556,6 +1637,12 @@ export function OrderChatbot() {
   }
 
   // 카운터(예약 인원·배달 수량)에서 고른 수. "3명", "2마리"처럼 입력한 것으로 처리한다
+  // 맛 고르기 표에서 "선택 완료": 표를 잠그고, 고른 맛 이름을 손님 말로 보내 같은 처리로 주문서를 만든다
+  function pickChoices(promptId: number, names: string[]) {
+    setMessages((prev) => prev.map((m) => (m.id === promptId && m.role === "bot" && m.kind === "choices" ? { ...m, picked: names } : m)));
+    handle(names.join(", "));
+  }
+
   function pickCount(promptId: number, count: number, unit: string) {
     setMessages((prev) =>
       prev.map((m) =>
@@ -1790,6 +1877,21 @@ export function OrderChatbot() {
               active={m.id === activeChoicesId}
               picked={m.picked}
               onPick={(n) => pickCount(m.id, n, "명")}
+            />
+          </>
+        );
+      case "choices":
+        return (
+          <>
+            {m.text}
+            <ChoicePicker
+              label={m.label}
+              need={m.need}
+              options={m.options}
+              basePrice={m.basePrice}
+              active={m.id === activeChoicesId}
+              picked={m.picked}
+              onPick={(names) => pickChoices(m.id, names)}
             />
           </>
         );

@@ -110,6 +110,45 @@ export const MENU_PRICE_MAX = 1_000_000;
 export const MENU_UNIT_MAX = 6;
 export const MENU_KEYWORDS_MAX = 10;
 
+// ---- 세트 메뉴의 맛 고르기 ----
+// 메뉴의 choice { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }, ...] }:
+// 1세트에 서로 다른 맛 count 가지를 options 중에서 하나씩 고르고, 고른 맛의 추가금(extra)을 세트 값에 더한다.
+// 여러 세트를 주문하면 세트 수 × count 가지를 고른다 (같은 맛은 한 번만)
+export const CHOICE_OPTIONS_MAX = 40;
+export const CHOICE_COUNT_MAX = 10;
+export const CHOICE_EXTRA_MAX = 100_000;
+
+// 메뉴 목록 파일의 choice 를 검사해 정리한 값을 돌려준다. 문제가 있으면 { error }
+export function cleanChoice(input) {
+  const label = String(input?.label ?? "맛").trim() || "맛";
+  const count = Number(input?.count);
+  const raw = Array.isArray(input?.options) ? input.options : [];
+  const options = raw.map((o) => ({ name: String(o?.name ?? "").trim().replace(/\s+/g, " "), extra: Number(o?.extra ?? 0) }));
+  if (label.length > 10) return { error: "고르기 이름(label)은 10자까지" };
+  if (!Number.isInteger(count) || count < 1 || count > CHOICE_COUNT_MAX) return { error: `고를 수(count)는 1~${CHOICE_COUNT_MAX}` };
+  if (options.length < count || options.length > CHOICE_OPTIONS_MAX) return { error: `고를 것(options)은 ${count}~${CHOICE_OPTIONS_MAX}가지` };
+  if (options.some((o) => !o.name || o.name.length > MENU_NAME_MAX)) return { error: `고를 것 이름은 1~${MENU_NAME_MAX}자` };
+  if (new Set(options.map((o) => o.name)).size !== options.length) return { error: "고를 것(options)에 같은 이름이 있어요" };
+  if (options.some((o) => !Number.isInteger(o.extra) || o.extra < 0 || o.extra > CHOICE_EXTRA_MAX)) return { error: `추가금(extra)은 0~${CHOICE_EXTRA_MAX}원 정수` };
+  return { label, count, options };
+}
+
+// 손님이 고른 맛(이름 배열)을 검사한다. 세트 수 × count 가지를, 메뉴의 options 안에서 서로 다르게.
+// 돌려주는 값: { choices: [{ name, extra }], extra: 추가금 합계 }. 문제가 있으면 { error }
+export function pickedChoices(choice, picked, qty) {
+  const need = choice.count * qty;
+  const names = Array.isArray(picked) ? picked.map((n) => String(typeof n === "object" && n ? n.name : n).trim()) : [];
+  if (names.length !== need) return { error: `${choice.label}을(를) ${need}가지 골라 주세요.` };
+  if (new Set(names).size !== names.length) return { error: `같은 ${choice.label}은(는) 한 번만 고를 수 있어요.` };
+  const choices = [];
+  for (const name of names) {
+    const option = choice.options.find((o) => o.name === name);
+    if (!option) return { error: `${name}은(는) 고를 수 없는 ${choice.label}이에요.` };
+    choices.push({ name: option.name, extra: option.extra });
+  }
+  return { choices, extra: choices.reduce((sum, c) => sum + c.extra, 0) };
+}
+
 // DB 의 배달 메뉴 중 지금 있는 매장(목록 파일 + 관리자가 만든 매장)의 것만. 목록 파일에서 빠진 가게의 메뉴는 DB 에 남아 있어도 보이지 않는다
 export const listedMenu = (db) => {
   const ids = new Set(allStores(db).map((s) => s.id));

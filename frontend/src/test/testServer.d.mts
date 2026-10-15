@@ -35,7 +35,7 @@ export interface TestDb {
   // 관리자가 직접 만든 매장
   addStore(store: { name: string; food: string; hours: string; address?: string; signature?: string }): { id: string; name: string };
   storeById(id: string): { id: string; name: string; food: string; hours: string; address?: string; signature?: string; source: "admin" } | null;
-  addMenuItem(item: { restaurantId: string; name: string; price: number; unit: string; keywords: string[] }): { id: string };
+  addMenuItem(item: { restaurantId: string; name: string; price: number; unit: string; keywords: string[]; choice?: { label: string; count: number; options: { name: string; extra: number }[] } }): { id: string };
 }
 
 export interface TestServer {

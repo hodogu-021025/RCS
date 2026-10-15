@@ -1022,3 +1022,44 @@ describe("아이디·비밀번호 최소 길이 6자", () => {
     assert.equal(login.body.session.name, "여섯자 가게 사장님");
   });
 });
+
+describe("세트 메뉴 맛 고르기 주문", () => {
+  let storeId;
+  before(() => {
+    storeId = db.addStore({ name: "맛 고르기 파닭", food: "chicken", hours: "00:00 - 24:00" }).id;
+    db.setBankAccount(storeId, { bank: "국민은행", account: "123456-01-234567", holder: "김사장" });
+    db.addMenuItem({
+      restaurantId: storeId, name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트"],
+      choice: { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }, { name: "굽는 불닭", extra: 2000 }] },
+    });
+  });
+  const order = (qty, choices) => call("POST", "/api/orders", { order: { ...chicken, storeId, item: "2마리 치킨 세트", qty, choices } }, buyer);
+
+  it("마리 수만큼 서로 다른 맛을 고르면 주문되고, 맛 추가금을 세트 값에 더한다", async () => {
+    const plain = await order(1, ["간장 파닭", "양념 파닭"]);
+    assert.equal(plain.status, 200, JSON.stringify(plain.body));
+    assert.equal(plain.body.order.price, 26000);
+    assert.deepEqual(plain.body.order.choices, [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }]);
+    assert.equal(plain.body.order.choiceLabel, "맛");
+
+    const extra = await order(1, ["블랙스완 파닭", "굽는 불닭"]);
+    assert.equal(extra.body.order.price, 29000); // 26,000 + 1,000 + 2,000
+    // 2세트면 서로 다른 맛 4가지
+    const two = await order(2, ["간장 파닭", "양념 파닭", "블랙스완 파닭", "굽는 불닭"]);
+    assert.equal(two.body.order.price, 55000); // 26,000 × 2 + 3,000
+  });
+
+  it("맛 수가 맞지 않거나, 같은 맛을 또 고르거나, 없는 맛이면 거절한다", async () => {
+    assert.match((await order(1, ["간장 파닭"])).body.error, /맛을\(를\) 2가지 골라/);
+    assert.match((await order(1)).body.error, /2가지 골라/);
+    assert.match((await order(1, ["간장 파닭", "간장 파닭"])).body.error, /한 번만/);
+    assert.match((await order(1, ["간장 파닭", "수원왕갈비 파닭"])).body.error, /고를 수 없는/);
+    assert.match((await order(2, ["간장 파닭", "양념 파닭"])).body.error, /4가지 골라/);
+  });
+
+  it("맛 고르기가 없는 메뉴는 보낸 맛을 무시한다", async () => {
+    const r = await call("POST", "/api/orders", { order: { ...chicken, storeId: "h1", item: "옛날통닭", qty: 1, choices: ["간장 파닭"] } }, buyer);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.order.choices, undefined);
+  });
+});
