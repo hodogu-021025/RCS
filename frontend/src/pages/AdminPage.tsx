@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { FOODS, RESTAURANTS, choicesText, formatDate, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
+import { FOODS, RESTAURANTS, choiceRows, formatDate, itemText, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
 import {
   addOwner,
   approveOwner,
@@ -203,10 +203,7 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
           {shown.map((o) => (
             <li key={o.id} className={"record" + (o.status === "입금 대기" ? " pending" : "")}>
               <div className="record-head">
-                <b>
-                  {o.order.item} {o.order.qty}
-                  {o.order.unit}
-                </b>
+                <b>{o.order.items.map(itemText).join(", ")}</b>
                 <span className="price">{orderPriceLabel(o.order)}</span>
                 <span className={statusClass(o.status)}>{o.status}</span>
               </div>
@@ -215,12 +212,12 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
                   <dt>매장</dt>
                   <dd>{o.order.store.name}</dd>
                 </div>
-                {o.order.choices?.length ? (
-                  <div>
-                    <dt>{o.order.choiceLabel ?? "맛"}</dt>
-                    <dd>{choicesText(o.order.choices)}</dd>
+                {choiceRows(o.order).map((r) => (
+                  <div key={r.label}>
+                    <dt>{r.label}</dt>
+                    <dd>{r.value}</dd>
                   </div>
-                ) : null}
+                ))}
                 <div>
                   <dt>입금 계좌</dt>
                   <dd>{o.order.bank ? `${o.order.bank.bank} ${o.order.bank.account} · ${o.order.bank.holder}` : "-"}</dd>

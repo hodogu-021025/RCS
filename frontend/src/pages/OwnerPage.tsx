@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { choicesText, clockText, findRestaurantById, untilText, formatDate, orderItemText, orderPriceLabel, won, type DeliveryItem, type MenuChoice, type Restaurant } from "../components/orderChatKnowledge";
+import { choiceRows, clockText, findRestaurantById, untilText, formatDate, itemText, orderItemText, orderPriceLabel, won, type DeliveryItem, type MenuChoice, type Restaurant } from "../components/orderChatKnowledge";
 import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
@@ -305,21 +305,19 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
   return (
     <li className={"record" + (needsAction(o) ? " pending" : "")}>
       <div className="record-head">
-        <b>
-          {o.order.item} {o.order.qty}
-          {o.order.unit}
-        </b>
+        {/* 담은 메뉴들 (여러 개면 쉼표로). 금액은 합계 */}
+        <b>{o.order.items.map(itemText).join(", ")}</b>
         <span className="price">{orderPriceLabel(o.order)}</span>
         <span className={statusClass(o.status)}>{o.status}</span>
       </div>
       <dl>
-        {/* 세트 메뉴의 고른 맛 */}
-        {o.order.choices?.length ? (
-          <div>
-            <dt>{o.order.choiceLabel ?? "맛"}</dt>
-            <dd>{choicesText(o.order.choices)}</dd>
+        {/* 세트 메뉴의 고른 맛 (메뉴마다) */}
+        {choiceRows(o.order).map((r) => (
+          <div key={r.label}>
+            <dt>{r.label}</dt>
+            <dd>{r.value}</dd>
           </div>
-        ) : null}
+        ))}
         {o.order.address && (
           <div>
             <dt>배달지</dt>
@@ -1032,10 +1030,13 @@ function SalesTab({ orders }: { orders: OrderRecord[] }) {
   const today = valid.filter((o) => o.createdAt >= todayStart);
   const week = valid.filter((o) => o.createdAt >= now - 7 * DAY);
   const sum = (list: OrderRecord[]) => list.reduce((a, o) => a + o.order.price, 0);
+  // 메뉴별: 한 주문에 담긴 메뉴마다 따로 센다 (매출은 그 줄의 금액)
   const byItem = new Map<string, { qty: number; sales: number }>();
   for (const o of week) {
-    const cur = byItem.get(o.order.item) ?? { qty: 0, sales: 0 };
-    byItem.set(o.order.item, { qty: cur.qty + o.order.qty, sales: cur.sales + o.order.price });
+    for (const line of o.order.items) {
+      const cur = byItem.get(line.item) ?? { qty: 0, sales: 0 };
+      byItem.set(line.item, { qty: cur.qty + line.qty, sales: cur.sales + line.price });
+    }
   }
   const top = [...byItem.entries()].sort((a, b) => b[1].sales - a[1].sales);
 
