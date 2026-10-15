@@ -43,6 +43,20 @@ const SCHEMA = `
     people          INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS reservations_store ON reservations(restaurant_id, created_at);
+  -- 고객님·사장님이 관리자에게 보낸 문의. 관리자가 답하면 answer·answered_at 이 채워진다. 회원 탈퇴하면 그 사람의 문의도 지운다
+  CREATE TABLE IF NOT EXISTS inquiries (
+    id          TEXT PRIMARY KEY,
+    created_at  INTEGER NOT NULL,
+    username    TEXT NOT NULL,
+    role        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    store_id    TEXT,
+    category    TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    answer      TEXT,
+    answered_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS inquiries_user ON inquiries(username, created_at);
   CREATE INDEX IF NOT EXISTS reservations_customer ON reservations(customer, created_at);
   CREATE TABLE IF NOT EXISTS store_settings (
     store_id   TEXT PRIMARY KEY,
@@ -158,6 +172,19 @@ const toReservation = (r) => ({
   people: r.people,
 });
 
+const toInquiry = (r) =>
+  r && {
+    id: r.id,
+    createdAt: r.created_at,
+    username: r.username,
+    role: r.role,
+    name: r.name,
+    ...(r.store_id ? { storeId: r.store_id } : {}),
+    category: r.category,
+    body: r.body,
+    ...(r.answer ? { answer: r.answer, answeredAt: r.answered_at } : {}),
+  };
+
 // path: 파일 경로. ":memory:" 면 메모리에만 (테스트)
 // 탈퇴한 회원의 주문·예약에 남는 주문자
 export const WITHDRAWN = { customer: "~withdrawn", name: "탈퇴한 회원" };
@@ -206,6 +233,13 @@ export function openDb(path) {
     deleteSessionsOf: q("DELETE FROM sessions WHERE username = ?"),
     privacyConsent: q("SELECT privacy_version, privacy_agreed_at FROM users WHERE username = ?"),
     deleteUser: q("DELETE FROM users WHERE username = ?"),
+    insertInquiry: q("INSERT INTO inquiries (id, created_at, username, role, name, store_id, category, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
+    allInquiries: q("SELECT * FROM inquiries ORDER BY created_at DESC"),
+    inquiriesOf: q("SELECT * FROM inquiries WHERE username = ? ORDER BY created_at DESC"),
+    inquiryById: q("SELECT * FROM inquiries WHERE id = ?"),
+    answerInquiry: q("UPDATE inquiries SET answer = ?, answered_at = ? WHERE id = ?"),
+    countInquiriesSince: q("SELECT COUNT(*) AS n FROM inquiries WHERE username = ? AND created_at >= ?"),
+    deleteInquiriesOf: q("DELETE FROM inquiries WHERE username = ?"),
     insertMenuIfMissing: q("INSERT OR IGNORE INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at, choice_json) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', ?, ?)"),
     insertMenu: q("INSERT INTO menu_items (id, restaurant_id, name, price, unit, keywords_json, active, source, created_at, choice_json) VALUES (?, ?, ?, ?, ?, ?, 1, 'owner', ?, ?)"),
     listMenu: q("SELECT * FROM menu_items ORDER BY rowid"),
@@ -339,6 +373,7 @@ export function openDb(path) {
         }
         stmts.anonymizeOrders.run(WITHDRAWN.customer, WITHDRAWN.name, username);
         stmts.anonymizeReservations.run(WITHDRAWN.customer, WITHDRAWN.name, username);
+        stmts.deleteInquiriesOf.run(username); // 문의는 법으로 보관할 기록이 아니라 지운다
         const deleted = stmts.deleteUser.run(username).changes > 0;
         db.exec("COMMIT");
         return deleted;
@@ -403,6 +438,21 @@ export function openDb(path) {
       if (!r) return false;
       return stmts.confirmPayment.run(JSON.stringify({ ...JSON.parse(r.order_json), paidAt: at }), id).changes > 0;
     },
+
+    // ---- 관리자에게 보낸 문의 ----
+    addInquiry({ username, role, name, storeId, category, body, createdAt = Date.now() }) {
+      const id = newId("q");
+      stmts.insertInquiry.run(id, createdAt, username, role, name, storeId ?? null, category, body);
+      return toInquiry(stmts.inquiryById.get(id));
+    },
+    // username 이 있으면 그 사람의 문의만, 없으면 전부 (최근 것부터)
+    listInquiries: ({ username } = {}) => (username ? stmts.inquiriesOf.all(username) : stmts.allInquiries.all()).map(toInquiry),
+    inquiryById: (id) => toInquiry(stmts.inquiryById.get(id)) ?? null,
+    answerInquiry(id, answer, at = Date.now()) {
+      stmts.answerInquiry.run(answer, at, id);
+      return toInquiry(stmts.inquiryById.get(id)) ?? null;
+    },
+    countInquiriesSince: (username, since) => stmts.countInquiriesSince.get(username, since).n,
 
     // ---- 예약 ----
     addReservation({ customer, customerName, restaurantId, restaurantName, date, time, people }) {

@@ -200,6 +200,7 @@ const RESTAURANT_PICKS_HEADING = "오늘은 이런 식당 어떠세요?\n드시�
 const LOGIN_CHOICE: Choice = { label: "로그인하러 가기", value: "로그인할게요" };
 const REDIRECT_MS = 3000; // 안내를 보여 준 뒤 로그인 화면·계정 관리로 저절로 넘어가기까지
 const ACCOUNT_CHOICE: Choice = { label: "계정 관리로 가기", value: "계정 관리로 갈게요" };
+const INQUIRY_CHOICE: Choice = { label: "문의하러 가기", value: "문의 화면으로 갈게요" };
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
 
 // 배달 수량 카운터 말풍선
@@ -1168,6 +1169,11 @@ export function OrderChatbot() {
   }
 
   function handleAccepted(text: string) {
+    // 문의 안내의 "문의하러 가기" 버튼: 해시 주소라 주소만 바꾸면 그 화면으로 간다
+    if (text === INQUIRY_CHOICE.value && session && session.role !== "admin") {
+      window.location.assign("#/inquiry");
+      return;
+    }
 
     // "치킨집 예약", "근처 맛집": 메뉴 이름(치킨)이 들어 있어도 식당·예약 말이면 배달이 아니라 식당 찾기로 본다
     const wantsRestaurant = menuIntent(text) === "식당";
@@ -1523,6 +1529,19 @@ export function OrderChatbot() {
     }
 
     if (intent === "deals") return showDeals();
+    // "문의할래", "고객센터": 관리자에게 문의하는 화면으로 안내한다 (답을 받으려면 로그인해야 한다)
+    if (intent === "inquiry") {
+      startFresh();
+      if (!session || session.role === "admin") {
+        setStage("needLogin");
+        botReply(() => push(botPrompt({ text: "관리자에게 문의는 로그인한 뒤에 남길 수 있어요.\n답변을 받을 계정이 필요해요.", choices: [LOGIN_CHOICE], noDirect: true })));
+        return;
+      }
+      setStage("idle");
+      const text = "관리자에게 문의를 남기시면 확인하고 답해 드려요.\n아래 버튼을 누르면 문의 화면으로 가요.";
+      botReply(() => push(botPrompt({ text, say: text.replace("\n", " "), choices: [INQUIRY_CHOICE], noDirect: true })));
+      return;
+    }
     if (intent === "hungry") return showRecommendations();
 
     if (intent === "greeting" || intent === "thanks") {

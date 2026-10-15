@@ -10,7 +10,7 @@ import { formatDateTime } from "./format";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
-  const [login, signup, me, owner, admin, privacy, account, reset, app] = await Promise.all([
+  const [login, signup, me, owner, admin, privacy, account, reset, app, inquiry] = await Promise.all([
     import("./LoginPage"),
     import("./SignupPage"),
     import("./MyOrdersPage"),
@@ -20,6 +20,7 @@ vi.mock("./routes", async () => {
     import("./AccountPage"),
     import("./ResetPasswordPage"),
     import("./AppDownloadPage"),
+    import("./InquiryPage"),
   ]);
   return {
     LoginPage: login.LoginPage,
@@ -31,6 +32,7 @@ vi.mock("./routes", async () => {
     AccountPage: account.AccountPage,
     ResetPasswordPage: reset.ResetPasswordPage,
     AppDownloadPage: app.AppDownloadPage,
+    InquiryPage: inquiry.InquiryPage,
   };
 });
 
@@ -849,7 +851,7 @@ describe("개인정보 처리방침", () => {
     open("#/privacy");
     expect(await screen.findByRole("heading", { name: "1. 수집하는 개인정보" })).toBeInTheDocument();
     expect(screen.getByText("Resend, Inc. (미국)")).toBeInTheDocument();
-    expect(screen.getByText(/2026년 10월 15일부터 적용돼요/)).toBeInTheDocument();
+    expect(screen.getByText(/2026년 10월 16일부터 적용돼요/)).toBeInTheDocument();
   });
 });
 
@@ -1243,5 +1245,65 @@ describe("매장 일시 중지 (사장님·관리자 화면)", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "매장·사장님" }));
     expect(await screen.findByText(/^일시 중지 · (내일 )?\d{2}:\d{2}까지$/)).toBeInTheDocument();
     expect(screen.getByText(/^일시 중지 예정 · (내일 )?\d{2}:\d{2}~(내일 )?\d{2}:\d{2}$/)).toBeInTheDocument();
+  });
+});
+
+describe("관리자에게 문의", () => {
+  const ADMIN = { username: "adminuser", name: "관리자", role: "admin" as const };
+
+  it("고객님이 문의를 보내면 내 문의에 '답변 대기'로 쌓이고, 관리자가 문의 탭에서 답하면 고객님이 답을 본다", async () => {
+    server.createAccount({ ...KIM, email: "kim@example.com" });
+    server.createAccount(ADMIN);
+    await loginAs(KIM.username);
+    open("#/inquiry");
+    expect(await screen.findByRole("heading", { name: "문의 보내기" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "관리자에게 문의" })).not.toBeInTheDocument(); // 이 화면에서는 아래 링크를 감춘다
+    expect(await screen.findByText("아직 보낸 문의가 없어요.")).toBeInTheDocument();
+
+    // 분류와 5자 이상 내용이 있어야 보낸다
+    fireEvent.click(screen.getByRole("button", { name: "문의 보내기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("문의 분류를 골라 주세요");
+    fireEvent.click(screen.getByRole("radio", { name: "결제·환불" }));
+    fireEvent.change(screen.getByLabelText("문의 내용"), { target: { value: "입금" } });
+    fireEvent.click(screen.getByRole("button", { name: "문의 보내기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("5자 이상");
+    fireEvent.change(screen.getByLabelText("문의 내용"), { target: { value: "입금했는데 아직 입금 대기로 나와요." } });
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "문의 보내기" })));
+    expect(await screen.findByRole("status")).toHaveTextContent("문의를 보냈어요");
+    expect(await screen.findByText("입금했는데 아직 입금 대기로 나와요.")).toBeInTheDocument();
+    expect(screen.getByText("답변 대기")).toBeInTheDocument();
+    expect(screen.getByLabelText("문의 내용")).toHaveValue("");
+    cleanup();
+
+    // 관리자: 문의 탭에 답변 대기 수가 뜨고, 카드에서 답한다
+    await logout();
+    await loginAs(ADMIN.username);
+    open("#/admin");
+    const tab = await screen.findByRole("tab", { name: /문의/ });
+    await waitFor(() => expect(tab).toHaveTextContent("문의1"));
+    fireEvent.click(tab);
+    expect(await screen.findByText("김소비 · 고객님 · customer01")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("답변"), { target: { value: "가게에 확인했어요. 곧 접수돼요." } });
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "답변 보내기" })));
+    expect(await screen.findByText("답변을 기다리는 문의가 없어요.")).toBeInTheDocument();
+    expect(server.db.listInquiries({ username: KIM.username })[0].answer).toBe("가게에 확인했어요. 곧 접수돼요.");
+    cleanup();
+
+    await logout();
+    await loginAs(KIM.username);
+    open("#/inquiry");
+    expect(await screen.findByText("가게에 확인했어요. 곧 접수돼요.")).toBeInTheDocument();
+    expect(screen.getByText("답변 완료")).toBeInTheDocument();
+  });
+
+  it("사장님은 사장님 화면 아래 링크와 계정 관리에서 문의 화면으로 간다", async () => {
+    server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
+    await loginAs("chickenboss");
+    open("#/owner");
+    expect(await screen.findByRole("link", { name: "관리자에게 문의" })).toHaveAttribute("href", "#/inquiry");
+    cleanup();
+    open("#/account");
+    expect(await screen.findByRole("heading", { name: "관리자에게 문의" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "문의하기" })).toHaveAttribute("href", "#/inquiry");
   });
 });

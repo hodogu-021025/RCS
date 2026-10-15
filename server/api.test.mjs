@@ -13,6 +13,7 @@ import { createVerifier } from "./verification.mjs";
 let server;
 let base;
 let sent; // 가짜로 보낸 메일 [{ email, code }]
+let notices; // 가짜로 보낸 알림 메일 [{ email, subject, text }]
 let db;
 let clock = Date.now(); // 로그인 제한 시간을 넘길 때 앞으로 돌린다
 let buyer; // 주문할 때 쓰는 고객님 토큰
@@ -22,8 +23,9 @@ before(async () => {
   db = openDb(":memory:");
   sent = [];
   const verifier = createVerifier({ sendMail: async (email, code) => void sent.push({ email, code }), generateCode: () => "123456" });
-  const mailer = { mode: "dev-console", sendMail: verifier.sendMail, describe: "test" };
-  server = http.createServer(createApp({ db, verifier, mailer, now: () => clock }));
+  notices = [];
+  const mailer = { mode: "dev-console", sendMail: verifier.sendMail, sendNotice: async (email, subject, text) => void notices.push({ email, subject, text }), describe: "test" };
+  server = http.createServer(createApp({ db, verifier, mailer, adminEmail: "operator@example.com", now: () => clock }));
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${server.address().port}`;
   // 배달 주문은 로그인한 고객님만 한다. 주문이 필요한 테스트는 이 계정으로 주문한다
@@ -1147,5 +1149,78 @@ describe("사장님이 세트 메뉴의 맛 목록을 넣고 고치기", () => {
     assert.match((await patchMenu(set.id, {})).body.error, /바꿀 내용/);
     assert.equal((await patchMenu(set.id, { choice: FLAVORS }, otherOwner)).status, 403); // 다른 매장 사장님
     assert.equal((await patchMenu(set.id, { choice: FLAVORS }, null)).status, 401);
+  });
+});
+
+describe("관리자에게 문의", () => {
+  let customer, owner, admin;
+  before(async () => {
+    customer = await signup({ username: "asker0001", email: "asker@example.com", name: "문의 고객" });
+    db.createUser({ username: "askowner1", passwordHash: hashPassword("password1"), name: "문의 사장님", role: "owner", storeId: "h3" });
+    owner = (await call("POST", "/api/auth/login", { username: "askowner1", password: "password1" })).body.token;
+    db.createUser({ username: "askadmin1", passwordHash: hashPassword("password1"), name: "관리자", role: "admin" });
+    admin = (await call("POST", "/api/auth/login", { username: "askadmin1", password: "password1" })).body.token;
+  });
+  const ask = (token, body) => call("POST", "/api/inquiries", body, token);
+
+  it("고객님·사장님이 보낸 문의는 자기 것만 보이고, 관리자는 전부 보며 새 문의 알림 메일을 받는다", async () => {
+    notices.length = 0;
+    const mine = await ask(customer, { category: "결제·환불", body: "  입금했는데 아직 입금 대기로 나와요.  " });
+    assert.equal(mine.status, 200, JSON.stringify(mine.body));
+    assert.deepEqual({ ...mine.body, id: undefined, createdAt: undefined }, { id: undefined, createdAt: undefined, username: "asker0001", role: "user", name: "문의 고객", category: "결제·환불", body: "입금했는데 아직 입금 대기로 나와요." });
+    const fromOwner = await ask(owner, { category: "가게·메뉴", body: "메뉴 사진을 넣고 싶어요." });
+    assert.equal(fromOwner.body.storeId, "h3");
+
+    assert.deepEqual((await call("GET", "/api/inquiries", undefined, customer)).body.map((q) => q.id), [mine.body.id]);
+    assert.deepEqual((await call("GET", "/api/inquiries", undefined, owner)).body.map((q) => q.id), [fromOwner.body.id]);
+    const all = (await call("GET", "/api/inquiries", undefined, admin)).body.map((q) => q.id);
+    assert.ok(all.includes(mine.body.id) && all.includes(fromOwner.body.id));
+
+    await new Promise((r) => setImmediate(r)); // 알림은 기다리지 않고 보낸다
+    assert.equal(notices.length, 2);
+    assert.equal(notices[0].email, "operator@example.com");
+    assert.match(notices[0].text, /문의 고객 고객님 · 결제·환불/);
+    assert.match(notices[1].text, /^문의 사장님 \(.+\) · 가게·메뉴/); // 사장님은 매장 이름을 붙인다
+  });
+
+  it("관리자가 답하면 문의한 분이 답을 보고, 이메일이 있으면 알림 메일을 받는다. 다시 쓰면 고친다", async () => {
+    const q = (await ask(customer, { category: "주문·배달", body: "배달이 늦어요. 언제 오나요?" })).body;
+    notices.length = 0;
+    const answered = await call("POST", `/api/inquiries/${q.id}/answer`, { answer: "가게에 확인해 보니 10분 뒤 도착해요." }, admin);
+    assert.equal(answered.status, 200, JSON.stringify(answered.body));
+    assert.equal(answered.body.answer, "가게에 확인해 보니 10분 뒤 도착해요.");
+    assert.ok(answered.body.answeredAt > 0);
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(notices.map((n) => [n.email, n.subject]), [["asker@example.com", "문의에 답변이 달렸어요"]]);
+    const seen = (await call("GET", "/api/inquiries", undefined, customer)).body.find((x) => x.id === q.id);
+    assert.equal(seen.answer, "가게에 확인해 보니 10분 뒤 도착해요.");
+    assert.equal((await call("POST", `/api/inquiries/${q.id}/answer`, { answer: "고쳐 쓴 답변" }, admin)).body.answer, "고쳐 쓴 답변");
+  });
+
+  it("권한과 입력을 검사하고, 하루에 10건까지만 받는다", async () => {
+    assert.equal((await ask(undefined, { category: "기타", body: "로그인 없이 보내기" })).status, 401);
+    assert.equal((await ask(admin, { category: "기타", body: "관리자는 문의하지 않는다" })).status, 403);
+    assert.match((await ask(customer, { category: "아무거나", body: "분류가 이상해요" })).body.error, /분류를 골라/);
+    assert.match((await ask(customer, { category: "기타", body: "짧음" })).body.error, /5자 이상/);
+    assert.match((await ask(customer, { category: "기타", body: "가".repeat(1001) })).body.error, /1000자까지/);
+    const q = (await ask(owner, { category: "기타", body: "답변 권한 확인용 문의" })).body;
+    assert.equal((await call("POST", `/api/inquiries/${q.id}/answer`, { answer: "사장님은 못 단다" }, owner)).status, 403);
+    assert.equal((await call("POST", `/api/inquiries/${q.id}/answer`, { answer: "  " }, admin)).status, 400);
+    assert.equal((await call("POST", "/api/inquiries/nope/answer", { answer: "없는 문의" }, admin)).status, 404);
+
+    db.createUser({ username: "spammer01", passwordHash: hashPassword("password1"), name: "많이 묻는 분", role: "user" });
+    const spammer = (await call("POST", "/api/auth/login", { username: "spammer01", password: "password1" })).body.token;
+    for (let i = 0; i < 10; i++) assert.equal((await ask(spammer, { category: "기타", body: `문의 ${i}번째예요` })).status, 200);
+    const over = await ask(spammer, { category: "기타", body: "열한 번째 문의예요" });
+    assert.equal(over.status, 429);
+    assert.match(over.body.error, /오늘은 문의를 더 보낼 수 없어요/);
+  });
+
+  it("회원 탈퇴하면 그 사람의 문의도 지운다", async () => {
+    const token = await signup({ username: "leaver001", email: "leaver@example.com", name: "떠나는 분" });
+    await ask(token, { category: "계정", body: "탈퇴하면 문의는 어떻게 되나요?" });
+    assert.equal(db.listInquiries({ username: "leaver001" }).length, 1);
+    assert.equal((await call("POST", "/api/auth/withdraw", { password: "password1" }, token)).status, 200);
+    assert.equal(db.listInquiries({ username: "leaver001" }).length, 0);
   });
 });

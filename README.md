@@ -171,6 +171,7 @@ deploy/Caddyfile              HTTPS 앞단 설정 (도메인은 .env 의 DOMAIN)
   - 로컬 개발: `node server/export-catalog.mjs --out server/catalog.json` (`>` 로 같은 파일에 받으면 파일이 먼저 비워져 목록이 날아갑니다)
 - 배달지: 손님이 첫 주문 때 챗봇에 알려 주고, 그 브라우저에 기억됩니다.
 - 관리자 계정: `.env`의 `ADMIN_USERNAME` / `ADMIN_PASSWORD` (서버에 관리자가 없을 때 처음 한 번 만듦)
+- 관리자에게 문의: 고객님·사장님이 `#/inquiry`(계정 관리·화면 아래 링크, 챗봇에 "문의할래")에서 보내면 관리자 화면의 "문의" 탭에 쌓이고, 거기서 답합니다. 새 문의 알림 메일은 `.env`의 `ADMIN_NOTIFY_EMAIL`로 가고(비우면 안 보냄), 답변 알림은 문의한 분 계정에 이메일이 있으면 그 주소로 갑니다. 탈퇴하면 그 사람의 문의도 지웁니다.
 - 색·여백: `index.css` 맨 위의 CSS 변수
 
 ## 매장 일시 중지

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { HOME_BY_ROLE, logout, useSession } from "../auth/auth";
 import { clearRecords } from "../data/db";
 
@@ -14,6 +14,7 @@ interface Props {
 export function DashLayout({ title, children, accountLink = true }: Props) {
   const navigate = useNavigate();
   const session = useSession();
+  const onInquiry = useLocation().pathname === "/inquiry";
 
   function onLogout() {
     void logout(); // 화면의 로그인 상태는 바로 풀리고, 서버의 세션 삭제는 뒤에서 이어진다
@@ -40,9 +41,16 @@ export function DashLayout({ title, children, accountLink = true }: Props) {
       <main className="dash-main">
         {children}
         {accountLink && session && session.role !== "admin" && (
-          <a className="account-link" href="#/account">
-            계정 관리 · 회원 탈퇴
-          </a>
+          <nav className="account-links" aria-label="계정">
+            {!onInquiry && (
+              <a className="account-link" href="#/inquiry">
+                관리자에게 문의
+              </a>
+            )}
+            <a className="account-link" href="#/account">
+              계정 관리 · 회원 탈퇴
+            </a>
+          </nav>
         )}
       </main>
     </div>

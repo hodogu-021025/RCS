@@ -42,6 +42,9 @@
 //   POST   /api/owners/:username/approve  관리자: 스스로 가입한 사장님 승인 (승인 전에는 매장 주문·예약·설정에 접근할 수 없다)
 //   DELETE /api/owners/:username       관리자 (승인 거절도 이것으로)
 //   GET    /api/users                  관리자 (가입한 고객님)
+//   GET    /api/inquiries              로그인: 관리자는 전부, 고객님·사장님은 자기가 보낸 문의 (최근 것부터)
+//   POST   /api/inquiries              { category, body }   고객님·사장님: 관리자에게 문의 (하루 10건까지). 관리자에게 알림 메일
+//   POST   /api/inquiries/:id/answer   { answer }           관리자: 답변 쓰기·고치기. 문의한 분 이메일이 있으면 알림 메일
 //
 // 로그인 상태는 Authorization: Bearer <token> 헤더로 보낸다. 토큰은 서버 DB 의 sessions 에 있고 30일 뒤 만료된다.
 import { SESSION_TTL_MS, hashPassword, newToken, passwordError, usernameError, verifyPassword } from "./auth.mjs";
@@ -85,7 +88,7 @@ import { ADDRESS_MAX, ADDRESS_MIN, normalizePhone } from "./contact.mjs";
 
 const MAX_BODY = 16 * 1024;
 // 지금 개인정보 처리방침의 시행일 (frontend/src/pages/privacyPolicy.ts 의 PRIVACY_EFFECTIVE 와 같게). 가입할 때 이 버전에 동의한 것으로 남긴다
-export const PRIVACY_VERSION = "2026-10-15";
+export const PRIVACY_VERSION = "2026-10-16";
 const GUEST = { username: "guest", name: "비회원" };
 
 class HttpError extends Error {
@@ -123,11 +126,22 @@ const PHONE_ERROR = "전화번호를 010-1234-5678 형식으로 적어 주세요
 const PENDING_OWNER = "관리자 승인을 기다리고 있어요. 승인되면 매장 주문·예약을 볼 수 있어요.";
 const OWNER_SIGNUP_CLOSED = "사장님 계정은 관리자가 만들어 드려요. 관리자에게 요청해 주세요.";
 
+// 관리자에게 보내는 문의 (화면 frontend/src/data/inquiries.ts 와 같은 값)
+export const INQUIRY_CATEGORIES = ["주문·배달", "결제·환불", "가게·메뉴", "계정", "기타"];
+export const INQUIRY_BODY_MIN = 5;
+export const INQUIRY_TEXT_MAX = 1000;
+export const INQUIRY_DAILY_MAX = 10;
 const str = (v, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 // db: openDb() 결과, verifier: createVerifier() 결과, mailer: createMailer() 결과
 // now: 시계 (테스트에서 로그인 제한 시간을 넘길 때). 기본은 부를 때마다 Date.now 를 읽는다 (테스트가 시계를 바꿔도 따라가게)
-export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
+// adminEmail: 새 문의 알림을 받을 관리자 메일 (없으면 보내지 않는다)
+export function createApp({ db, verifier, mailer, adminEmail, now = () => Date.now() }) {
+  // 알림 메일은 기다리지 않는다 (못 보내도 문의·답변은 저장된다)
+  const notify = (email, subject, text) => {
+    if (!email) return;
+    Promise.resolve(mailer.sendNotice?.(email, subject, text)).catch((e) => console.warn(`[mail] "${subject}" 알림을 보내지 못했습니다: ${e.message}`));
+  };
   // 목록 파일의 배달 메뉴 중 DB 에 없는 것을 채워 넣는다 (사장님이 추가·판매 중지한 메뉴는 그대로)
   db.seedMenu(DELIVERY_MENU);
   // 판매 중인 그 매장의 그 이름 메뉴
@@ -616,6 +630,36 @@ export function createApp({ db, verifier, mailer, now = () => Date.now() }) {
       db.deleteUser(target.username); // 세션도 같이 지워진다 (ON DELETE CASCADE)
       forgetStoreBank(target.storeId);
       return { ok: true };
+    }],
+    // ---- 관리자에게 문의 ----
+    ["GET", "/api/inquiries", ({ user }) => {
+      if (!user) throw needLogin();
+      return db.listInquiries(user.role === "admin" ? {} : { username: user.username });
+    }],
+    ["POST", "/api/inquiries", ({ body, user }) => {
+      if (!user) throw needLogin();
+      if (user.role === "admin") throw forbidden();
+      const category = str(body.category, 20);
+      if (!INQUIRY_CATEGORIES.includes(category)) throw bad("문의 분류를 골라 주세요.");
+      const text = String(body.body ?? "").trim().replace(/\r\n/g, "\n");
+      if (text.length < INQUIRY_BODY_MIN) throw bad(`문의 내용을 ${INQUIRY_BODY_MIN}자 이상 적어 주세요.`);
+      if (text.length > INQUIRY_TEXT_MAX) throw bad(`문의 내용은 ${INQUIRY_TEXT_MAX}자까지 적을 수 있어요.`);
+      if (db.countInquiriesSince(user.username, now() - 24 * 60 * 60_000) >= INQUIRY_DAILY_MAX) throw new HttpError(429, "오늘은 문의를 더 보낼 수 없어요. 내일 다시 보내 주세요.");
+      const inq = db.addInquiry({ username: user.username, role: user.role, name: user.name, storeId: user.storeId, category, body: text, createdAt: now() });
+      const who = user.role === "owner" ? `${user.name} (${storeName(user.storeId) ?? "매장"})` : `${user.name} 고객님`;
+      notify(adminEmail, "새 문의가 왔어요", `${who} · ${category}\n\n${text}\n\n관리자 화면의 문의 탭에서 답할 수 있어요.`);
+      return inq;
+    }],
+    ["POST", "/api/inquiries/:id/answer", ({ params, body, user }) => {
+      if (user?.role !== "admin") throw user ? forbidden() : needLogin();
+      const inq = db.inquiryById(params.id);
+      if (!inq) throw new HttpError(404, "없는 문의예요.");
+      const answer = String(body.answer ?? "").trim().replace(/\r\n/g, "\n");
+      if (!answer) throw bad("답변을 적어 주세요.");
+      if (answer.length > INQUIRY_TEXT_MAX) throw bad(`답변은 ${INQUIRY_TEXT_MAX}자까지 적을 수 있어요.`);
+      const answered = db.answerInquiry(inq.id, answer, now());
+      notify(db.findUser(inq.username)?.email, "문의에 답변이 달렸어요", `${inq.category} 문의에 관리자가 답했어요.\n\n${answer}\n\nSaylo 계정 관리의 '관리자에게 문의'에서도 볼 수 있어요.`);
+      return answered;
     }],
     ["GET", "/api/users", ({ user }) => {
       if (user?.role !== "admin") throw user ? forbidden() : needLogin();

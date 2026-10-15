@@ -457,3 +457,24 @@ label.consent-check > span { margin: 0; font-size: 13.5px; font-weight: 600; col
 .dash-mobile .record-actions .btn.primary { flex: 2; }
 .dash-mobile .status { padding: 4px 10px; font-size: 12.5px; }
 .dash-mobile .dash-section h2 { font-size: 17px; }
+
+/* ---- 관리자에게 문의 (InquiryPage.tsx, 관리자 문의 탭 InquiriesAdmin.tsx) ---- */
+.account-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 8px; }
+.account-links .account-link { margin: 0; }
+.inquiry-lead { margin: -4px 0 14px; color: var(--muted); font-size: 13.5px; line-height: 1.55; word-break: keep-all; }
+.inquiry-form .chips { margin-bottom: 14px; }
+.inquiry-form label > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.dash .inquiry-form textarea, .dash .inquiry-reply textarea {
+  display: block; width: 100%; padding: 10px 12px;
+  border: 1.5px solid transparent; border-radius: 12px; background: var(--surface); color: var(--text);
+  font: inherit; font-size: 15px; line-height: 1.5; resize: vertical; outline: none;
+}
+.dash .inquiry-form textarea:focus, .dash .inquiry-reply textarea:focus { background: #fff; border-color: var(--accent); }
+.inquiry-count { margin: 6px 2px 12px; text-align: right; font-size: 12px; }
+/* 문의 카드: 보낸 내용은 줄바꿈 그대로, 관리자 답변은 옅은 파란 면에 */
+.inquiry-body { margin: 12px 0 0; font-size: 14.5px; line-height: 1.6; white-space: pre-line; word-break: keep-all; overflow-wrap: anywhere; }
+.inquiry-answer { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--accent-weak); }
+.inquiry-answer-head { display: block; margin-bottom: 4px; font-size: 12.5px; font-weight: 700; color: var(--accent); }
+.inquiry-answer p { margin: 0; font-size: 14.5px; line-height: 1.6; white-space: pre-line; word-break: keep-all; overflow-wrap: anywhere; }
+.inquiry-reply { margin-top: 12px; }
+.inquiry-reply .form-error { margin: 8px 0 0; }

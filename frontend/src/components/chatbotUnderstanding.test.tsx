@@ -1036,3 +1036,28 @@ describe("손님 주문 시뮬레이션에서 찾은 것들", () => {
     expect(inCard("27,000원")).toBe(true);
   });
 });
+
+describe("관리자에게 문의 안내", () => {
+  it("'문의할래'·'고객센터'라고 하면 문의 화면으로 가는 버튼을 보여 주고, 누르면 그 화면으로 간다", async () => {
+    await renderChat();
+    await say("관리자한테 문의할래");
+    expect(await find(/관리자에게 문의를 남기시면 확인하고 답해 드려요/)).toBeTruthy();
+    await click("문의하러 가기");
+    expect(window.location.hash).toBe("#/inquiry");
+  });
+
+  it("로그인하지 않았으면 로그인부터 하라고 한다", async () => {
+    await logout();
+    render(<OrderChatbot />);
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+    await say("고객센터 연결해줘");
+    expect(await find(/관리자에게 문의는 로그인한 뒤에 남길 수 있어요/)).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "로그인하러 가기" }).length).toBeGreaterThan(0);
+  });
+
+  it("주문 취소·가게 위치처럼 다른 기능 말이 먼저면 그 기능으로 간다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리 주문 취소 문의");
+    expect(screen.queryByText(/관리자에게 문의를 남기시면/)).not.toBeInTheDocument();
+  });
+});

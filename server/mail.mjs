@@ -10,7 +10,18 @@ function emailHtml(code) {
 </div></body></html>`;
 }
 
-// 돌려주는 값: { mode: "resend" | "dev-console" | "off", sendMail(email, code) }
+// 알림 메일 본문: 인증번호 메일과 같은 틀에 제목과 글 (글은 사용자가 쓴 문의일 수 있어 HTML 로 해석되지 않게 바꿔 넣는다)
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function noticeHtml(subject, text) {
+  return `<!doctype html><html><body style="margin:0;padding:32px 16px;background:#f3f6fb;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#0f172a">
+<div style="max-width:420px;margin:0 auto;background:#fff;border-radius:20px;padding:32px 28px">
+  <div style="font-size:24px;font-weight:900;color:#007cfc;letter-spacing:-0.03em">Saylo</div>
+  <p style="margin:20px 0 8px;font-size:16px;font-weight:700">${escapeHtml(subject)}</p>
+  <p style="margin:0;font-size:14px;color:#334155;line-height:1.7;white-space:pre-line">${escapeHtml(text)}</p>
+</div></body></html>`;
+}
+
+// 돌려주는 값: { mode: "resend" | "dev-console" | "off", sendMail(email, code), sendNotice(email, subject, text) }
 export function createMailer({ apiKey = "", from = "Saylo <onboarding@resend.dev>", production = false } = {}) {
   const mode = apiKey ? "resend" : production ? "off" : "dev-console";
 
@@ -36,6 +47,22 @@ export function createMailer({ apiKey = "", from = "Saylo <onboarding@resend.dev
     console.log(`[email:dev] ${email} 인증번호 ${code} (RESEND_API_KEY 가 없어 메일 대신 콘솔에 찍음)`);
   }
 
+  // 알림 메일 (새 문의가 왔어요, 문의에 답변이 달렸어요): 제목과 글만. 키가 없으면 개발 중에는 콘솔에 찍고, 운영에서는 보내지 않는다
+  async function sendNotice(email, subject, text) {
+    if (mode === "off") return;
+    if (mode === "dev-console") {
+      console.log(`[email:dev] ${email} ${subject}\n${text}`);
+      return;
+    }
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [email], subject: `[Saylo] ${subject}`, html: noticeHtml(subject, text), text }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`Resend ${res.status}: ${await res.text()}`);
+  }
+
   const describe = { resend: `Resend (보내는 사람 ${from})`, off: "꺼짐 — .env 에 RESEND_API_KEY 필요", "dev-console": "개발용(콘솔 출력)" }[mode];
-  return { mode, sendMail, describe };
+  return { mode, sendMail, sendNotice, describe };
 }
