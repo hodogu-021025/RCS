@@ -188,7 +188,7 @@ const DEFAULT_PLACEHOLDER = "메시지를 입력하세요";
 const RESTAURANT_PICKS_HEADING = "오늘은 이런 식당 어떠세요?\n드시고 싶은 음식을 말씀해 주시면 그 음식 맛집을 찾아 드릴게요.";
 // 로그인 전인 손님을 로그인 화면으로, 계정에 배달지·연락처가 없는 고객님을 계정 관리로 보내는 버튼
 const LOGIN_CHOICE: Choice = { label: "로그인하러 가기", value: "로그인할게요" };
-const LOGIN_REDIRECT_MS = 3000; // 로그인 안내를 보여 준 뒤 로그인 화면으로 넘어가기까지
+const REDIRECT_MS = 3000; // 안내를 보여 준 뒤 로그인 화면·계정 관리로 저절로 넘어가기까지
 const ACCOUNT_CHOICE: Choice = { label: "계정 관리로 가기", value: "계정 관리로 갈게요" };
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
 
@@ -663,21 +663,22 @@ export function OrderChatbot() {
     }
     if (hasDelivery(myDelivery)) return false;
     const what = !myDelivery.address && !myDelivery.phone ? "배달지와 연락처" : !myDelivery.address ? "배달지" : "연락처";
-    sendAway("account", `아직 계정에 ${what}가 없어요.\n계정 관리에서 ${what}를 등록하시면 이어서 주문해 드릴게요.`, resume);
+    sendAway("account", `아직 계정에 ${what}가 없어요.\n${what}를 등록해주세요.`, resume, true);
     return true;
   }
 
-  // 로그인 화면이나 계정 관리로 보낸다. 로그인은 안내를 읽을 틈을 두고 저절로 넘어가고,
-  // 계정 관리는 버튼을 누르거나 "응"이라고 하면 간다
-  function sendAway(to: "login" | "account", text: string, resume: ResumeDelivery) {
+  // 로그인 화면이나 계정 관리로 보낸다.
+  // auto: 안내를 읽을 틈(3초)을 두고 저절로 넘어간다 (로그인 전, 계정에 배달지·연락처가 없을 때).
+  // 아니면 버튼을 누르거나 "응"이라고 할 때 간다 (주문서에서 "주소 바꿔줘"처럼 손님이 바꾸겠다고 할 때)
+  function sendAway(to: "login" | "account", text: string, resume: ResumeDelivery, auto = to === "login") {
     startFresh();
     rememberResume(session?.username ?? null, resume);
     setStage(to === "login" ? "needLogin" : "needContact");
-    if (to === "login") {
+    if (auto) {
       botReply(() => {
         push(botText(text));
         // 해시 주소라 주소만 바꾸면 그 화면으로 간다. "새 대화"를 누르거나 화면을 떠나면 타이머째 취소된다
-        later(() => window.location.assign("#/login"), LOGIN_REDIRECT_MS);
+        later(() => window.location.assign(to === "login" ? "#/login" : "#/account"), REDIRECT_MS);
       });
       return;
     }

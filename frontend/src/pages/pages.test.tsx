@@ -923,13 +923,15 @@ describe("로그인한 고객님의 연락처·배달지", () => {
     await loginAs(KIM.username);
     openChat();
     sayInChat("간장치킨 2마리");
-    expect(await findBot(/아직 계정에 배달지가 없어요/)).toBeTruthy();
+    expect(await findBot(/아직 계정에 배달지가 없어요\.\s*배달지를 등록해주세요\./)).toBeTruthy();
     // 주소를 챗봇에서 묻지 않고, 주문서로도 넘어가지 않는다
     expect(screen.queryByText(/배달 받을 주소를 알려 주세요/)).not.toBeInTheDocument();
     expect(screen.queryByText("주문 내역을 확인해 주세요.")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "계정 관리로 가기" }));
-    await waitFor(() => expect(window.location.hash).toBe("#/account"));
+    // 버튼 없이 3초 뒤에 계정 관리로 저절로 넘어간다 (바로 넘어가지 않는다)
+    expect(screen.queryByRole("button", { name: "계정 관리로 가기" })).not.toBeInTheDocument();
+    expect(window.location.hash).not.toBe("#/account");
+    await waitFor(() => expect(window.location.hash).toBe("#/account"), { timeout: 5000 });
     expect(await screen.findByText("배달지를 등록해야 배달 주문을 할 수 있어요.")).toBeInTheDocument();
     expect(screen.getByLabelText("휴대폰 번호")).toHaveValue("010-1234-5678");
     fill({ 배달지: "제천" });
@@ -947,7 +949,7 @@ describe("로그인한 고객님의 연락처·배달지", () => {
     await waitFor(() => expect(inCard("제천시 하소동 행복아파트 101동 202호")).toBe(true), { timeout: 3000 });
     expect(inCard("010-1234-5678")).toBe(true);
     expect(inCard("간장치킨 2마리")).toBe(true);
-  });
+  }, 15_000); // 계정 관리로 넘어가기 전 3초를 실제로 기다린다
 
   it("배달을 고르는 순간 막고, 배달지가 있으면 묻지 않고 계정의 배달지로 주문서를 만든다", async () => {
     server.createAccount({ ...KIM, phone: "010-1234-5678" });
