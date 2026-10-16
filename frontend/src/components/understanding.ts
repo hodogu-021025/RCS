@@ -3,6 +3,7 @@
 import {
   deliveryMenu,
   findRestaurant,
+  findRestaurantLoosely,
   foodsOnOffer,
   filledRows,
   orderItemText,
@@ -153,7 +154,8 @@ export const nearestRestaurants = (n = 3) =>
 
 // 문장에 들어 있는 식당 이름 (띄어쓰기 무시)
 export function restaurantNamed(text: string): Restaurant | undefined {
-  return findRestaurant(text, allRestaurants());
+  // 이름이 정확히 맞는 가게가 없으면 이름의 일부("파닭", "세명대")로 찾는다
+  return findRestaurant(text, allRestaurants()) ?? findRestaurantLoosely(text, allRestaurants());
 }
 
 // ---- 예약 정보 한 번에 받기 ----

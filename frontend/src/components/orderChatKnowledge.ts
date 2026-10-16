@@ -141,6 +141,38 @@ export function findRestaurant(text: string, list: Restaurant[]): Restaurant | u
   return list.find((r) => typed.includes(squash(r.name))) ?? list.find((r) => shortStoreName(r.name) && typed.includes(shortStoreName(r.name)));
 }
 
+// 말에서 뽑은 낱말들 (띄어쓰기 없이, 두 글자 이상, 숫자가 든 것은 뺀다): "파닭이랑 매운 거 주세요" → 파닭이랑, 파닭, 매운, 주세요, 주세.
+// 끝의 조사·말끝을 뗀 말과 원래 말을 둘 다 둔다 ("떡볶이"의 "이"처럼 이름의 일부를 조사로 잘못 뗄 수 있어서). raw: 원래 말
+const WORD_ENDING = /(이랑|하고|에서|으로|이요|부터|까지|로|을|를|이|가|은|는|도|만|랑|요|좀)$/;
+function spokenWordPairs(text: string): { raw: string; word: string }[] {
+  return text
+    .split(/[\s,.!?~]+/)
+    .map(squash)
+    .flatMap((raw) => [...new Set([raw, raw.replace(WORD_ENDING, "")])].map((word) => ({ raw, word })))
+    .filter(({ word }) => [...word].length >= 2 && !/\d/.test(word));
+}
+export const spokenWords = (text: string): string[] => [...new Set(spokenWordPairs(text).map((p) => p.word))];
+// 이름을 이루는 낱말 (두 글자 이상, 숫자가 든 것은 뺀다): "국물떡볶이 매운맛" → 국물떡볶이, 매운맛
+const nameWords = (name: string) => name.split(/\s+/).map(squash).filter((w) => [...w].length >= 2 && !/\d/.test(w));
+
+// 가게 이름의 일부만 말해도 그 가게로: "파닭", "파닭집" → 못말리는파닭 세명대점, "세명대" → 세명대점, "족발" → 맛있는 족발 테스트점.
+// 이름이 정확히 맞는 가게가 없을 때만 쓴다. 꾸미는 낱말("맛있는")과 흔한 말(가게·식당·배달…)로는 찾지 않는다 ("맛있는 거 추천해줘"가 가게로 가지 않게)
+const STORE_WORD_SUFFIX = /(집|가게|네|쪽)$/;
+const COMMON_WORDS = new Set(["가게", "식당", "매장", "배달", "주문", "메뉴", "음식", "테스트", "추천", "시켜", "근처"]);
+const MODIFIER = /(는|은|한|운|던|있는|없는)$/;
+export function findRestaurantLoosely(text: string, list: Restaurant[]): Restaurant | undefined {
+  // 음식 종류("치킨", "떡볶이")나 메뉴 키워드는 그 음식·메뉴를 찾는 말이지 가게 이름이 아니다 ("떡볶이"가 "장락 떡볶이" 가게로만 가지 않게)
+  // 메뉴 이름 속 낱말("옛날통닭", "족발")도 메뉴를 부르는 말이라 가게 이름 찾기에 쓰지 않는다 ("간장치킨이랑 옛날통닭"이 "장락 옛날통닭" 가게로 가지 않게)
+  const foodWords = new Set([...FOODS.flatMap((f) => f.keywords), ...deliveryMenu().flatMap((d) => [...d.keywords, ...nameWords(d.name)])].map(squash));
+  const words = spokenWordPairs(text)
+    .filter(({ raw, word }) => !foodWords.has(raw) && !foodWords.has(word))
+    .map(({ word }) => (word.length > 2 ? word.replace(STORE_WORD_SUFFIX, "") : word))
+    .filter((w) => [...w].length >= 2 && !COMMON_WORDS.has(w) && !foodWords.has(w)); // "치킨집" → "치킨"도 음식 이름이라 가게로 보지 않는다
+  if (!words.length) return undefined;
+  const hits = list.filter((r) => nameWords(r.name).some((part) => !MODIFIER.test(part) && words.some((w) => part.includes(w))));
+  return hits.length === 1 ? hits[0] : undefined; // 여러 가게에 걸리면 고르지 않는다
+}
+
 export const restaurantById = (id: string) => withStoreSettings(RESTAURANTS.find((r) => r.id === id)!);
 // 목록(catalog.json)이 바뀌어 더 이상 없는 매장이면 undefined (사장님 계정이 그 매장을 가리킬 수 있다)
 export const findRestaurantById = (id: string | undefined): Restaurant | undefined => {
@@ -324,7 +356,13 @@ export function findDeliveryItems(text: string, storeId?: string): DeliveryItem[
   const menu = availableDeliveryMenu().filter(inStore);
   // 메뉴 이름을 그대로 말했는데 품절이면, 비슷한 다른 메뉴로 바꿔치기하지 않고 못 찾은 것으로 본다
   if (deliveryMenu().some((d) => inStore(d) && typed.includes(squash(d.name)))) return menu.filter((d) => typed.includes(squash(d.name)));
-  return menu.filter((d) => d.keywords.some((k) => typed.includes(k)) || flavorNamed(d, typed));
+  const found = menu.filter((d) => d.keywords.some((k) => typed.includes(k)) || flavorNamed(d, typed));
+  if (found.length) return found;
+  // 정확히 맞는 게 없으면 이름의 일부로: 메뉴 이름("매운" → 국물떡볶이 매운맛)이나 고를 맛 이름("파닭" → 간장 파닭을 고르는 세트)의 낱말 속에 말한 낱말이 들어 있으면
+  const words = spokenWords(text);
+  if (!words.length) return [];
+  const partOf = (names: string[]) => names.some((n) => nameWords(n).some((part) => words.some((w) => part.includes(w))));
+  return menu.filter((d) => partOf([d.name]) || (!!d.choice && partOf(d.choice.options.map((o) => o.name))));
 }
 
 // 버튼 글자: 오늘의 메뉴·할인 중이면 짧게 표시한다 (누르면 메뉴 이름으로 처리)
@@ -360,8 +398,20 @@ export function withoutQuantity(text: string, unit: string): string {
   return text.replace(new RegExp(`(\\d+|${counts})\\s*${u}`, "g"), " ").replace(new RegExp(`(^|\\s)${u}(?=\\s|$)`, "g"), " ");
 }
 
+// 가게 이름에 든 낱말도 수량이 아니다 ("세명대점"·"세명대"의 "세명"은 "세 명"이 아니다). 세 글자 이상 낱말만 지운다 (사람 수 "세명"은 남긴다)
+function withoutStoreNames(text: string): string {
+  const parts = RESTAURANTS.flatMap((r) => nameWords(r.name));
+  return text
+    .split(/(\s+)/)
+    .map((w) => {
+      const s = squash(w.replace(WORD_ENDING, ""));
+      return [...s].length >= 3 && parts.some((p) => p.includes(s)) ? " " : w;
+    })
+    .join("");
+}
+
 export function parseQuantity(said: string): number | undefined {
-  const text = withoutMenuNames(said);
+  const text = withoutStoreNames(withoutMenuNames(said));
   for (const m of text.matchAll(/\d+/g)) {
     if (!NOT_COUNT_UNIT.test(text.slice(m.index + m[0].length))) return parseInt(m[0], 10);
   }

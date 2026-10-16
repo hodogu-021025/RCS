@@ -1868,7 +1868,7 @@ export function OrderChatbot() {
       return;
     }
 
-    // 가게 이름을 말했으면: 메뉴·배달 얘기면 그 가게 배달, 아니면 그 가게 예약
+    // 가게 이름을 말했으면: 배달 메뉴가 있는 가게는 예약 말(예약·식당, 날짜·시간·인원)이 없으면 그 가게 메뉴를, 아니면 그 가게 예약
     if (place) {
       // "장락 옛날통닭 내일 7시 예약": 예약·식당 말이 있으면 가게 이름 속 메뉴 이름(옛날통닭)보다 예약을 먼저 본다
       const wantsBooking = menu === "식당";
@@ -1883,7 +1883,7 @@ export function OrderChatbot() {
       }
       const storeMenu = availableDeliveryMenu().filter((d) => d.restaurantId === place.id);
       const named = findDeliveryItems(text, place.id); // 그 가게 메뉴 중에서 ("못말리는파닭 간장" → 간장 파닭을 고를 수 있는 메뉴)
-      if (!wantsBooking && storeMenu.length && (named.length || menu === "배달")) {
+      if (!wantsBooking && storeMenu.length && (named.length || menu === "배달" || !hasSlots(slots))) {
         startFresh();
         setLastPlace(place);
         deliverItems(named.length ? named : storeMenu, text);

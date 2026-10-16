@@ -1431,3 +1431,49 @@ describe("장바구니: 합친 뒤 점검에서 찾은 것들", () => {
     expect(await find(/수량을 2마리로 바꿨어요/)).toBeTruthy();
   });
 });
+
+describe("가게 이름·메뉴 이름의 일부로 말하기", () => {
+  const FLAVORS = [
+    { name: "간장 파닭", extra: 0 },
+    { name: "양념 파닭", extra: 0 },
+    { name: "뿌링클 치킨", extra: 1000 },
+  ];
+  beforeEach(() => {
+    const id = server.db.addStore({ name: "못말리는파닭 세명대점", food: "chicken", hours: "00:00 - 24:00" }).id;
+    server.db.addMenuItem({ restaurantId: id, name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["두마리", "세트", "치킨"], choice: { label: "맛", count: 2, options: FLAVORS } });
+    server.db.addMenuItem({ restaurantId: id, name: "국물떡볶이 매운맛", price: 5000, unit: "인분", keywords: ["떡볶이"] });
+  });
+
+  it("'파닭'·'파닭집 메뉴 보여줘'·'세명대 치킨'은 그 가게 메뉴를 보여 준다", async () => {
+    await renderChat();
+    // 이 가게 치킨은 세트 하나뿐이라 바로 맛 고르기로 간다 (세트는 수량을 묻지 않는다)
+    await say("파닭 시켜줘");
+    expect(await find(/2마리 치킨 세트 1세트의 맛을 2가지 골라 주세요/)).toBeTruthy();
+    await type("취소");
+    await say("파닭집 메뉴 보여줘");
+    expect(buttonsIn(/이런 메뉴를 추천해요/)).toEqual(["2마리 치킨 세트", "국물떡볶이 매운맛", "직접 입력"]); // 예약이 아니라 그 가게 메뉴
+    await type("취소");
+    const before = screen.queryAllByText(/2마리 치킨 세트 1세트의 맛을 2가지 골라 주세요/).length;
+    await say("세명대 치킨"); // 다른 가게 치킨(간장치킨·옛날통닭)이 아니라 이 가게 치킨
+    await wait();
+    expect(screen.queryAllByText(/2마리 치킨 세트 1세트의 맛을 2가지 골라 주세요/).length).toBe(before + 1);
+  });
+
+  it("가게 이름 일부와 날짜·시간·인원을 말하면 그 가게 예약으로 간다", async () => {
+    await renderChat();
+    await say("파닭집 내일 저녁 7시 2명");
+    expect(await find(/예약 내용을 확인해 주세요/)).toBeTruthy();
+    expect(screen.getAllByText("못말리는파닭 세명대점").length).toBeGreaterThan(0);
+  });
+
+  it("메뉴 이름의 일부('매운')로도 찾고, 음식·메뉴 이름('떡볶이', '옛날통닭')은 가게 이름으로 보지 않으며 꾸미는 말('맛있는')로는 가게를 찾지 않는다", async () => {
+    await renderChat();
+    await say("맛있는 거 추천해줘");
+    expect(await find(/메뉴로 이런 건 어떠세요/)).toBeTruthy();
+    await type("취소");
+    await say("매운 거 있어?");
+    expect(await find(/국물떡볶이 매운맛은 못말리는파닭 세명대점에서/)).toBeTruthy();
+    await say("떡볶이");
+    expect(buttonsIn(/이런 메뉴를 추천해요/)).toEqual(expect.arrayContaining(["국물떡볶이", "국물떡볶이 매운맛"])); // 한 가게로 정하지 않는다
+  });
+});
