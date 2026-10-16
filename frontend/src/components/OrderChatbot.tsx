@@ -910,7 +910,10 @@ export function OrderChatbot() {
       return;
     }
     const item = items[0];
-    const qty = said ?? pendingQty ?? undefined;
+    // 세트 메뉴(맛 고르기가 있고 단위가 "세트", 예: 2마리 치킨 세트)는 메뉴 하나가 곧 한 세트라 수량을 묻지 않고 1세트로 바로 맛을 고른다.
+    // 이 말에서 수량을 말했을 때만("2마리 치킨 세트 2세트") 그 수량으로. 앞서 "치킨 두 마리"처럼 말해 둔 마리 수는 세트 수가 아니라 쓰지 않는다
+    const setMenu = !!item.choice && item.unit === "세트";
+    const qty = setMenu ? (said ?? 1) : (said ?? pendingQty ?? undefined);
     setPendingQty(null);
     setLastItem(item);
     if (qtyInRange(qty)) {
