@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { choiceRows, clockText, findRestaurantById, untilText, formatDate, itemText, orderItemText, orderPriceLabel, won, type DeliveryItem, type MenuChoice, type Restaurant } from "../components/orderChatKnowledge";
+import { choiceRows, clockText, orderHeadText, findRestaurantById, untilText, formatDate, orderItemText, orderPriceLabel, won, type DeliveryItem, type MenuChoice, type Restaurant } from "../components/orderChatKnowledge";
 import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
@@ -28,6 +28,7 @@ import { ChoiceEditor } from "./ChoiceEditor";
 import { choiceFromDraft, choiceSummary, draftFromChoice, emptyDraft, type ChoiceDraft } from "./menuChoice";
 import { InstallBanner } from "../components/InstallBanner";
 import { Select } from "../components/Select";
+import { OrderLines } from "./OrderLines";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
 
@@ -306,18 +307,27 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
     <li className={"record" + (needsAction(o) ? " pending" : "")}>
       <div className="record-head">
         {/* 담은 메뉴들 (여러 개면 쉼표로). 금액은 합계 */}
-        <b>{o.order.items.map(itemText).join(", ")}</b>
+        <b>{orderHeadText(o.order)}</b>
         <span className="price">{orderPriceLabel(o.order)}</span>
         <span className={statusClass(o.status)}>{o.status}</span>
       </div>
       <dl>
-        {/* 세트 메뉴의 고른 맛 (메뉴마다) */}
-        {choiceRows(o.order).map((r) => (
-          <div key={r.label}>
-            <dt>{r.label}</dt>
-            <dd>{r.value}</dd>
+        {/* 메뉴가 여럿이면 한 줄씩(맛은 그 메뉴 아래), 하나면 세트의 고른 맛만 */}
+        {o.order.items.length > 1 ? (
+          <div>
+            <dt>메뉴</dt>
+            <dd>
+              <OrderLines items={o.order.items} />
+            </dd>
           </div>
-        ))}
+        ) : (
+          choiceRows(o.order).map((r) => (
+            <div key={r.label}>
+              <dt>{r.label}</dt>
+              <dd>{r.value}</dd>
+            </div>
+          ))
+        )}
         {o.order.address && (
           <div>
             <dt>배달지</dt>

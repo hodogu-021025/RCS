@@ -150,6 +150,14 @@ export function AccountPage() {
       <ContactSection />
 
       <section className="dash-section">
+        <h2>관리자에게 문의</h2>
+        <p className="inquiry-lead">주문·결제·{owner ? "매장 운영" : "가게"}·계정 등 궁금한 점을 관리자에게 남길 수 있어요. 답변은 문의 화면에서 볼 수 있어요.</p>
+        <a className="btn wide" href="#/inquiry">
+          문의하기
+        </a>
+      </section>
+
+      <section className="dash-section">
         <h2>회원 탈퇴</h2>
         <ul className="withdraw-notes">
           <li>아이디, 이름, 이메일, 비밀번호는 바로 삭제돼요.</li>

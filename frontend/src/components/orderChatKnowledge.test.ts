@@ -397,3 +397,14 @@ describe("장바구니 합계 표시", () => {
     expect(orderPriceLabel(both)).toBe("32,000원 (20% 할인)");
   });
 });
+
+describe("로/으로", () => {
+  it("받침에 맞춰 붙이고, ㄹ 받침과 괄호로 끝나는 말도 맞게 붙인다", async () => {
+    const { withRoParticle } = await import("./orderChatKnowledge");
+    expect(withRoParticle("2마리")).toBe("2마리로");
+    expect(withRoParticle("3묶음")).toBe("3묶음으로");
+    expect(withRoParticle("1일")).toBe("1일로");
+    expect(withRoParticle("2개")).toBe("2개로");
+    expect(withRoParticle("2마리 치킨 세트 1세트 (간장 파닭, 뿌링클 치킨(+1,000원))")).toBe("2마리 치킨 세트 1세트 (간장 파닭, 뿌링클 치킨(+1,000원))으로");
+  });
+});

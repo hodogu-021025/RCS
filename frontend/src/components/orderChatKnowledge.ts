@@ -174,6 +174,14 @@ export const withObjectParticle = (word: string) => withParticle(word, "을", "�
 export const withTopicParticle = (word: string) => withParticle(word, "은", "는");
 export const withSubjectParticle = (word: string) => withParticle(word, "이", "가");
 export const withCopula = (word: string) => withParticle(word, "이에요", "예요"); // 간장치킨이에요 / 피자예요
+// 로/으로: "2마리로", "3묶음으로". ㄹ 받침은 "로"(1일로). 괄호로 끝나면("…(+1,000원))") 괄호 앞 글자로 정한다
+export function withRoParticle(word: string): string {
+  const spoken = word.trim().replace(/\)+$/, "");
+  const code = spoken.slice(-1).charCodeAt(0) - 0xac00;
+  if (code >= 0 && code <= 11171 && code % 28 === 8) return `${word}로`;
+  const picked = withParticle(spoken, "으로", "로").slice(spoken.length);
+  return word + picked;
+}
 
 // ---- 배달 ----
 // 배달 메뉴 (catalog.json 의 deliveryMenu). 매장은 식당 찾기의 식당과 같은 곳이다 (restaurantId).
@@ -217,6 +225,9 @@ export const choicesExtra = (choices: ChosenOption[] | undefined) => (choices ??
 export const itemText = (line: Pick<OrderItem, "item" | "qty" | "unit">) => `${line.item} ${line.qty}${line.unit}`;
 export const itemLabel = (line: Pick<OrderItem, "item" | "qty" | "unit" | "choices">) =>
   `${itemText(line)}${line.choices?.length ? ` (${choicesText(line.choices)})` : ""}`;
+// 주문 카드 위 칸의 짧은 제목: 메뉴가 여럿이면 첫 메뉴 + "외 N가지" (전체는 카드 안 "메뉴" 줄에 한 줄씩)
+export const orderHeadText = (order: Pick<Order, "items">) =>
+  order.items.length > 1 ? `${itemText(order.items[0])} 외 ${order.items.length - 1}가지` : order.items[0] ? itemText(order.items[0]) : "";
 // 주문한 메뉴를 한 줄로 (사장님·관리자·내 주문 화면·입금 안내): 여러 개면 쉼표로 이어 "족발 소 1개, 보쌈 중 2개 (…)"
 export const orderItemText = (order: Pick<Order, "items">) => order.items.map(itemLabel).join(", ");
 // 세트 메뉴의 고른 맛 줄들 (화면의 표에): 메뉴가 하나면 "맛", 여럿이면 어느 메뉴의 맛인지 앞에 붙인다

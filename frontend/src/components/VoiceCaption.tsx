@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { CopyButton } from "./CopyButton";
+import { AccountText, CopyButton } from "./CopyButton";
 import { TelLink } from "./TelLink";
 import type { CaptionCard } from "./OrderChatbot";
 
@@ -70,7 +70,7 @@ function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messa
                       {row.badge && <span className="place-badge">{row.badge}</span>}
                     </dt>
                     <dd className={row.emphasis ? "price" : undefined}>
-                      {row.tel ? <TelLink phone={row.value} /> : row.value}
+                      {row.tel ? <TelLink phone={row.value} /> : row.copy ? <AccountText value={row.value} /> : row.value}
                       {row.copy && <CopyButton text={row.copy} label="계좌번호 복사" />}
                     </dd>
                   </div>

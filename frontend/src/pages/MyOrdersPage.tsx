@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useSession } from "../auth/auth";
-import { CopyButton } from "../components/CopyButton";
+import { AccountText, CopyButton } from "../components/CopyButton";
 import { TelLink } from "../components/TelLink";
-import { accountDigits, formatDate, itemText, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
+import { accountDigits, formatDate, orderHeadText, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
 import { cancelMyOrder, useDb, type OrderRecord } from "../data/db";
 import { DashLayout } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
@@ -84,7 +84,7 @@ function OrderItem({ record: o }: { record: OrderRecord }) {
   return (
     <li className={"record" + (o.status === "입금 대기" ? " pending" : "")}>
       <div className="record-head">
-        <b>{o.order.items.map(itemText).join(", ")}</b>
+        <b>{orderHeadText(o.order)}</b>
         <span className={statusClass(o.status)}>{o.status}</span>
       </div>
       <dl>
@@ -113,7 +113,7 @@ function OrderItem({ record: o }: { record: OrderRecord }) {
             <div>
               <dt>입금 계좌</dt>
               <dd>
-                {bank.bank} {bank.account}
+                <AccountText value={`${bank.bank} ${bank.account}`} />
                 <CopyButton text={accountDigits(bank.account)} label="계좌번호 복사" />
               </dd>
             </div>

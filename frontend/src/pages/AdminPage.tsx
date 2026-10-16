@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { FOODS, RESTAURANTS, choiceRows, formatDate, itemText, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
+import { FOODS, RESTAURANTS, choiceRows, orderHeadText, formatDate, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
 import {
   addOwner,
   approveOwner,
@@ -12,13 +12,16 @@ import {
   type ReservationRecord,
 } from "../data/db";
 import { Select } from "../components/Select";
+import { OrderLines } from "./OrderLines";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
 import { PasswordField } from "./PasswordField";
 import { PhoneField } from "./PhoneField";
 import { PHONE_ERROR, normalizePhone } from "../components/delivery";
+import { useInquiries } from "../data/inquiries";
+import { InquiriesTab } from "./InquiriesAdmin";
 
-type Tab = "all" | "stores" | "stats" | "users";
+type Tab = "all" | "stores" | "stats" | "users" | "inquiries";
 type KindFilter = "all" | "delivery" | "reservation";
 type StoresView = "stores" | "approve" | "create";
 type AllView = KindFilter | "transfers"; // 전체 현황의 세부 메뉴: 종류별 목록, 또는 계좌이체 거래 내역
@@ -68,6 +71,9 @@ export function AdminPage() {
   const db = useDb(["settings", "records", "accounts"]);
   const waiting = db.owners.filter((o) => o.approved === false).length;
   const [tab, setTab] = useState<Tab>("all");
+  // 문의: 답변을 기다리는 수를 탭에 띄우려고 처음부터 받아 둔다
+  const inquiries = useInquiries();
+  const unanswered = (inquiries.list ?? []).filter((q) => !q.answer).length;
   const rows = [...db.orders.map(toRow), ...db.reservations.map(rsvToRow)].sort((a, b) => b.createdAt - a.createdAt);
 
   return (
@@ -78,6 +84,7 @@ export function AdminPage() {
           { key: "stores", label: "매장·사장님", badge: waiting },
           { key: "stats", label: "통계" },
           { key: "users", label: "사용자" },
+          { key: "inquiries", label: "문의", badge: unanswered },
         ]}
         value={tab}
         onChange={setTab}
@@ -86,6 +93,7 @@ export function AdminPage() {
       {tab === "stores" && <StoresTab />}
       {tab === "stats" && <StatsTab rows={rows} />}
       {tab === "users" && <UsersTab rows={rows} />}
+      {tab === "inquiries" && <InquiriesTab {...inquiries} />}
     </DashLayout>
   );
 }
@@ -203,7 +211,7 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
           {shown.map((o) => (
             <li key={o.id} className={"record" + (o.status === "입금 대기" ? " pending" : "")}>
               <div className="record-head">
-                <b>{o.order.items.map(itemText).join(", ")}</b>
+                <b>{orderHeadText(o.order)}</b>
                 <span className="price">{orderPriceLabel(o.order)}</span>
                 <span className={statusClass(o.status)}>{o.status}</span>
               </div>
@@ -212,12 +220,21 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
                   <dt>매장</dt>
                   <dd>{o.order.store.name}</dd>
                 </div>
-                {choiceRows(o.order).map((r) => (
-                  <div key={r.label}>
-                    <dt>{r.label}</dt>
-                    <dd>{r.value}</dd>
+                {o.order.items.length > 1 ? (
+                  <div>
+                    <dt>메뉴</dt>
+                    <dd>
+                      <OrderLines items={o.order.items} />
+                    </dd>
                   </div>
-                ))}
+                ) : (
+                  choiceRows(o.order).map((r) => (
+                    <div key={r.label}>
+                      <dt>{r.label}</dt>
+                      <dd>{r.value}</dd>
+                    </div>
+                  ))
+                )}
                 <div>
                   <dt>입금 계좌</dt>
                   <dd>{o.order.bank ? `${o.order.bank.bank} ${o.order.bank.account} · ${o.order.bank.holder}` : "-"}</dd>

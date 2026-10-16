@@ -14,3 +14,4 @@ export const ResetPasswordPage = page(() => import("./ResetPasswordPage"), "Rese
 export const AccountPage = page(() => import("./AccountPage"), "AccountPage");
 export const PrivacyPage = page(() => import("./PrivacyPage"), "PrivacyPage");
 export const AppDownloadPage = page(() => import("./AppDownloadPage"), "AppDownloadPage");
+export const InquiryPage = page(() => import("./InquiryPage"), "InquiryPage");

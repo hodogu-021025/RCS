@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import backgroundVideo from "../image/saylo_background.mp4";
-import { CopyButton } from "./CopyButton";
+import { AccountText, CopyButton } from "./CopyButton";
 import { InstallBanner } from "./InstallBanner";
 import { TelLink } from "./TelLink";
 import { AccountIcon, ChatIcon, HelpIcon, MenuIcon, MicIcon, PlusIcon, SpeakerIcon } from "./icons";
@@ -78,6 +78,7 @@ import {
   withTopicParticle,
   spokenTime,
   withObjectParticle,
+  withRoParticle,
   won,
   matchChoices,
   withoutQuantity,
@@ -215,6 +216,7 @@ const RESTAURANT_PICKS_HEADING = "오늘은 이런 식당 어떠세요?\n드시�
 const LOGIN_CHOICE: Choice = { label: "로그인하러 가기", value: "로그인할게요" };
 const REDIRECT_MS = 3000; // 안내를 보여 준 뒤 로그인 화면·계정 관리로 저절로 넘어가기까지
 const ACCOUNT_CHOICE: Choice = { label: "계정 관리로 가기", value: "계정 관리로 갈게요" };
+const INQUIRY_CHOICE: Choice = { label: "문의하러 가기", value: "문의 화면으로 갈게요" };
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
 
 // 장바구니("더 담을까요?")에서 더 담지 않고 주문하겠다는 말: "그만 담을게", "더 안 시킬게", "이제 됐어", "없어", "그게 다야", "이대로 주문"
@@ -899,7 +901,7 @@ export function OrderChatbot() {
       return;
     }
     setLastItem(lastItemOf(base));
-    showOrderCard(base, [...goneNote(gone), botText(`${first ? "처음에" : "아까"} 고르신 ${orderItemText(base)}로 주문서를 다시 만들었어요.`)]);
+    showOrderCard(base, [...goneNote(gone), botText(`${first ? "처음에" : "아까"} 고르신 ${withRoParticle(orderItemText(base))} 주문서를 다시 만들었어요.`)]);
   }
 
   // 배달 주문은 로그인한 고객님이 계정에 배달지·연락처를 적어 둬야 할 수 있다. 아니면 안내하고 멈춘다(true).
@@ -995,7 +997,10 @@ export function OrderChatbot() {
       return;
     }
     const item = items[0];
-    const qty = said ?? pendingQty ?? undefined;
+    // 세트 메뉴(맛 고르기가 있고 단위가 "세트", 예: 2마리 치킨 세트)는 메뉴 하나가 곧 한 세트라 수량을 묻지 않고 1세트로 바로 맛을 고른다.
+    // 이 말에서 수량을 말했을 때만("2마리 치킨 세트 2세트") 그 수량으로. 앞서 "치킨 두 마리"처럼 말해 둔 마리 수는 세트 수가 아니라 쓰지 않는다
+    const setMenu = !!item.choice && item.unit === "세트";
+    const qty = setMenu ? (said ?? 1) : (said ?? pendingQty ?? undefined);
     setPendingQty(null);
     setLastItem(item);
     if (qtyInRange(qty)) {
@@ -1130,7 +1135,8 @@ export function OrderChatbot() {
   }
 
   // "족발 빼줘", "소떡소떡 취소": 담은 메뉴 중 그 메뉴만 뺀다. 마지막 메뉴를 빼면 주문을 접는다. 뺄 메뉴 이름이 없으면 false
-  function removeFromCart(text: string, bag: Order): boolean {
+  // resume: 다른 메뉴의 수량·맛을 묻는 중에 뺐을 때, 빼고 나서 다시 보여 줄 그 질문 (장바구니 카드·주문서 대신)
+  function removeFromCart(text: string, bag: Order, resume?: () => NewMessage): boolean {
     if (!/빼|제외|취소|지워|삭제|없애/.test(text)) return false;
     const typed = squash(text);
     const named = new Set(findDeliveryItems(text, bag.storeId).map((d) => d.name));
@@ -1151,6 +1157,11 @@ export function OrderChatbot() {
     }
     const removed = withObjectParticle(targets.map((i) => itemText(bag.items[i])).join(", "));
     const next = withItems(bag, bag.items.filter((_, i) => !targets.includes(i)));
+    if (resume) {
+      cartRef.current = next.items.length ? next : null; // 묻던 질문(수량·맛)은 그대로 이어 간다
+      botReply(() => push(botText(`${removed} 뺐어요.`), resume()));
+      return true;
+    }
     if (!next.items.length) {
       startFresh();
       setStage("idle");
@@ -1188,7 +1199,7 @@ export function OrderChatbot() {
       return true;
     }
     const next = replaceItem(bag, at, makeOrderItem(item, n));
-    const note = `${bag.items.length > 1 ? `${item.name} ` : ""}수량을 ${n}${item.unit}로 바꿨어요.`;
+    const note = `${bag.items.length > 1 ? `${item.name} ` : ""}수량을 ${withRoParticle(`${n}${item.unit}`)} 바꿨어요.`;
     if (stage === "cart") showCart(next, note);
     else showOrderCard(next, [botText(note)]);
     return true;
@@ -1426,7 +1437,7 @@ export function OrderChatbot() {
         setLastItem(lastItemOf(base));
         setCart(base);
         setStage("confirm");
-        push(...goneNote(gone), botText(`지난번에 드신 ${orderItemText(base)}로 주문서를 만들었어요.`), { role: "bot", kind: "order", order: base });
+        push(...goneNote(gone), botText(`지난번에 드신 ${withRoParticle(orderItemText(base))} 주문서를 만들었어요.`), { role: "bot", kind: "order", order: base });
       };
     });
   }
@@ -1515,6 +1526,11 @@ export function OrderChatbot() {
   }
 
   function handleAccepted(text: string) {
+    // 문의 안내의 "문의하러 가기" 버튼: 해시 주소라 주소만 바꾸면 그 화면으로 간다
+    if (text === INQUIRY_CHOICE.value && session && session.role !== "admin") {
+      window.location.assign("#/inquiry");
+      return;
+    }
 
     // "치킨집 예약", "근처 맛집": 메뉴 이름(치킨)이 들어 있어도 식당·예약 말이면 배달이 아니라 식당 찾기로 본다
     const wantsRestaurant = menuIntent(text) === "식당";
@@ -1674,6 +1690,9 @@ export function OrderChatbot() {
         botReply(() => push(choicePrompt(choosing.item, choosing.qty, lead)));
         return;
       }
+      // 맛을 고르는 중에 "치즈볼 빼줘": 담아 둔 메뉴에서 빼고, 맛 고르기를 다시 보여 준다
+      const held = cart();
+      if (held?.items.length && removeFromCart(text, held, () => choicePrompt(choosing.item, choosing.qty))) return;
       if (isNo(text)) {
         cancelDelivery();
         return;
@@ -1687,6 +1706,9 @@ export function OrderChatbot() {
 
     // 배달 수량: 숫자만 오면 그 수량으로 주문서를 만든다. 다른 메뉴를 말하면 아래 일반 처리에서 메뉴부터 다시 받는다
     if (stage === "qty" && pendingItem) {
+      // 수량을 묻는 중에 "치즈볼 빼줘": 담아 둔 메뉴에서 빼고, 묻던 수량을 다시 묻는다
+      const held = cart();
+      if (held?.items.length && removeFromCart(text, held, () => deliveryQty(pendingItem))) return;
       const qty = parseQuantity(text);
       // "1세트"처럼 단위가 메뉴 키워드("세트")와 같아도 수량으로 본다. 수량 표현을 빼고도 다른 메뉴가 걸릴 때만 메뉴를 다시 받는다
       if (qty !== undefined && findDeliveryItems(withoutQuantity(text, pendingItem.unit)).every((d) => d.id === pendingItem.id)) {
@@ -1927,6 +1949,19 @@ export function OrderChatbot() {
     }
 
     if (intent === "deals") return showDeals();
+    // "문의할래", "고객센터": 관리자에게 문의하는 화면으로 안내한다 (답을 받으려면 로그인해야 한다)
+    if (intent === "inquiry") {
+      startFresh();
+      if (!session || session.role === "admin") {
+        setStage("needLogin");
+        botReply(() => push(botPrompt({ text: "관리자에게 문의는 로그인한 뒤에 남길 수 있어요.\n답변을 받을 계정이 필요해요.", choices: [LOGIN_CHOICE], noDirect: true })));
+        return;
+      }
+      setStage("idle");
+      const text = "관리자에게 문의를 남기시면 확인하고 답해 드려요.\n아래 버튼을 누르면 문의 화면으로 가요.";
+      botReply(() => push(botPrompt({ text, say: text.replace("\n", " "), choices: [INQUIRY_CHOICE], noDirect: true })));
+      return;
+    }
     if (intent === "hungry") return showRecommendations();
 
     if (intent === "greeting" || intent === "thanks") {
@@ -2394,7 +2429,7 @@ export function OrderChatbot() {
                   <Fragment key={i}>
                     <dt>{row.label}</dt>
                     <dd className={row.emphasis ? "price" : undefined}>
-                      {row.tel ? <TelLink phone={row.value} /> : row.value}
+                      {row.tel ? <TelLink phone={row.value} /> : row.copy ? <AccountText value={row.value} /> : row.value}
                       {row.copy && <CopyButton text={row.copy} label="계좌번호 복사" />}
                     </dd>
                   </Fragment>

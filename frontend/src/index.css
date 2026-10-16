@@ -287,6 +287,8 @@ html[data-keyboard] .caption-text.long { font-size: 15px; }
 @media (prefers-reduced-motion: reduce) {
   .voice-caption, .caption-dots span { animation: none; }
 }
+/* 계좌번호처럼 줄 중간에서 끊기면 안 되는 글자 (CopyButton.tsx 의 AccountText) */
+.nowrap { white-space: nowrap; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;

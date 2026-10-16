@@ -10,7 +10,7 @@ import { formatDateTime } from "./format";
 
 // 실제 앱은 화면을 그 화면에 갈 때 받지만(routes.ts 의 lazy), 테스트에서는 바로 받아 동기로 그린다
 vi.mock("./routes", async () => {
-  const [login, signup, me, owner, admin, privacy, account, reset, app] = await Promise.all([
+  const [login, signup, me, owner, admin, privacy, account, reset, app, inquiry] = await Promise.all([
     import("./LoginPage"),
     import("./SignupPage"),
     import("./MyOrdersPage"),
@@ -20,6 +20,7 @@ vi.mock("./routes", async () => {
     import("./AccountPage"),
     import("./ResetPasswordPage"),
     import("./AppDownloadPage"),
+    import("./InquiryPage"),
   ]);
   return {
     LoginPage: login.LoginPage,
@@ -31,6 +32,7 @@ vi.mock("./routes", async () => {
     AccountPage: account.AccountPage,
     ResetPasswordPage: reset.ResetPasswordPage,
     AppDownloadPage: app.AppDownloadPage,
+    InquiryPage: inquiry.InquiryPage,
   };
 });
 
@@ -800,7 +802,8 @@ describe("계좌이체 (사장님·관리자·내 주문)", () => {
     void expired;
     await loginAs(KIM.username);
     open("#/me");
-    expect(await screen.findByText(`${TEST_BANK.bank} ${TEST_BANK.account}`, { exact: false })).toBeInTheDocument();
+    // 계좌번호는 줄 중간에서 끊기지 않게 따로 감싸 그리므로, 칸(dd) 전체 글자로 찾는다
+    await waitFor(() => expect(screen.getAllByRole("definition").some((dd) => dd.textContent?.startsWith(`${TEST_BANK.bank} ${TEST_BANK.account}`))).toBe(true));
     expect(screen.getByRole("button", { name: "계좌번호 복사: 00000000000" })).toBeInTheDocument();
     expect(screen.getByText(/까지 \(지나면 자동 취소\)/)).toBeInTheDocument();
     expect(screen.getByText("입금 기한이 지나 자동으로 취소됐어요.")).toBeInTheDocument();
@@ -849,7 +852,7 @@ describe("개인정보 처리방침", () => {
     open("#/privacy");
     expect(await screen.findByRole("heading", { name: "1. 수집하는 개인정보" })).toBeInTheDocument();
     expect(screen.getByText("Resend, Inc. (미국)")).toBeInTheDocument();
-    expect(screen.getByText(/2026년 10월 15일부터 적용돼요/)).toBeInTheDocument();
+    expect(screen.getByText(/2026년 10월 16일부터 적용돼요/)).toBeInTheDocument();
   });
 });
 
@@ -1251,13 +1254,74 @@ describe("매장 일시 중지 (사장님·관리자 화면)", () => {
   });
 });
 
+describe("관리자에게 문의", () => {
+  const ADMIN = { username: "adminuser", name: "관리자", role: "admin" as const };
+
+  it("고객님이 문의를 보내면 내 문의에 '답변 대기'로 쌓이고, 관리자가 문의 탭에서 답하면 고객님이 답을 본다", async () => {
+    server.createAccount({ ...KIM, email: "kim@example.com" });
+    server.createAccount(ADMIN);
+    await loginAs(KIM.username);
+    open("#/inquiry");
+    expect(await screen.findByRole("heading", { name: "문의 보내기" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "관리자에게 문의" })).not.toBeInTheDocument(); // 이 화면에서는 아래 링크를 감춘다
+    expect(await screen.findByText("아직 보낸 문의가 없어요.")).toBeInTheDocument();
+
+    // 분류와 5자 이상 내용이 있어야 보낸다
+    fireEvent.click(screen.getByRole("button", { name: "문의 보내기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("문의 분류를 골라 주세요");
+    fireEvent.click(screen.getByRole("radio", { name: "결제·환불" }));
+    fireEvent.change(screen.getByLabelText("문의 내용"), { target: { value: "입금" } });
+    fireEvent.click(screen.getByRole("button", { name: "문의 보내기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("5자 이상");
+    fireEvent.change(screen.getByLabelText("문의 내용"), { target: { value: "입금했는데 아직 입금 대기로 나와요." } });
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "문의 보내기" })));
+    expect(await screen.findByRole("status")).toHaveTextContent("문의를 보냈어요");
+    expect(await screen.findByText("입금했는데 아직 입금 대기로 나와요.")).toBeInTheDocument();
+    expect(screen.getByText("답변 대기")).toBeInTheDocument();
+    expect(screen.getByLabelText("문의 내용")).toHaveValue("");
+    cleanup();
+
+    // 관리자: 문의 탭에 답변 대기 수가 뜨고, 카드에서 답한다
+    await logout();
+    await loginAs(ADMIN.username);
+    open("#/admin");
+    const tab = await screen.findByRole("tab", { name: /문의/ });
+    await waitFor(() => expect(tab).toHaveTextContent("문의1"));
+    fireEvent.click(tab);
+    expect(await screen.findByText("김소비 · 고객님 · customer01")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("답변"), { target: { value: "가게에 확인했어요. 곧 접수돼요." } });
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "답변 보내기" })));
+    expect(await screen.findByText("답변을 기다리는 문의가 없어요.")).toBeInTheDocument();
+    expect(server.db.listInquiries({ username: KIM.username })[0].answer).toBe("가게에 확인했어요. 곧 접수돼요.");
+    cleanup();
+
+    await logout();
+    await loginAs(KIM.username);
+    open("#/inquiry");
+    expect(await screen.findByText("가게에 확인했어요. 곧 접수돼요.")).toBeInTheDocument();
+    expect(screen.getByText("답변 완료")).toBeInTheDocument();
+  });
+
+  it("사장님은 사장님 화면 아래 링크와 계정 관리에서 문의 화면으로 간다", async () => {
+    server.createAccount({ username: "chickenboss", name: "치킨 사장", role: "owner", storeId: "h3" });
+    await loginAs("chickenboss");
+    open("#/owner");
+    expect(await screen.findByRole("link", { name: "관리자에게 문의" })).toHaveAttribute("href", "#/inquiry");
+    cleanup();
+    open("#/account");
+    expect(await screen.findByRole("heading", { name: "관리자에게 문의" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "문의하기" })).toHaveAttribute("href", "#/inquiry");
+  });
+});
+
 describe("장바구니 주문 (사장님·관리자·내 주문 화면)", () => {
   const boss = { username: "chickenboss", name: "치킨 사장", role: "owner" as const, storeId: "h3" };
   const yangnyeom = { ...chicken, id: "x-yangnyeom", name: "양념치킨", price: 21000 };
   const set = { ...chicken, id: "x-set", name: "2마리 치킨 세트", price: 26000, unit: "세트", choice: { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "블랙스완 파닭", extra: 1000 }] } };
   // 간장치킨 1마리 20,000 + 양념치킨 2마리 42,000 + 세트 1세트 27,000(맛 추가금 1,000) = 89,000원
   const cartOrder = () => addItem(addItem(makeOrder(chicken, 1, TEST_DELIVERY), makeOrderItem(yangnyeom, 2)), makeOrderItem(set, 1, set.choice.options));
-  const HEAD = "간장치킨 1마리, 양념치킨 2마리, 2마리 치킨 세트 1세트";
+  // 카드 위 칸은 첫 메뉴 + "외 N가지", 전체는 카드 안 "메뉴" 줄에 한 줄씩
+  const HEAD = "간장치킨 1마리 외 2가지";
 
   it("사장님 화면: 주문 카드에 담은 메뉴를 줄줄이, 세트의 맛은 그 메뉴 이름과 함께, 금액은 합계로 보이고 매출 통계는 메뉴마다 센다", async () => {
     server.createAccount(boss);
@@ -1266,8 +1330,10 @@ describe("장바구니 주문 (사장님·관리자·내 주문 화면)", () => 
     open("#/owner");
     expect(await screen.findByText(HEAD)).toBeInTheDocument();
     expect(screen.getByText("89,000원")).toBeInTheDocument();
-    expect(screen.getByText("2마리 치킨 세트 맛")).toBeInTheDocument();
-    expect(screen.getByText("간장 파닭, 블랙스완 파닭(+1,000원)")).toBeInTheDocument();
+    for (const [line, price] of [["간장치킨 1마리", "20,000원"], ["양념치킨 2마리", "42,000원"], ["2마리 치킨 세트 1세트", "27,000원"]]) {
+      expect(screen.getByText(line, { selector: ".order-line-name" }).nextElementSibling).toHaveTextContent(price);
+    }
+    expect(screen.getByText("맛: 간장 파닭, 블랙스완 파닭(+1,000원)")).toBeInTheDocument(); // 세트의 맛은 그 메뉴 바로 아래
 
     fireEvent.click(screen.getByRole("tab", { name: "매출" }));
     const row = (name: string) => screen.getByText(name, { selector: "td" }).closest("tr")!.textContent;
@@ -1294,7 +1360,7 @@ describe("장바구니 주문 (사장님·관리자·내 주문 화면)", () => 
     fireEvent.click(await screen.findByRole("tab", { name: "거래 내역" }));
     expect((await screen.findAllByText(HEAD)).length).toBeGreaterThan(0);
     expect(screen.getAllByText("89,000원").length).toBeGreaterThan(0);
-    expect(screen.getByText("2마리 치킨 세트 맛")).toBeInTheDocument();
+    expect(screen.getByText("맛: 간장 파닭, 블랙스완 파닭(+1,000원)")).toBeInTheDocument();
     cleanup();
 
     await logout();

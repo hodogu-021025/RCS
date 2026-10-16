@@ -4,6 +4,7 @@
 //   RESEND_API_KEY  Resend 대시보드의 API 키 (re_…). 없으면 개발 중엔 콘솔에 번호를 찍고, 운영에선 발송 거절
 //   MAIL_FROM       보내는 사람. Resend 에 인증한 도메인 주소여야 아무에게나 보낼 수 있다
 //   ADMIN_USERNAME / ADMIN_PASSWORD   관리자 계정이 하나도 없을 때 처음 한 번 만든다
+//   ADMIN_NOTIFY_EMAIL  새 문의가 오면 알림 메일을 받을 관리자 주소 (비우면 보내지 않는다)
 import http from "node:http";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -59,7 +60,7 @@ function purgeExpiredOrders() {
 purgeExpiredOrders();
 setInterval(purgeExpiredOrders, 24 * 60 * 60_000).unref();
 
-const server = http.createServer(createApp({ db, verifier, mailer }));
+const server = http.createServer(createApp({ db, verifier, mailer, adminEmail: process.env.ADMIN_NOTIFY_EMAIL?.trim() }));
 server.listen(PORT, () => {
   console.log(`Saylo API :${PORT} · DB ${join(DATA_DIR, "saylo.db")} · 메일 ${mailer.describe}`);
 });

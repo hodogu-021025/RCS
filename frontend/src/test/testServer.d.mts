@@ -36,6 +36,8 @@ export interface TestDb {
   addStore(store: { name: string; food: string; hours: string; address?: string; signature?: string }): { id: string; name: string };
   storeById(id: string): { id: string; name: string; food: string; hours: string; address?: string; signature?: string; source: "admin" } | null;
   addMenuItem(item: { restaurantId: string; name: string; price: number; unit: string; keywords: string[]; choice?: { label: string; count: number; options: { name: string; extra: number }[] } }): { id: string };
+  // 관리자에게 보낸 문의
+  listInquiries(filter?: { username?: string }): { id: string; username: string; category: string; body: string; answer?: string }[];
 }
 
 export interface TestServer {
