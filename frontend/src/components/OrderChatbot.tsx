@@ -51,6 +51,8 @@ import {
   storeOrder,
   withItems,
   menusNamedIn,
+  orderPriceLabel,
+  itemPriceLabel,
   checkVisitTime,
   orderCardRows,
   datePrompt,
@@ -226,6 +228,8 @@ const DROP_ALL = /그만\s?(할|둘|하|해)|주문\s?안\s?(할|해)|안\s?(먹
 // 더 담겠다는 말 ("더 담기", "더 시킬게", "추가할래"). "더 담을 거 없어"처럼 뒤집는 말은 아니다
 const MORE = /더\s?담|더\s?시킬|더\s?주문|추가(할|로|하고|해)/;
 const MORE_NEGATED = /없|안\s|됐|괜찮|그만/;
+// 값을 묻는 말: "얼마야?", "다 해서 얼마", "합계", "간장치킨 가격"
+const PRICE_ASK = /얼마|합계|총\s?(액|금액)|금액|가격/;
 // 담아 둔 메뉴를 다시 보자는 말: "장바구니", "담은 거 보여줘", "담아 둔 메뉴"
 const CART_WORDS = /장바구니|담은\s?(거|것|메뉴)|담아\s?둔/;
 // 담긴 메뉴의 수량을 바꾸는 말: "1마리로", "3묶음으로 해줘", "2개로 바꿔", "수량 변경"
@@ -502,7 +506,7 @@ export function OrderChatbot() {
   const [stage, setStage] = useState<Stage>("idle");
   // 장바구니: 담은 메뉴들이 든 주문서. 담는 중(cart)·더 담을 메뉴의 수량·맛 고르기·주문서 확인(confirm) 동안 유지된다.
   // 한 처리 안에서 담은 직후 바로 읽어야 하는 곳이 있어(상태는 다음 렌더에 바뀐다) ref 로도 든다
-  const [order, setOrder] = useState<Order | null>(null);
+  const [, setOrder] = useState<Order | null>(null); // 값은 cartRef 로 읽는다 (바뀌면 다시 그리게 상태로도 둔다)
   const cartRef = useRef<Order | null>(null);
   const cart = () => cartRef.current;
   function setCart(next: Order | null) {
@@ -846,9 +850,21 @@ export function OrderChatbot() {
 
   // 담은 메뉴로 주문서를 보여 주고 "응 해줘"를 기다린다
   function showOrderCard(next: Order, lead: NewMessage[] = []) {
-    setCart(next);
+    // 담은 뒤 사장님이 가격·할인을 바꿨으면 지금 가격으로 다시 계산해 보여 준다 (주문 금액은 서버가 지금 가격으로 정한다)
+    const fresh = repriced(next);
+    const changed = !!fresh && fresh.price !== next.price;
+    const card = changed ? fresh : next;
+    setCart(card);
     setStage("confirm");
-    botReply(() => push(...lead, { role: "bot", kind: "order", order: next }));
+    const note: NewMessage[] = changed ? [botText("담으신 뒤 가격이 바뀌어 지금 가격으로 다시 계산했어요.")] : [];
+    botReply(() => push(...lead, ...note, { role: "bot", kind: "order", order: card }));
+  }
+
+  // 담은 메뉴를 지금 메뉴 목록·가격으로 다시 계산한 주문서. 그사이 담을 수 없게 된 메뉴가 있으면 null (주문하면 서버가 그 이유를 알린다)
+  function repriced(o: Order): Order | null {
+    const { lines, gone, repick } = rebuildLines(o.storeId ?? "", o.items);
+    if (gone.length || repick || lines.length !== o.items.length) return null;
+    return withItems(o, lines);
   }
 
   // 장바구니를 로그인·배달지 등록 뒤에 이어 가려고 기억해 둘 모양 (메뉴 id·수량·고른 맛 이름)
@@ -1108,6 +1124,20 @@ export function OrderChatbot() {
     showOrderCard(bag, [botText("고르시던 메뉴는 담지 않고, 담아 두신 메뉴로 주문서를 보여 드릴게요.")]);
   }
 
+  // "얼마야?": 담은 메뉴 이름을 말했으면 그 줄의 금액, 담지 않은 메뉴면 1단위 값, 아니면 합계(메뉴가 여럿이면 줄마다)를 알려 주고 묻던 것을 다시 묻는다
+  function answerPrice(text: string, bag: Order, inCart: boolean) {
+    const named = findDeliveryItems(text, bag.storeId);
+    const inBag = bag.items.filter((l) => named.some((d) => d.name === l.item));
+    const answer = inBag.length
+      ? `${inBag.map((l) => `${itemText(l)} ${itemPriceLabel(l)}`).join(", ")}이에요.`
+      : named.length === 1
+        ? `${withTopicParticle(named[0].name)} 1${named[0].unit}에 ${priceText(named[0])}이에요.`
+        : `지금 담은 메뉴는 모두 ${orderPriceLabel(bag)}이에요.${bag.items.length > 1 ? `\n${bag.items.map((l) => `${itemText(l)} ${won(l.price)}`).join(", ")}` : ""}`;
+    botReply(() =>
+      push(botText(`${answer}\n${inCart ? CART_QUESTION : ORDER_CARD_QUESTION}`), ...(inCart ? [] : [{ role: "bot", kind: "confirm" } as NewMessage])),
+    );
+  }
+
   // 담은 메뉴를 모두 비우고 주문을 접는다
   function cancelAll() {
     startFresh();
@@ -1182,6 +1212,34 @@ export function OrderChatbot() {
       );
       return true;
     }
+    // 한 메뉴를 담긴 수량보다 적게 말했으면("3마리 중 1마리 빼줘") 그만큼만 뺀다
+    const less = parseQuantity(text);
+    const one = targets.length === 1 ? bag.items[targets[0]] : undefined;
+    if (one && less !== undefined && less >= 1 && less < one.qty) {
+      const left = one.qty - less;
+      const gone = withObjectParticle(itemText({ ...one, qty: less }));
+      const item = availableDeliveryMenu().find((d) => d.restaurantId === bag.storeId && d.name === one.item);
+      // 세트는 남은 세트 수만큼 맛을 다시 고른다 (고르면 다시 담긴다)
+      if (one.choices?.length && item?.choice && !resume) {
+        const rest = replaceItem(bag, targets[0]);
+        setCart(rest.items.length ? rest : null);
+        notesRef.current = { added: [], notes: [`${gone} 뺐어요. 남은 ${left}${one.unit}의 ${withObjectParticle(one.choiceLabel ?? "맛")} 다시 골라 주세요.`] };
+        backToOrderRef.current = stage === "confirm";
+        startOrder(item, left);
+        return true;
+      }
+      if (!one.choices?.length) {
+        const each = (v: number | undefined) => (v === undefined ? undefined : (v / one.qty) * left);
+        const listPrice = each(one.listPrice);
+        const fewer = replaceItem(bag, targets[0], { ...one, qty: left, price: each(one.price)!, ...(listPrice !== undefined ? { listPrice } : {}) });
+        if (resume) {
+          cartRef.current = fewer;
+          botReply(() => push(botText(`${gone} 뺐어요.`), resume()));
+        } else if (stage === "cart") showCart(fewer, `${gone} 뺐어요.`);
+        else showOrderCard(fewer, [botText(`${gone} 뺐어요.`)]);
+        return true;
+      }
+    }
     const removed = withObjectParticle(targets.map((i) => itemText(bag.items[i])).join(", "));
     const next = withItems(bag, bag.items.filter((_, i) => !targets.includes(i)));
     if (resume) {
@@ -1197,6 +1255,31 @@ export function OrderChatbot() {
     }
     if (stage === "cart") showCart(next, `${removed} 뺐어요.`);
     else showOrderCard(next, [botText(`${removed} 뺐어요.`)]);
+    return true;
+  }
+
+  // "간장치킨 말고 양념치킨으로", "치즈볼 대신 감자튀김": 담긴 앞 메뉴를 빼고 뒤 메뉴를 담는다. 바꾸는 말이 아니면 false
+  function replaceInCart(text: string, bag: Order): boolean {
+    const word = /말고|대신/.exec(text);
+    if (!word) return false;
+    const named = menusNamedIn(text);
+    const from = named.filter((n) => n.start < word.index).at(-1);
+    const to = named.find((n) => n.start > word.index);
+    if (!from || !to || to.item.restaurantId !== bag.storeId) return false;
+    const at = bag.items.findIndex((l) => l.item === from.item.name);
+    const item = availableDeliveryMenu().find((d) => d.id === to.item.id);
+    if (at < 0 || !item) return false;
+    const old = bag.items[at];
+    const said = parseQuantity(to.part);
+    const qty = qtyInRange(said) ? said : old.unit === item.unit ? old.qty : 1;
+    const rest = replaceItem(bag, at);
+    setCart(rest.items.length ? rest : null);
+    setPendingItem(null);
+    setChoosing(null);
+    queueRef.current = [];
+    notesRef.current = { added: [], notes: [`${withObjectParticle(itemText(old))} 뺐어요.`] };
+    backToOrderRef.current = stage === "confirm";
+    startOrder(item, qty);
     return true;
   }
 
@@ -1588,9 +1671,17 @@ export function OrderChatbot() {
     if (earlier) {
       // 보여 드린 주문서와 장바구니 (같은 주문서가 장바구니로도 주문서로도 나왔으면 한 번만)
       const shown = messages.flatMap((m) => (m.role === "bot" && (m.kind === "order" || m.kind === "cart") ? [m.order] : [])).filter((o, i, all) => all.indexOf(o) === i);
-      const draft = earlier.first ? shown[0] : shown.filter((o) => o !== order).at(-1);
+      // 바로 다음 모습이 이 모습에 메뉴를 더 담기만 한 것이면(같은 가게, 이 모습의 메뉴가 같거나 많은 수량으로 다 들어 있음) 담는 도중이라 뺀다
+      const grows = (a: Order, b: Order) => a.storeId === b.storeId && a.items.every((l) => b.items.some((m) => m.item === l.item && m.qty >= l.qty));
+      const drafts = shown.filter((o, i) => !(shown[i + 1] && grows(o, shown[i + 1])));
+      const draft = earlier.first ? drafts[0] : drafts.filter((o) => o !== cart()).at(-1);
       if (draft) {
         restoreOrder(draft, text, earlier.first);
+        return;
+      }
+      // 되살릴 다른 주문서가 없는데 담는 중이면 지금 담은 메뉴를 그대로 보여 준다 (방금 담은 메뉴를 버리지 않게)
+      if (bag?.items.length) {
+        showCart(bag, "지금 담아 두신 메뉴예요.");
         return;
       }
     }
@@ -1634,11 +1725,33 @@ export function OrderChatbot() {
         );
         return;
       }
-      // "더 담기", "더 시킬게": 그 가게 메뉴를 보여 준다 (메뉴 이름을 같이 말했으면 아래에서 바로 담는다. "더 담을 거 없어"는 아니다)
-      if (inCart && MORE.test(text) && !MORE_NEGATED.test(text) && findDeliveryItems(text).length === 0) {
+      const namesMenu = findDeliveryItems(text).length > 0;
+      // "얼마야?", "다 해서 얼마": 합계를, 메뉴 이름을 말했으면 그 메뉴 값을 알려 주고 묻던 것을 다시 묻는다
+      if (PRICE_ASK.test(text)) {
+        answerPrice(text, bag, inCart);
+        return;
+      }
+      // 메뉴 이름 없이 "하나 더", "두 개 더": 마지막에 담은 메뉴를 그만큼 더 담는다. "추가", "더"만 말하면 그 가게 메뉴를 보여 준다
+      if (!namesMenu && /더|추가|또/.test(text) && !MORE_NEGATED.test(text)) {
+        const n = parseQuantity(text);
+        const last = lastItemOf(bag);
+        if (n !== undefined && last) {
+          if (!qtyInRange(n)) botReply(() => push(botText(rangeLead(last))));
+          else startOrder(last, n);
+          return;
+        }
+        if (n === undefined && /^\s*(추가|더)\s*(요|해\s?줘|줘|할게요?|할래요?)?\s*[.!?~]*\s*$/.test(text)) {
+          showMoreMenu(bag);
+          return;
+        }
+      }
+      // "더 담기", "더 시킬게": 그 가게 메뉴를 보여 준다 (주문서를 보는 중에도. 메뉴 이름을 같이 말했으면 아래에서 바로 담는다. "더 담을 거 없어"는 아니다)
+      if (MORE.test(text) && !MORE_NEGATED.test(text) && !namesMenu) {
         showMoreMenu(bag);
         return;
       }
+      // "간장치킨 말고 양념치킨으로": 바꿔 담는다
+      if (replaceInCart(text, bag)) return;
       // "족발 빼줘": 그 메뉴만 뺀다. "3개로 해줘": 수량을 바꾼다 ("해줘"가 들어 있어도 '응'보다 먼저 본다)
       if (removeFromCart(text, bag)) return;
       if (changeCartQty(text, bag)) return;
@@ -1670,8 +1783,12 @@ export function OrderChatbot() {
       }
       // 담는 중: "그만 담을게", "더 안 시킬게", "이제 됐어", "아니"는 더 담지 않겠다는 말(주문서로). 주문서를 보는 중에는 '응'만 주문한다
       const done = isYes(text) || (inCart && (DONE_ADDING.test(text) || isNo(text)));
-      if (!done && (DROP_ALL.test(text) || (!inCart && isNo(text)))) {
+      if (!done && DROP_ALL.test(text)) {
         cancelAll();
+        return;
+      }
+      if (!done && !inCart && isNo(text)) {
+        showCart(bag, "주문하지 않고, 담은 메뉴는 그대로 둘게요.\n더 담거나 빼실 수 있어요. 모두 지우려면 '취소'라고 말씀해 주세요.");
         return;
       }
       if (done) {
@@ -2146,6 +2263,16 @@ export function OrderChatbot() {
     setCart(null);
     setStage("done");
     botReplyAsync(async () => {
+      // 주문 직전에 매장 설정·메뉴를 새로 받아, 주문서를 보는 사이 가격이 바뀌었으면 주문하지 않고 바뀐 금액으로 다시 확인받는다
+      await refresh(["settings", "menu"]).catch(() => undefined);
+      const fresh = repriced(placed);
+      if (fresh && fresh.price !== placed.price) {
+        return () => {
+          setCart(fresh);
+          setStage("confirm");
+          push(botText("그사이 가격이 바뀌었어요. 바뀐 금액으로 다시 확인해 주세요."), { role: "bot", kind: "order", order: fresh });
+        };
+      }
       try {
         const rec = await addOrder(placed);
         return () => push({ role: "bot", kind: "info", card: transferCard(rec) });
