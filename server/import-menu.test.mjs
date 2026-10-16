@@ -1,53 +1,58 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { openDb } from "./db.mjs";
 import { applyMenuImport, planMenuImport } from "./import-menu.mjs";
 import { listedMenu } from "./stores.mjs";
 
 const newDb = () => {
   const db = openDb(":memory:");
-  const store = db.addStore({ name: "시험 파닭", food: "chicken", hours: "16:30 - 02:30" });
+  const store = db.addStore({ name: "시험 치킨집", food: "chicken", hours: "16:30 - 02:30" });
   return { db, storeId: store.id };
 };
-const menuFile = () => JSON.parse(readFileSync(new URL("./menus/motmalri-padak.json", import.meta.url), "utf8"));
+// 메뉴 목록 파일 견본: 한 마리 메뉴는 판매 중지로 두고 1마리 치킨·세트(맛 고르기)로 파는 가게
+const FLAVORS = [
+  { name: "후라이드", extra: 0 },
+  { name: "양념", extra: 0 },
+  { name: "뿌링클", extra: 1000 },
+];
+const menuFile = () => ({
+  storeName: "시험 치킨집",
+  items: [
+    { name: "1마리 치킨", price: 18000, unit: "마리", keywords: ["치킨"], choice: { label: "맛", count: 1, options: FLAVORS } },
+    { name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트", "치킨"], choice: { label: "맛", count: 2, options: FLAVORS } },
+    { name: "후라이드치킨", price: 18000, unit: "마리", keywords: ["후라이드"], active: false },
+    { name: "양념치킨", price: 18000, unit: "마리", keywords: ["양념"], active: false },
+    { name: "컵밥", price: 2000, unit: "개", keywords: ["컵밥"] },
+  ],
+  excluded: [{ name: "맥주", reason: "주류 성인 확인 기능이 없다" }],
+});
 
 describe("메뉴 목록 파일 한꺼번에 넣기 (import-menu.mjs)", () => {
-  it("못말리는파닭 메뉴 파일: 39개를 넣고, 치킨은 1마리 치킨과 세트 3개만 팔며 모두 맛 고르기가 붙는다", () => {
+  it("메뉴 파일을 넣고, 한 마리 메뉴는 판매 중지로, 1마리 치킨·세트는 맛 고르기를 붙여 판다. 다시 돌리면 건너뛴다", () => {
     const { db, storeId } = newDb();
     const data = menuFile();
     const plan = planMenuImport(db, storeId, data);
     assert.deepEqual(plan.errors, []);
-    assert.equal(plan.add.length, 39);
+    assert.equal(plan.add.length, 5);
     applyMenuImport(db, plan);
     const menu = listedMenu(db).filter((d) => d.restaurantId === storeId);
-    assert.equal(menu.length, 39);
-    const selling = menu.filter((d) => d.active);
-    assert.equal(selling.length, 14);
+    assert.equal(menu.length, 5);
+    assert.deepEqual(menu.filter((d) => d.active).map((d) => d.name), ["1마리 치킨", "2마리 치킨 세트", "컵밥"]);
     // 한 마리 메뉴는 판매 중지 (사장님 화면에서 다시 팔 수 있게 남겨 둔다)
-    assert.equal(menu.find((d) => d.name === "간장파닭").active, false);
+    assert.equal(menu.find((d) => d.name === "양념치킨").active, false);
     const set2 = menu.find((d) => d.name === "2마리 치킨 세트");
-    assert.equal(set2.active, true);
     assert.equal(set2.choice.count, 2);
-    assert.equal(set2.choice.options.length, 23);
-    assert.deepEqual(set2.choice.options.find((o) => o.name === "블랙스완 파닭"), { name: "블랙스완 파닭", extra: 1000 });
-    assert.ok(!set2.choice.options.some((o) => o.name.includes("수원왕갈비"))); // 빠진 메뉴
-    assert.equal(menu.find((d) => d.name === "4마리 치킨 세트").choice.count, 4);
-    // 1마리 치킨: 18,000원 + 맛 추가금 = 예전 한 마리 메뉴 값 (파닭 18,000 · 19,000 · 굽는 20,000원)
+    assert.deepEqual(set2.choice.options.find((o) => o.name === "뿌링클"), { name: "뿌링클", extra: 1000 });
     const one = menu.find((d) => d.name === "1마리 치킨");
-    assert.equal(one.active, true);
     assert.equal(one.price, 18000);
-    assert.equal(one.unit, "마리");
     assert.equal(one.choice.count, 1);
     assert.deepEqual(one.choice.options, set2.choice.options);
-    // 사이드에는 "치킨" 키워드를 넣지 않는다 ("치킨 시켜줘"에 떡볶이가 섞이지 않게)
-    assert.ok(!menu.find((d) => d.name === "컵밥").keywords.includes("치킨"));
-    for (const name of ["카스", "공기밥", "행복주택 제이앤비 (지역 배달비)"]) assert.ok(!menu.some((d) => d.name === name));
+    assert.ok(!menu.some((d) => d.name === "맥주")); // excluded 는 읽지 않는다
 
     // 다시 돌리면 이미 있는 메뉴는 건너뛴다
     const again = planMenuImport(db, storeId, data);
     assert.equal(again.add.length, 0);
-    assert.equal(again.skip.length, 39);
+    assert.equal(again.skip.length, 5);
   });
 
   it("--update: 이미 있는 메뉴를 파일대로 고친다 (맛 고르기 붙이기, 판매 중지·다시 판매). 가격은 고치지 않는다", () => {
@@ -61,13 +66,13 @@ describe("메뉴 목록 파일 한꺼번에 넣기 (import-menu.mjs)", () => {
     const plan = planMenuImport(db, storeId, menuFile(), { update: true });
     assert.deepEqual(plan.errors, []);
     assert.equal(plan.add.length, 0);
-    assert.equal(plan.update.length, 29); // 1마리 치킨·세트 3개(맛 고르기) + 예전 한 마리 메뉴 25개(판매 중지)
-    assert.deepEqual(plan.update.find((u) => u.name === "3마리 치킨 세트").changes, ["choice"]);
-    assert.deepEqual(plan.update.find((u) => u.name === "양념파닭").changes, ["active"]);
+    assert.equal(plan.update.length, 4); // 1마리 치킨·세트(맛 고르기) + 한 마리 메뉴 2개(판매 중지)
+    assert.deepEqual(plan.update.find((u) => u.name === "2마리 치킨 세트").changes, ["choice"]);
+    assert.deepEqual(plan.update.find((u) => u.name === "양념치킨").changes, ["active"]);
     applyMenuImport(db, plan);
     const menu = listedMenu(db).filter((d) => d.restaurantId === storeId);
-    assert.equal(menu.filter((d) => d.active).length, 14);
-    assert.equal(menu.find((d) => d.name === "3마리 치킨 세트").choice.count, 3);
+    assert.equal(menu.filter((d) => d.active).length, 3);
+    assert.equal(menu.find((d) => d.name === "2마리 치킨 세트").choice.count, 2);
     assert.equal(menu.find((d) => d.id === sideId).active, true);
     // 한 번 더 돌리면 고칠 게 없다
     assert.equal(planMenuImport(db, storeId, menuFile(), { update: true }).update.length, 0);
