@@ -160,10 +160,40 @@
       ]
     },
     {
+      "id": "j3",
+      "name": "족발 대",
+      "restaurantId": "h3",
+      "price": 44000,
+      "unit": "개",
+      "keywords": [
+        "족발"
+      ]
+    },
+    {
+      "id": "j4",
+      "name": "보쌈 소",
+      "restaurantId": "h3",
+      "price": 30000,
+      "unit": "개",
+      "keywords": [
+        "보쌈"
+      ]
+    },
+    {
       "id": "j2",
       "name": "보쌈 중",
       "restaurantId": "h3",
       "price": 36000,
+      "unit": "개",
+      "keywords": [
+        "보쌈"
+      ]
+    },
+    {
+      "id": "j5",
+      "name": "보쌈 대",
+      "restaurantId": "h3",
+      "price": 42000,
       "unit": "개",
       "keywords": [
         "보쌈"
