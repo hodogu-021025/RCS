@@ -1782,3 +1782,37 @@ describe("장바구니 세 번째 점검에서 찾은 문제", () => {
     expect(inCard("30,000원")).toBe(true);
   });
 });
+
+describe("장바구니: 주문을 마친 뒤 '하나 더', 종류만 말한 '치킨 하나 더'", () => {
+  beforeEach(() => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "양념치킨", price: 21000, unit: "마리", keywords: ["양념", "치킨"] });
+  });
+
+  it("주문을 마친 뒤 '하나 더'는 마지막에 고른 메뉴를 새로 담고, '두 개 더'는 그 수량으로 담는다", async () => {
+    await renderChat();
+    await say("양념치킨 1마리");
+    await click("이대로 주문");
+    await click("응 해줘");
+    expect(await find(/주문을 받았어요/)).toBeTruthy();
+    await say("하나 더");
+    expect(await find(/양념치킨 1마리를 담았어요/)).toBeTruthy();
+    expect(inCard("21,000원")).toBe(true);
+    await say("취소");
+    await say("두 개 더");
+    expect(await find(/양념치킨 2마리를 담았어요/)).toBeTruthy();
+  });
+
+  it("담는 중 '치킨 하나 더'는 담긴 치킨(마지막에 담은 것)을 더 담고, 그냥 '치킨'은 그중에서 고르게 한다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("양념치킨 1마리");
+    await say("치킨 하나 더");
+    expect(await find(/양념치킨 1마리를 담았어요/)).toBeTruthy();
+    expect(inCard("양념치킨 2마리 · 42,000원")).toBe(true);
+    await say("치킨 2마리 추가");
+    expect(inCard("양념치킨 4마리 · 84,000원")).toBe(true);
+    await say("치킨");
+    expect(await find(/이런 메뉴를 추천해요/)).toBeTruthy();
+    expect(buttonsIn(/이런 메뉴를 추천해요/)).toEqual(expect.arrayContaining(["간장치킨", "양념치킨"]));
+  });
+});

@@ -229,6 +229,8 @@ const DROP_ALL = /그만\s?(할|둘|하|해)|주문\s?안\s?(할|해)|안\s?(먹
 // 더 담겠다는 말 ("더 담기", "더 시킬게", "추가할래"). "더 담을 거 없어"처럼 뒤집는 말은 아니다
 const MORE = /더\s?담|더\s?시킬|더\s?주문|추가(할|로|하고|해)/;
 const MORE_NEGATED = /없|안\s|됐|괜찮|그만/;
+// 메뉴 이름 없이 "하나 더", "두 개 더", "더 추가": 마지막 메뉴를 그만큼 더 (주문을 마친 뒤에도 그 메뉴로 새로 담는다)
+const MORE_OF_LAST = /^\s*(하나|한\s?개|둘|두\s?개|셋|세\s?개|넷|네\s?개|\d+\s*[가-힣]*)?\s*(더|추가)\s*(요|해\s?줘|줘|주세요|할게요?|할래요?|시켜\s?줘|로)?\s*[.!~]*$/;
 // 값을 묻는 말: "얼마야?", "다 해서 얼마", "합계", "간장치킨 가격"
 const PRICE_ASK = /얼마|합계|총\s?(액|금액)|금액|가격/;
 // 담아 둔 메뉴를 다시 보자는 말: "장바구니", "담은 거 보여줘", "담아 둔 메뉴"
@@ -1019,6 +1021,11 @@ export function OrderChatbot() {
         return;
       }
       items = same;
+      // "치킨 하나 더": 종류만 말해 여러 메뉴에 걸려도 더 담는 말이면 담긴 메뉴로 본다 (마지막에 담은 것부터). 그냥 "치킨"이면 그중에서 고르게 한다
+      if (items.length > 1 && (/더|추가|또\s/.test(text) || parseQuantity(text) !== undefined)) {
+        const held = [...bag.items].reverse().map((l) => items.find((d) => d.name === l.item)).find(Boolean);
+        if (held) items = [held];
+      }
     }
     const said = parseQuantity(text);
     queueRef.current = [];
@@ -2050,6 +2057,12 @@ export function OrderChatbot() {
     // "아까 그거 하나 더": 이번 대화에서 말한 메뉴, 없으면 지난 주문
     if (refersToItem(text) && lastItem) {
       // 담아 둔 메뉴는 그대로 두고 그 메뉴를 더 담는다
+      startFresh(true);
+      deliverItems([lastItem], text);
+      return;
+    }
+    // "하나 더", "두 개 더": 주문을 마쳤거나 접은 뒤에도 마지막에 고른 메뉴를 그만큼 새로 담는다
+    if (MORE_OF_LAST.test(text) && !MORE_NEGATED.test(text) && lastItem) {
       startFresh(true);
       deliverItems([lastItem], text);
       return;
