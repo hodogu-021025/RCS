@@ -1748,7 +1748,8 @@ describe("장바구니 세 번째 점검에서 찾은 문제", () => {
     await type("간장 파닭, 양념 파닭, 굽는 불닭, 핫 파닭");
     expect(await find(/6가지를 골라 주세요\. 지금 4가지를 말씀하셨어요/)).toBeTruthy();
     await say("취소");
-    expect(await find(/배달 주문을 그만할게요|주문을 취소했어요/)).toBeTruthy(); // 두 줄을 뺀 뒤라 남은 메뉴가 없다
+    expect(await find(/바꾸지 않고 전처럼 둘게요/)).toBeTruthy(); // 고르다 취소하면 두 줄 그대로
+    expect(inCard("52,000원")).toBe(true);
   });
 
   it("수량을 바꾼 뒤 '아까 거로'는 바꾸기 전 모습을 되살리고, 더 담기만 한 앞 모습은 되살리지 않는다", async () => {
@@ -1814,5 +1815,59 @@ describe("장바구니: 주문을 마친 뒤 '하나 더', 종류만 말한 '치
     await say("치킨");
     expect(await find(/이런 메뉴를 추천해요/)).toBeTruthy();
     expect(buttonsIn(/이런 메뉴를 추천해요/)).toEqual(expect.arrayContaining(["간장치킨", "양념치킨"]));
+  });
+});
+
+describe("장바구니 네 번째 점검: 맛을 다시 고르다 취소하면 되돌린다", () => {
+  const SET = { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "굽는 불닭", extra: 2000 }, { name: "핫 파닭", extra: 0 }] };
+  beforeEach(() => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트"], choice: SET });
+  });
+
+  it("세트 수를 바꾸다 취소하면 원래 세트가 그대로 남는다 (주문서에서 바꾸던 중이면 주문서로)", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("2마리 치킨 세트");
+    await type("간장 파닭이랑 양념 파닭");
+    await wait();
+    await say("세트 2세트로");
+    expect(await find(/맛을 4가지 골라 주세요/)).toBeTruthy();
+    await type("취소");
+    expect(await find(/바꾸지 않고 전처럼 둘게요/)).toBeTruthy();
+    expect(inCard("2마리 치킨 세트 1세트 · 26,000원")).toBe(true);
+    expect(inCard("46,000원")).toBe(true);
+    await click("이대로 주문");
+    await say("세트 2세트로");
+    await type("아니");
+    expect(screen.getAllByText("주문할까요?").length).toBe(2);
+    expect(inCard("46,000원")).toBe(true);
+  });
+
+  it("바꿔 담으려던 세트의 맛 고르기를 취소하면 원래 메뉴가 그대로 남는다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("간장치킨 말고 2마리 치킨 세트로");
+    expect(await find(/맛을 2가지 골라 주세요/)).toBeTruthy();
+    await type("아니");
+    expect(await find(/바꾸지 않고 전처럼 둘게요/)).toBeTruthy();
+    expect(inCard("간장치킨 1마리")).toBe(true);
+    expect(screen.queryByText(/배달 주문을 그만할게요/)).not.toBeInTheDocument();
+  });
+
+  it("세트를 일부만 빼다 취소하면 원래 세트 수로 돌아가고, '이대로 주문'이면 원래 세트로 주문서를 보여 준다", async () => {
+    await renderChat();
+    await say("2마리 치킨 세트 2세트");
+    await type("간장 파닭, 양념 파닭, 굽는 불닭, 핫 파닭");
+    await wait();
+    await say("세트 1세트 빼줘");
+    expect(await find(/남은 1세트의 맛을 다시 골라 주세요/)).toBeTruthy();
+    await type("취소");
+    expect(await find(/바꾸지 않고 전처럼 둘게요/)).toBeTruthy();
+    expect(inCard("2마리 치킨 세트 2세트")).toBe(true);
+    expect(inCard("54,000원")).toBe(true);
+    await say("세트 1세트 빼줘");
+    await type("이대로 주문");
+    expect(await find(/주문할까요\?/)).toBeTruthy();
+    expect(inCard("54,000원")).toBe(true);
   });
 });

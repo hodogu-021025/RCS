@@ -523,6 +523,8 @@ export function OrderChatbot() {
   const queueRef = useRef<PendingAdd[]>([]);
   // 주문서를 보다가 세트 수를 바꿔 맛을 다시 고르는 중: 다 고르면 장바구니가 아니라 주문서로 돌아간다
   const backToOrderRef = useRef(false);
+  // 세트 수 바꾸기·바꿔 담기·세트 일부 빼기로 맛을 다시 고르는 동안 빼 둔 장바구니 (고르다 취소하면 이걸로 되돌린다)
+  const undoRef = useRef<{ cart: Order; toOrder: boolean } | null>(null);
   const notesRef = useRef<{ added: string[]; notes: string[] }>({ added: [], notes: [] });
   // 모아 둔 안내를 한 문장으로 꺼내고 비운다: "양념치킨은 지금 주문할 수 없어요. 간장치킨 1마리, 보쌈 중 2개를 담았어요."
   function takeNotesText(): string {
@@ -815,6 +817,7 @@ export function OrderChatbot() {
   // 장바구니에 담고 "더 담을까요?"를 묻는다. 같은 메뉴가 이미 있으면 합친다 (addItem).
   // 담은 메뉴가 있으면 같은 가게 것만 온다 (다른 가게 메뉴는 deliverItems 가 먼저 새로 시작할지 묻는다)
   function addToCart(item: DeliveryItem, qty: number, choices?: ChosenOption[]) {
+    undoRef.current = null;
     const line = makeOrderItem(item, qty, choices);
     const bag = cart();
     const base = bag && bag.storeId === item.restaurantId ? bag : storeOrder(item.restaurantId, [], deliveryInfo());
@@ -1108,6 +1111,16 @@ export function OrderChatbot() {
     setPendingQty(null);
     setChoosing(null);
     backToOrderRef.current = false;
+    // 세트 수를 바꾸거나 바꿔 담으려고 맛을 다시 고르던 중이면, 빼 두었던 메뉴를 되돌린다
+    const undo = undoRef.current;
+    if (undo) {
+      undoRef.current = null;
+      queueRef.current = [];
+      const note = "바꾸지 않고 전처럼 둘게요.";
+      if (undo.toOrder) showOrderCard(undo.cart, [botText(note)]);
+      else showCart(undo.cart, note);
+      return;
+    }
     const queued = queueRef.current.shift();
     if (queued) {
       notesRef.current.notes.push("그 메뉴는 담지 않을게요.");
@@ -1125,6 +1138,9 @@ export function OrderChatbot() {
 
   // 더 담을 메뉴의 수량·맛을 묻는 중에 "이대로 주문", "그만 담을게": 그 메뉴는 담지 않고 담아 둔 메뉴로 주문서를 보여 준다
   function skipToOrder(bag: Order) {
+    const undo = undoRef.current;
+    undoRef.current = null;
+    if (undo) bag = undo.cart; // 맛을 다시 고르던 중이면 빼 두었던 메뉴까지 그대로
     setPendingItem(null);
     setPendingQty(null);
     setChoosing(null);
@@ -1234,6 +1250,7 @@ export function OrderChatbot() {
         const rest = replaceItem(bag, targets[0]);
         setCart(rest.items.length ? rest : null);
         notesRef.current = { added: [], notes: [`${gone} 뺐어요. 남은 ${left}${one.unit}의 ${withObjectParticle(one.choiceLabel ?? "맛")} 다시 골라 주세요.`] };
+        undoRef.current = { cart: bag, toOrder: stage === "confirm" };
         backToOrderRef.current = stage === "confirm";
         startOrder(item, left);
         return true;
@@ -1291,6 +1308,7 @@ export function OrderChatbot() {
     setChoosing(null);
     queueRef.current = [];
     notesRef.current = { added: [], notes: [`${withObjectParticle(itemText(old))} 뺐어요.`] };
+    if (item.choice) undoRef.current = { cart: bag, toOrder: stage === "confirm" };
     backToOrderRef.current = stage === "confirm";
     startOrder(item, qty);
     return true;
@@ -1324,6 +1342,7 @@ export function OrderChatbot() {
     if (item.choice) {
       const rest = sameSet ? withItems(bag, bag.items.filter((l) => l.item !== target.item)) : replaceItem(bag, at);
       setCart(rest.items.length ? rest : null);
+      undoRef.current = { cart: bag, toOrder: stage === "confirm" };
       backToOrderRef.current = stage === "confirm";
       startOrder(item, n);
       return true;
@@ -1883,8 +1902,10 @@ export function OrderChatbot() {
       // 맛을 고르는 중에 "치즈볼 빼줘": 담아 둔 메뉴에서 빼고, 맛 고르기를 다시 보여 준다
       const held = cart();
       if (held?.items.length && removeFromCart(text, held, () => choicePrompt(choosing.item, choosing.qty))) return;
-      if (held?.items.length && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
-        skipToOrder(held);
+      // (맛을 다시 고르려고 빼 둔 메뉴가 있으면 그것까지 그대로)
+      const kept = held?.items.length ? held : undoRef.current?.cart;
+      if (kept && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
+        skipToOrder(kept);
         return;
       }
       if (isNo(text)) {
@@ -1910,8 +1931,10 @@ export function OrderChatbot() {
         else botReply(() => push(deliveryQty(pendingItem, rangeLead(pendingItem))));
         return;
       }
-      if (held?.items.length && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
-        skipToOrder(held);
+      // (맛을 다시 고르려고 빼 둔 메뉴가 있으면 그것까지 그대로)
+      const kept = held?.items.length ? held : undoRef.current?.cart;
+      if (kept && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
+        skipToOrder(kept);
         return;
       }
       if (isNo(text)) {
@@ -2249,6 +2272,7 @@ export function OrderChatbot() {
     setPendingSwitch(null);
     queueRef.current = [];
     backToOrderRef.current = false;
+    undoRef.current = null;
     notesRef.current = { added: [], notes: [] };
     setRsv(null);
     setRsvSlots({});
