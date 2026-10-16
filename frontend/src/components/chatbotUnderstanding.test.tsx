@@ -1674,7 +1674,7 @@ describe("장바구니 두 번째 점검에서 찾은 문제", () => {
     await say("치즈볼 얼마야?");
     expect(await find(/치즈볼 2개 10,000원이에요/)).toBeTruthy();
     await say("양념치킨 얼마야");
-    expect(await find(/양념치킨은 1마리에 21,000원이에요/)).toBeTruthy();
+    expect(await find(/양념치킨은 청전 치킨공방에서 1마리에 21,000원이에요/)).toBeTruthy();
     expect(inCard("양념치킨 1마리")).toBe(false); // 값만 알려 주고 담지 않는다
   });
 
@@ -1690,5 +1690,95 @@ describe("장바구니 두 번째 점검에서 찾은 문제", () => {
     await click("이대로 주문");
     await click("취소");
     expect(await find(/주문을 취소했어요/)).toBeTruthy();
+  });
+});
+
+describe("장바구니 세 번째 점검에서 찾은 문제", () => {
+  const SET = { label: "맛", count: 2, options: [{ name: "간장 파닭", extra: 0 }, { name: "양념 파닭", extra: 0 }, { name: "굽는 불닭", extra: 0 }, { name: "핫 파닭", extra: 0 }] };
+  beforeEach(() => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "양념치킨", price: 21000, unit: "마리", keywords: ["양념", "치킨"] });
+    server.db.addMenuItem({ restaurantId: "h3", name: "치즈볼", price: 5000, unit: "개", keywords: [] });
+  });
+
+  it("담지 않은 메뉴(다른 가게 것도)의 값을 물으면 그 가게의 1단위 값을 알려 준다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("옛날통닭 얼마야");
+    expect(await find(/옛날통닭은 장락 옛날통닭에서 1마리에 18,000원이에요/)).toBeTruthy();
+    expect(screen.getAllByText("더 담을까요?").length).toBeGreaterThan(0);
+  });
+
+  it("'A 빼고 B로'와 '~로 바꿔줘'(앞 메뉴를 말하지 않으면 마지막 메뉴)는 바꿔 담는다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("간장치킨 빼고 양념치킨으로");
+    expect(await find(/간장치킨 1마리를 뺐어요/)).toBeTruthy();
+    expect(inCard("양념치킨 1마리")).toBe(true);
+    expect(screen.queryByText(/주문을 접었어요/)).not.toBeInTheDocument();
+    await say("치즈볼 2개");
+    await say("간장치킨으로 바꿔줘"); // 단위가 다르면(개→마리) 1마리로 담는다
+    expect(await find(/치즈볼 2개를 뺐어요/)).toBeTruthy();
+    expect(inCard("간장치킨 1마리 · 20,000원")).toBe(true);
+    expect(inCard("41,000원")).toBe(true);
+  });
+
+  it("메뉴 이름 없이 '다 빼줘'·'장바구니 비워줘'는 모두 비운다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("치즈볼 1개");
+    await say("다 빼줘");
+    expect(await find(/주문을 취소했어요/)).toBeTruthy();
+    await say("간장치킨 1마리");
+    await say("장바구니 비워줘");
+    expect(screen.getAllByText(/주문을 취소했어요/).length).toBe(2);
+  });
+
+  it("같은 세트가 맛이 겹쳐 두 줄로 담겼을 때 세트 수를 바꾸면 두 줄을 합쳐 맛을 다시 고른다", async () => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "2마리 치킨 세트", price: 26000, unit: "세트", keywords: ["세트"], choice: SET });
+    await renderChat();
+    await say("2마리 치킨 세트");
+    await type("간장 파닭이랑 양념 파닭");
+    await wait();
+    await say("2마리 치킨 세트 하나 더");
+    await type("간장 파닭이랑 양념 파닭");
+    await wait();
+    expect(inCard("52,000원")).toBe(true);
+    await say("세트 3세트로 해줘");
+    expect(await find(/3세트의 맛을 6가지 골라 주세요/)).toBeTruthy();
+    await type("간장 파닭, 양념 파닭, 굽는 불닭, 핫 파닭");
+    expect(await find(/6가지를 골라 주세요\. 지금 4가지를 말씀하셨어요/)).toBeTruthy();
+    await say("취소");
+    expect(await find(/배달 주문을 그만할게요|주문을 취소했어요/)).toBeTruthy(); // 두 줄을 뺀 뒤라 남은 메뉴가 없다
+  });
+
+  it("수량을 바꾼 뒤 '아까 거로'는 바꾸기 전 모습을 되살리고, 더 담기만 한 앞 모습은 되살리지 않는다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("3마리로 해줘");
+    await say("아까 거로 할게");
+    expect(await find(/아까 고르신 간장치킨 1마리로 주문서를 다시 만들었어요/)).toBeTruthy();
+    await click("취소");
+    await say("간장치킨 1마리");
+    await say("치즈볼 1개");
+    await say("아까 거로 할게"); // 바로 앞 모습(간장치킨만)은 담는 도중이라 되살리지 않는다 → 그 전의 주문서(간장치킨 1마리)를 되살린다
+    expect(await find(/아까 고르신 간장치킨 1마리로 주문서를 다시 만들었어요/)).toBeTruthy();
+  });
+
+  it("로그인 전에 한 문장으로 여러 메뉴를 말하면 로그인하고 돌아와 모두 담는다", async () => {
+    await logout();
+    const first = render(<OrderChatbot />);
+    fireEvent.click(screen.getByRole("button", { name: "채팅창 켜기" }));
+    await act(() => refresh(["menu"])); // 사장님이 추가한 메뉴(치즈볼)를 받은 뒤에 말한다
+    await say("간장치킨 1마리랑 치즈볼 2개 주세요");
+    await find(/로그인한 뒤에 할 수 있어요/);
+    first.unmount();
+    await loginCustomer2();
+    await renderChat();
+    await wait();
+    expect(await find(/고르시던 배달 주문을 이어서 도와드릴게요/)).toBeTruthy();
+    expect(await find(/간장치킨 1마리를 담았어요/)).toBeTruthy();
+    expect(inCard("간장치킨 1마리 · 20,000원")).toBe(true);
+    expect(inCard("치즈볼 2개 · 10,000원")).toBe(true);
+    expect(inCard("30,000원")).toBe(true);
   });
 });
