@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { AccountText, CopyButton } from "./CopyButton";
 import { TelLink } from "./TelLink";
-import type { CaptionCard } from "./OrderChatbot";
+import type { CaptionCard, CaptionOption } from "./OrderChatbot";
 
 // 한 글자씩 나오는 간격. 긴 답은 조금 빠르게 적어 전체가 5초 안팎에 끝나게 한다
 const MAX_DELAY_MS = 45;
@@ -38,7 +38,7 @@ function Typewriter({ text, after }: { text: string; after?: ReactNode }) {
 
 // 자막 아래 표. 카드가 떠오르고 줄이 하나씩 차례로 나타난다 (--i: 줄 순서).
 // 메뉴·식당 목록 표는 줄을 눌러(또는 Enter·Space) 그 메뉴·식당을 고를 수 있다
-function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messageId: number, index: number) => void }) {
+function CaptionCards({ cards, onPick, onPickOption }: { cards: CaptionCard[]; onPick?: (messageId: number, index: number) => void; onPickOption?: (messageId: number, option: CaptionOption) => void }) {
   return (
     <div className="caption-cards">
       {cards.map((c) =>
@@ -46,6 +46,11 @@ function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messa
           // 맛 고르기: 채팅창과 같은 체크 표 (표가 자기 테두리를 가진다)
           <div key={c.key} className="caption-card picker">
             {c.picker}
+          </div>
+        ) : c.rows.length === 0 && c.options ? (
+          // 선택 버튼만 있는 답 (확인 질문·글 질문): 표 없이 버튼만
+          <div key={c.key} className="caption-options-only">
+            <CaptionOptions card={c} onPickOption={onPickOption} />
           </div>
         ) : (
           <div key={c.key} className={"caption-card" + (c.list ? " list" : "")}>
@@ -77,9 +82,23 @@ function CaptionCards({ cards, onPick }: { cards: CaptionCard[]; onPick?: (messa
                 );
               })}
             </dl>
+            {c.options && <CaptionOptions card={c} onPickOption={onPickOption} />}
           </div>
         ),
       )}
+    </div>
+  );
+}
+
+// 표 아래 선택 버튼 (더 담기·이대로 주문, 응 해줘·취소…): 채팅 말풍선의 버튼과 같은 말을 보낸다. 그 질문이 지금 차례일 때만 누를 수 있다
+function CaptionOptions({ card, onPickOption }: { card: CaptionCard; onPickOption?: (messageId: number, option: CaptionOption) => void }) {
+  return (
+    <div className="caption-choices" role="group" aria-label="선택">
+      {card.options!.map((o) => (
+        <button key={o.value} type="button" className={o.primary ? "primary" : undefined} disabled={!card.optionsActive || !onPickOption} onClick={() => onPickOption?.(card.messageId, o)}>
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -103,11 +122,12 @@ interface Props {
   cards?: CaptionCard[]; // 자막을 다 적은 뒤 아래에 띄울 표 (주문서·예약 확인·식당·안내)
   thinking: boolean;
   onPick?: (messageId: number, index: number) => void; // 목록 표의 줄을 눌렀을 때
+  onPickOption?: (messageId: number, option: CaptionOption) => void; // 표 아래 선택 버튼을 눌렀을 때
 }
 
 // 채팅창을 끈 동안 배경 구체 가운데에 띄우는 자막: 봇이 소리로 읽어 주는 바로 그 문장.
 // 봇이 답을 준비하는 동안은 점 세 개가 깜빡인다
-export function VoiceCaption({ id, text, cards = [], thinking, onPick }: Props) {
+export function VoiceCaption({ id, text, cards = [], thinking, onPick, onPickOption }: Props) {
   const hasCards = !thinking && cards.length > 0;
   return (
     <div className={"voice-caption" + (hasCards ? " has-cards" : "")}>
@@ -118,7 +138,7 @@ export function VoiceCaption({ id, text, cards = [], thinking, onPick }: Props) 
           <span />
         </span>
       ) : (
-        text && <Typewriter key={id} text={breakAfterSentences(text)} after={hasCards ? <CaptionCards cards={cards} onPick={onPick} /> : undefined} />
+        text && <Typewriter key={id} text={breakAfterSentences(text)} after={hasCards ? <CaptionCards cards={cards} onPick={onPick} onPickOption={onPickOption} /> : undefined} />
       )}
       {/* 화면 읽기 프로그램에는 한 글자씩이 아니라 문장 전체를 한 번에 알린다 */}
       <p className="sr-only" aria-live="polite">

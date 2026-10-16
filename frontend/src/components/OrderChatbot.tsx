@@ -418,7 +418,23 @@ export interface CaptionCard {
   pickable?: boolean; // 줄을 눌러 고를 수 있는지 (그 질문이 지금 답할 차례일 때만)
   choices?: boolean; // 맛 고르기: 줄 대신 채팅창과 같은 체크 표(ChoicePicker)를 띄운다 (picker 는 그릴 때 붙인다)
   picker?: ReactNode;
+  // 표 아래의 선택 버튼 (채팅 말풍선의 버튼과 같은 것: 더 담기·이대로 주문, 응 해줘·취소, 식당 찾기…). 말로 해도 되고 눌러도 된다
+  options?: CaptionOption[];
+  optionsActive?: boolean; // 그 질문이 지금 답할 차례일 때만 누를 수 있다 (그릴 때 붙인다)
 }
+export interface CaptionOption extends Choice {
+  primary?: boolean; // 가장 흔한 답(이대로 주문, 응 해줘)은 파란 버튼
+}
+// 주문서·확인 질문의 버튼 (채팅 말풍선의 confirmActions 와 같은 말)
+const CONFIRM_OPTIONS = (delivery: boolean): CaptionOption[] => [
+  { label: "응 해줘", value: "응 해줘", primary: true },
+  { label: "취소", value: "취소할게" },
+  ...(delivery ? [{ label: "배달지 변경", value: "배달지 변경" }] : []),
+];
+const CART_OPTIONS: CaptionOption[] = [
+  { label: CART_MORE, value: CART_MORE },
+  { label: CART_CHECKOUT, value: CART_CHECKOUT, primary: true },
+];
 
 function captionCard(m: Message, now: Date): CaptionCard | null {
   if (m.role === "user") return null;
@@ -426,9 +442,11 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
   const messageId = m.id;
   switch (m.kind) {
     case "order":
-      return { key, messageId, rows: orderCardRows(m.order) };
+      return { key, messageId, rows: orderCardRows(m.order), options: CONFIRM_OPTIONS(true) };
     case "cart":
-      return { key, messageId, rows: cartCardRows(m.order) };
+      return { key, messageId, rows: cartCardRows(m.order), options: CART_OPTIONS };
+    case "confirm":
+      return { key, messageId, rows: [], options: CONFIRM_OPTIONS(false) };
     // 맛 고르기: 채팅창과 같은 체크 표 (눌러서 고르거나 맛 이름을 말해서 고른다)
     case "choices":
       return { key, messageId, rows: [], choices: true };
@@ -462,11 +480,15 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
     }
     case "info":
       return { key, messageId, rows: m.card.rows };
-    case "text":
-      if (!m.menu?.length) return null;
-      return { key, messageId, list: true, rows: m.menu.map((d) => pickCardRow(menuCard(d))) };
+    // 글 질문의 선택 버튼(식당 찾기, 로그인하러 가기…)도 표 아래 버튼으로. 추천 메뉴는 목록 줄로, 그 밖의 선택지만 버튼으로
+    case "text": {
+      const menu = m.menu ?? [];
+      const options = (m.choices ?? []).filter((c) => !menu.some((d) => d.name === c.value));
+      if (!menu.length && !options.length) return null;
+      return { key, messageId, list: menu.length > 0, rows: menu.map((d) => pickCardRow(menuCard(d))), ...(options.length ? { options } : {}) };
+    }
     case "restaurants":
-      return { key, messageId, list: true, rows: m.list.map((r) => pickCardRow(restaurantCard(r, now))) };
+      return { key, messageId, list: true, rows: m.list.map((r) => pickCardRow(restaurantCard(r, now))), ...(m.choices?.length ? { options: m.choices } : {}) };
     default:
       return null;
   }
@@ -2419,6 +2441,15 @@ export function OrderChatbot() {
     else if (m.kind === "restaurants" && m.list[index]) handle(m.list[index].name);
   }
 
+  // 자막 아래 선택 버튼: 채팅 말풍선의 같은 버튼과 똑같이 처리한다 (누른 것을 표시하고 그 말을 한 것처럼)
+  function pickCaptionOption(messageId: number, choice: Choice) {
+    const m = messages.find((x) => x.id === messageId);
+    if (m?.role !== "bot") return;
+    if (m.kind === "text") pickChoice(m.id, choice);
+    else if (m.kind === "restaurants") pickRestaurantsChoice(m.id, choice);
+    else handle(choice.value);
+  }
+
   // 카운터(예약 인원·배달 수량)에서 고른 수. "3명", "2마리"처럼 입력한 것으로 처리한다
   // 맛 고르기 표에서 "선택 완료": 표를 잠그고, 고른 맛 이름을 손님 말로 보내 같은 처리로 주문서를 만든다
   function pickChoices(promptId: number, names: string[]) {
@@ -2895,9 +2926,15 @@ export function OrderChatbot() {
           <VoiceCaption
             id={captionId}
             text={captionText}
-            cards={captionCards.map((c) => ({ ...c, pickable: c.list && (c.messageId === activeChoicesId || c.messageId === activeRestaurantsId), picker: c.choices ? choicePickerFor(c.messageId) : undefined }))}
+            cards={captionCards.map((c) => ({
+              ...c,
+              pickable: c.list && (c.messageId === activeChoicesId || c.messageId === activeRestaurantsId),
+              picker: c.choices ? choicePickerFor(c.messageId) : undefined,
+              optionsActive: !thinking && [activeChoicesId, activeCartId, activeConfirmId].includes(c.messageId),
+            }))}
             thinking={thinking}
             onPick={pickCaptionRow}
+            onPickOption={pickCaptionOption}
           />
         )}
 

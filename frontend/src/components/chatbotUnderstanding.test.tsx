@@ -1874,3 +1874,35 @@ describe("장바구니 네 번째 점검: 맛을 다시 고르다 취소하면 �
     expect(inCard("54,000원")).toBe(true);
   });
 });
+
+describe("채팅창을 끈 동안의 선택 버튼", () => {
+  it("장바구니·주문서·확인 질문의 버튼이 자막 아래에 떠서, 눌러서 더 담기 → 이대로 주문 → 응 해줘까지 간다", async () => {
+    render(<OrderChatbot />); // 채팅창은 처음에 꺼져 있다
+    await act(() => refresh(["settings", "popular", "menu"]));
+    const caption = () => within(document.querySelector<HTMLElement>(".voice-caption")!);
+    await say("간장치킨 1마리");
+    await wait(15_000); // 자막이 다 적히고 표가 뜰 때까지
+    expect(caption().getByRole("button", { name: "더 담기" })).toBeEnabled();
+    fireEvent.click(caption().getByRole("button", { name: "이대로 주문" }));
+    await wait();
+    await wait(15_000);
+    expect(caption().getByText("간장치킨 1마리")).toBeInTheDocument(); // 주문서 표
+    expect(caption().getByRole("button", { name: "배달지 변경" })).toBeEnabled();
+    fireEvent.click(caption().getByRole("button", { name: "응 해줘" }));
+    await wait();
+    expect(await find(/주문을 받았어요/)).toBeTruthy();
+  });
+
+  it("글 질문의 선택지(식당 찾기 등)도 자막 아래 버튼으로 뜨고, 지난 질문의 버튼은 눌리지 않는다", async () => {
+    render(<OrderChatbot />);
+    await act(() => refresh(["settings", "popular", "menu"]));
+    const caption = () => within(document.querySelector<HTMLElement>(".voice-caption")!);
+    await say("배고파");
+    await wait(15_000);
+    expect(caption().getByRole("button", { name: "식당 찾기" })).toBeEnabled();
+    fireEvent.click(caption().getByRole("button", { name: "식당 찾기" }));
+    await wait();
+    await wait(15_000);
+    expect(caption().queryByRole("button", { name: "식당 찾기" })).not.toBeInTheDocument(); // 새 답의 표만 보인다
+  });
+});

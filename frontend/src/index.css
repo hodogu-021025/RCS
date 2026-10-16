@@ -836,3 +836,16 @@ html[data-keyboard] .install-banner { display: none; }
   .overlay.tutorial-overlay, .tutorial { animation: none; }
   .tutorial-dots span { transition: none; }
 }
+
+/* 자막 표 아래 선택 버튼 (VoiceCaption.tsx CaptionOptions): 채팅 말풍선의 버튼과 같은 말을 보낸다. 납작한 알약, 가장 흔한 답은 파랑 */
+.caption-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.caption-options-only { width: 100%; }
+.caption-options-only .caption-choices { margin-top: 0; justify-content: center; }
+.caption-choices button {
+  flex: 1 1 auto; min-height: 42px; padding: 0 16px;
+  border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--text);
+  font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer;
+}
+.caption-choices button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+.caption-choices button:disabled { opacity: .45; cursor: default; }
+.caption-choices button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
