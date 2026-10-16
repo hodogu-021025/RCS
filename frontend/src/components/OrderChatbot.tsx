@@ -226,6 +226,8 @@ const DROP_ALL = /그만\s?(할|둘|하|해)|주문\s?안\s?(할|해)|안\s?(먹
 // 더 담겠다는 말 ("더 담기", "더 시킬게", "추가할래"). "더 담을 거 없어"처럼 뒤집는 말은 아니다
 const MORE = /더\s?담|더\s?시킬|더\s?주문|추가(할|로|하고|해)/;
 const MORE_NEGATED = /없|안\s|됐|괜찮|그만/;
+// 담아 둔 메뉴를 다시 보자는 말: "장바구니", "담은 거 보여줘", "담아 둔 메뉴"
+const CART_WORDS = /장바구니|담은\s?(거|것|메뉴)|담아\s?둔/;
 // 담긴 메뉴의 수량을 바꾸는 말: "1마리로", "3묶음으로 해줘", "2개로 바꿔", "수량 변경"
 const QTY_CHANGE = /\S(으로|로)(?=\s|$|[.!?,~]|해|바꿔|변경|수정|할|주|요|만|부탁)|바꿔|바꾸|변경|수정/;
 // 띄어쓰기를 지우고 메뉴 이름도 지운 말 (이름 속 "로"(로제 떡볶이)에 걸리지 않게)
@@ -512,6 +514,8 @@ export function OrderChatbot() {
   const [pendingSwitch, setPendingSwitch] = useState<{ items: DeliveryItem[]; text: string; lines?: PendingAdd[] } | null>(null);
   // 한 문장에 여러 메뉴를 말했을 때 아직 담지 않은 메뉴들, 그리고 담은 것·못 담은 이유 (다 담은 뒤 한 번에 알린다)
   const queueRef = useRef<PendingAdd[]>([]);
+  // 주문서를 보다가 세트 수를 바꿔 맛을 다시 고르는 중: 다 고르면 장바구니가 아니라 주문서로 돌아간다
+  const backToOrderRef = useRef(false);
   const notesRef = useRef<{ added: string[]; notes: string[] }>({ added: [], notes: [] });
   // 모아 둔 안내를 한 문장으로 꺼내고 비운다: "양념치킨은 지금 주문할 수 없어요. 간장치킨 1마리, 보쌈 중 2개를 담았어요."
   function takeNotesText(): string {
@@ -825,6 +829,11 @@ export function OrderChatbot() {
       takeQueued(queued);
       return;
     }
+    if (backToOrderRef.current) {
+      backToOrderRef.current = false;
+      showOrderCard(next, takeNotes());
+      return;
+    }
     showCart(next, takeNotesText());
   }
 
@@ -1072,6 +1081,7 @@ export function OrderChatbot() {
     setPendingItem(null);
     setPendingQty(null);
     setChoosing(null);
+    backToOrderRef.current = false;
     const queued = queueRef.current.shift();
     if (queued) {
       notesRef.current.notes.push("그 메뉴는 담지 않을게요.");
@@ -1085,6 +1095,17 @@ export function OrderChatbot() {
     }
     setStage("idle");
     botReply(() => push(botText("배달 주문을 그만할게요. 다른 게 필요하면 말씀해 주세요!")));
+  }
+
+  // 더 담을 메뉴의 수량·맛을 묻는 중에 "이대로 주문", "그만 담을게": 그 메뉴는 담지 않고 담아 둔 메뉴로 주문서를 보여 준다
+  function skipToOrder(bag: Order) {
+    setPendingItem(null);
+    setPendingQty(null);
+    setChoosing(null);
+    queueRef.current = [];
+    notesRef.current = { added: [], notes: [] };
+    backToOrderRef.current = false;
+    showOrderCard(bag, [botText("고르시던 메뉴는 담지 않고, 담아 두신 메뉴로 주문서를 보여 드릴게요.")]);
   }
 
   // 담은 메뉴를 모두 비우고 주문을 접는다
@@ -1194,7 +1215,8 @@ export function OrderChatbot() {
     const item = availableDeliveryMenu().find((d) => d.restaurantId === bag.storeId && d.name === target.item);
     if (!item) return false;
     // 수량 표현("2세트")을 빼고도 장바구니에 없는 다른 메뉴가 걸리면 수량 바꾸기가 아니라 더 담는 말이다 ("세트"가 세트 메뉴 키워드라도)
-    if (findDeliveryItems(withoutQuantity(text, item.unit)).some((d) => !bag.items.some((l) => l.item === d.name))) return false;
+    // (메뉴 이름을 다 말했으면 "2마리 치킨 세트 2세트로"의 "치킨"처럼 이름 속 낱말이 다른 메뉴에 걸려도 그 메뉴의 수량 바꾸기다)
+    if (!typed.includes(squash(target.item)) && findDeliveryItems(withoutQuantity(text, item.unit)).some((d) => !bag.items.some((l) => l.item === d.name))) return false;
     if (!qtyInRange(n)) {
       botReply(() => push(botText(rangeLead(item)), ...(stage === "confirm" ? [{ role: "bot", kind: "confirm" } as NewMessage] : [])));
       return true;
@@ -1204,6 +1226,7 @@ export function OrderChatbot() {
     if (item.choice) {
       const rest = replaceItem(bag, at);
       setCart(rest.items.length ? rest : null);
+      backToOrderRef.current = stage === "confirm";
       startOrder(item, n);
       return true;
     }
@@ -1572,6 +1595,13 @@ export function OrderChatbot() {
       }
     }
 
+    // 담아 둔 배달 메뉴가 있으면 어느 단계에서든(식당 찾기·예약 중에도) "장바구니", "담은 거 보여줘"로 다시 본다
+    if (bag?.items.length && stage !== "cart" && stage !== "confirm" && CART_WORDS.test(text) && findDeliveryItems(text).length === 0) {
+      startFresh(true);
+      showCart(bag, "담아 두신 메뉴예요.");
+      return;
+    }
+
     // 다른 가게 메뉴를 말해 "담은 것을 비우고 새로 시작할까요?"라고 묻는 중
     if (stage === "switchStore" && pendingSwitch && bag && !switchingMenu) {
       const keep = /아니|그대로|둘게|말고|취소/.test(text);
@@ -1612,6 +1642,16 @@ export function OrderChatbot() {
       // "족발 빼줘": 그 메뉴만 뺀다. "3개로 해줘": 수량을 바꾼다 ("해줘"가 들어 있어도 '응'보다 먼저 본다)
       if (removeFromCart(text, bag)) return;
       if (changeCartQty(text, bag)) return;
+      // 가게 정보("청전 치킨공방 영업시간")·가게 정보의 "배달 주문" 버튼("청전 치킨공방 배달"): 가게 이름 속 "치킨"을 메뉴로 보기 전에 받는다.
+      // 답만 하는 가게 정보 뒤에는 담던 단계(더 담을까요?·주문할까요?)를 그대로 이어 간다 ('응'이면 다음으로)
+      const storeAsk = detectIntent(text) === "storeInfo";
+      const storeOrderAsk = !!restaurantNamed(text) && menuIntent(text) === "배달";
+      if (storeAsk || storeOrderAsk) {
+        const back = stage;
+        routeGeneral(text);
+        if (storeAsk && (!!restaurantNamed(text) || (refersToPlace(text) && !!lastPlace))) setStage(back);
+        return;
+      }
       // "떡볶이도 추가", "소떡소떡 하나 더", 메뉴 이름만: 그 메뉴를 더 담는다 (수량·맛을 묻는 흐름 그대로)
       if (findDeliveryItems(text).length > 0) {
         tryDelivery(text);
@@ -1649,7 +1689,10 @@ export function OrderChatbot() {
       }
       // "내 주문 어디쯤 왔어", "할인하는 거 있어?", "영업시간" 같은 다른 질문에는 답한다 (담은 메뉴는 그대로 둔다)
       if (intent && intent !== "orderCancel") {
+        const back = stage;
         routeGeneral(text);
+        // 인사처럼 그 자리에서 답만 하는 말이면 담던 단계를 그대로 이어 간다
+        if (intent === "greeting" || intent === "thanks") setStage(back);
         return;
       }
       if (inCart) {
@@ -1702,6 +1745,10 @@ export function OrderChatbot() {
       // 맛을 고르는 중에 "치즈볼 빼줘": 담아 둔 메뉴에서 빼고, 맛 고르기를 다시 보여 준다
       const held = cart();
       if (held?.items.length && removeFromCart(text, held, () => choicePrompt(choosing.item, choosing.qty))) return;
+      if (held?.items.length && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
+        skipToOrder(held);
+        return;
+      }
       if (isNo(text)) {
         cancelDelivery();
         return;
@@ -1723,6 +1770,10 @@ export function OrderChatbot() {
       if (qty !== undefined && findDeliveryItems(withoutQuantity(text, pendingItem.unit)).every((d) => d.id === pendingItem.id)) {
         if (qtyInRange(qty)) startOrder(pendingItem, qty);
         else botReply(() => push(deliveryQty(pendingItem, rangeLead(pendingItem))));
+        return;
+      }
+      if (held?.items.length && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
+        skipToOrder(held);
         return;
       }
       if (isNo(text)) {
@@ -1859,6 +1910,12 @@ export function OrderChatbot() {
     // 주문 조회·취소는 "주문"이 들어 있어 배달로 오해하기 쉬우므로 가장 먼저
     if (intent === "orderStatus") return showOrderStatus();
     if (intent === "orderCancel") return askCancelOrder();
+    // 담아 둔 배달 메뉴가 있을 때 (식당 예약·가게 정보를 보고 돌아왔을 때): "장바구니"·"응"은 담은 메뉴를, "이대로 주문"·"주문할게"는 주문서를 보여 준다
+    const held = cart();
+    if (held?.items.length && !place && menu !== "식당" && findDeliveryItems(text).length === 0 && intent !== "reorder") {
+      if (/이대로|주문(할|해|하자|하고)|결제/.test(text)) return showOrderCard(held);
+      if (CART_WORDS.test(text) || isYes(text)) return showCart(held, "담아 두신 메뉴예요.");
+    }
     // "아까 그거 하나 더": 이번 대화에서 말한 메뉴, 없으면 지난 주문
     if (refersToItem(text) && lastItem) {
       // 담아 둔 메뉴는 그대로 두고 그 메뉴를 더 담는다
@@ -1883,7 +1940,7 @@ export function OrderChatbot() {
       const paused = storePausedUntil(place.id);
       const placeItemNamed = deliveryMenu().some((d) => d.restaurantId === place.id && squash(text).includes(squash(d.name)));
       if (!wantsBooking && paused && (menu === "배달" || placeItemNamed)) {
-        startFresh();
+        startFresh(true);
         const sameFood = availableDeliveryMenu().filter((d) => restaurantById(d.restaurantId).food === place.food);
         offerInstead(pausedText(place.name, paused), sameFood.length ? sameFood : availableDeliveryMenu());
         return;
@@ -1891,13 +1948,14 @@ export function OrderChatbot() {
       const storeMenu = availableDeliveryMenu().filter((d) => d.restaurantId === place.id);
       const named = findDeliveryItems(text, place.id); // 그 가게 메뉴 중에서 ("못말리는파닭 간장" → 간장 파닭을 고를 수 있는 메뉴)
       if (!wantsBooking && storeMenu.length && (named.length || menu === "배달")) {
-        startFresh();
+        startFresh(true); // 다른 가게 메뉴면 deliverItems 가 새로 시작할지 묻는다
         setLastPlace(place);
         deliverItems(named.length ? named : storeMenu, text);
         return;
       }
-      startFresh();
-      beginReservation(place, { ...rsvSlots, ...slots });
+      const lead = keptNote();
+      startFresh(true);
+      beginReservation(place, { ...rsvSlots, ...slots }, lead);
       return;
     }
 
@@ -1910,18 +1968,20 @@ export function OrderChatbot() {
     }
 
     if (intent === "nearest" && !food) {
-      startFresh();
+      const lead = keptNote();
+      startFresh(true);
       setRsvSlots(slots);
-      showRestaurants("", nearestRestaurants(), { heading: "가장 가까운 곳들이에요!\n마음에 드는 곳을 고르시면 예약을 도와드릴게요." });
+      showRestaurants("", nearestRestaurants(), { lead, heading: "가장 가까운 곳들이에요!\n마음에 드는 곳을 고르시면 예약을 도와드릴게요." });
       return;
     }
 
     // "중식 식당 예약해줘": 식당 말과 음식 종류를 같이 말했으면 바로 근처 식당 추천으로
     if (menu === "식당") {
       if (food) {
-        startFresh();
+        const lead = keptNote();
+        startFresh(true);
         setRsvSlots(slots);
-        showRestaurants(food.label, nearbyRestaurants(food.key));
+        showRestaurants(food.label, nearbyRestaurants(food.key), { lead });
       } else {
         startMenu("식당");
         setRsvSlots(slots);
@@ -1951,9 +2011,10 @@ export function OrderChatbot() {
 
     // "한식 먹고 싶어": 배달 메뉴에는 없는 음식 종류만 말했으면 근처 식당 추천으로
     if (food) {
-      startFresh();
+      const lead = keptNote();
+      startFresh(true);
       setRsvSlots(slots);
-      showRestaurants(food.label, nearbyRestaurants(food.key));
+      showRestaurants(food.label, nearbyRestaurants(food.key), { lead });
       return;
     }
 
@@ -2031,6 +2092,10 @@ export function OrderChatbot() {
     );
   }
 
+  // 담아 둔 배달 메뉴가 있는데 식당 찾기·예약으로 넘어갈 때 알려 줄 말 (메뉴는 지우지 않는다)
+  const keptNote = (): NewMessage[] =>
+    cart()?.items.length ? [botText("담아 두신 배달 메뉴는 그대로 둘게요. 나중에 '장바구니'라고 말씀하시면 다시 보여 드려요.")] : [];
+
   // 진행 중이던 주문·예약을 접고 처음부터. keepCart 가 아니면 담은 메뉴도 비운다
   function startFresh(keepCart = false) {
     setPendingItem(null);
@@ -2039,6 +2104,7 @@ export function OrderChatbot() {
     if (!keepCart) setCart(null);
     setPendingSwitch(null);
     queueRef.current = [];
+    backToOrderRef.current = false;
     notesRef.current = { added: [], notes: [] };
     setRsv(null);
     setRsvSlots({});
@@ -2048,9 +2114,11 @@ export function OrderChatbot() {
   // 배달·식당의 첫 질문으로. 식당도 배달처럼 바로 추천 목록(카드)을 보여 주고, 다른 음식을 말하면 그 음식 맛집으로 바꾼다
   function startMenu(menu: "배달" | "식당") {
     if (menu === "식당") {
-      startFresh();
+      const lead = keptNote();
+      startFresh(true);
       // 카드 아래에는 음식 종류 버튼을 붙여 눌러서 그 음식 맛집으로 바로 갈 수 있게 한다
       showRestaurants("", recommendRestaurants(new Date()), {
+        lead,
         heading: RESTAURANT_PICKS_HEADING,
         choices: FOOD_PROMPT.choices,
         placeholder: FOOD_PROMPT.placeholder,
