@@ -227,12 +227,15 @@ describe("3. 안 되는 것 대신 할 수 있는 것", () => {
     expect(await find(/하소 케이크하우스를 선택했어요/)).toBeTruthy();
   });
 
-  it("배달도 가게도 없는 음식은 '대신 맛집에서' 권하지 않는다", async () => {
+  it("배달도 가게도 없는 음식은 식당 찾기로 넘기지 않고 배달되는 다른 메뉴를 권하며, 거기서 고른 음식은 배달 메뉴로 간다", async () => {
     await renderChat();
     await say("케이크 배달해줘");
     expect(await find(/케이크는 아직 배달이 안 돼요/)).toBeTruthy();
-    expect(await find(/아직 근처에 디저트 가게가 없어요/)).toBeTruthy();
-    expect(screen.queryByText(/대신 근처 디저트 맛집/)).not.toBeInTheDocument();
+    expect(screen.getByText(/대신 이런 메뉴는 어떠세요/)).toBeInTheDocument();
+    expect(screen.queryByText(/디저트 가게가 없어요|디저트 맛집/)).not.toBeInTheDocument();
+    await type("치킨 두 마리");
+    expect(await find(/이런 메뉴를 추천해요/)).toBeTruthy(); // 식당 추천이 아니라 치킨 배달 메뉴
+    expect(screen.queryByText(/근처 치킨 맛집을 추천해요/)).not.toBeInTheDocument();
   });
 
   it("품절 메뉴는 비슷한 메뉴를 권한다", async () => {

@@ -2163,10 +2163,13 @@ export function OrderChatbot() {
     if (food && !deliversFood(food) && (menu === "배달" || stage === "menu")) {
       const word = foodWord(text, food);
       startFresh();
-      // 그 음식을 파는 근처 가게도 없으면 "대신 맛집에서" 대신 배달이 안 된다는 말만 하고, 가게가 없다는 안내로 이어진다
-      const offer = hasStoresFor(food.key) ? `\n대신 근처 ${food.label} 맛집에서 드시는 건 어때요?` : "";
+      // 그 음식을 파는 근처 가게도 없으면 (배달을 청한 것이니) 식당 찾기로 넘기지 않고 배달되는 다른 메뉴를 권한다
+      if (!hasStoresFor(food.key)) {
+        offerInstead(`${withTopicParticle(word)} 아직 배달이 안 돼요.`, availableDeliveryMenu());
+        return;
+      }
       showRestaurants(food.label, nearbyRestaurants(food.key), {
-        lead: [botText(`${withTopicParticle(word)} 아직 배달이 안 돼요.${offer}`)],
+        lead: [botText(`${withTopicParticle(word)} 아직 배달이 안 돼요.\n대신 근처 ${food.label} 맛집에서 드시는 건 어때요?`)],
       });
       return;
     }
