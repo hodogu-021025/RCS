@@ -226,6 +226,10 @@ const DROP_ALL = /그만\s?(할|둘|하|해)|주문\s?안\s?(할|해)|안\s?(먹
 // 더 담겠다는 말 ("더 담기", "더 시킬게", "추가할래"). "더 담을 거 없어"처럼 뒤집는 말은 아니다
 const MORE = /더\s?담|더\s?시킬|더\s?주문|추가(할|로|하고|해)/;
 const MORE_NEGATED = /없|안\s|됐|괜찮|그만/;
+// 담긴 메뉴의 수량을 바꾸는 말: "1마리로", "3묶음으로 해줘", "2개로 바꿔", "수량 변경"
+const QTY_CHANGE = /\S(으로|로)(?=\s|$|[.!?,~]|해|바꿔|변경|수정|할|주|요|만|부탁)|바꿔|바꾸|변경|수정/;
+// 띄어쓰기를 지우고 메뉴 이름도 지운 말 (이름 속 "로"(로제 떡볶이)에 걸리지 않게)
+const withoutNames = (text: string, names: string[]) => names.reduce((rest, name) => rest.split(squash(name)).join(" "), squash(text));
 
 // 한 문장에 여러 메뉴를 말했을 때 차례로 담을 메뉴 (수량을 말하지 않았으면 qty 없음)
 type PendingAdd = { item: DeliveryItem; qty?: number };
@@ -1184,6 +1188,9 @@ export function OrderChatbot() {
     const named = bag.items.filter((l) => typed.includes(squash(l.item)) || findDeliveryItems(text, bag.storeId).some((d) => d.name === l.item));
     const target = named.length === 1 ? named[0] : named.length === 0 ? bag.items.at(-1) : undefined;
     if (!target) return false;
+    // 담긴 메뉴 이름을 말했으면 "로/으로"나 "바꿔"가 있을 때만 수량을 바꾼다 ("간장치킨 1마리로").
+    // 없으면("간장치킨 2마리") 그만큼 더 담는다 (아래에서 메뉴를 담는 흐름으로)
+    if (named.length && !QTY_CHANGE.test(withoutNames(text, bag.items.map((l) => l.item)))) return false;
     const item = availableDeliveryMenu().find((d) => d.restaurantId === bag.storeId && d.name === target.item);
     if (!item) return false;
     // 수량 표현("2세트")을 빼고도 장바구니에 없는 다른 메뉴가 걸리면 수량 바꾸기가 아니라 더 담는 말이다 ("세트"가 세트 메뉴 키워드라도)

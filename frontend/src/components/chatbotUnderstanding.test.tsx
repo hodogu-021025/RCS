@@ -1389,6 +1389,29 @@ describe("장바구니 점검에서 찾은 문제", () => {
     expect(inCard("46,000원")).toBe(true);
   });
 
+  it("담긴 메뉴를 수량과 함께 다시 말하면 '로'가 있을 때만 수량을 바꾸고, 없으면 그만큼 더 담는다", async () => {
+    await renderChat();
+    await say("간장치킨 2마리");
+    await say("양념치킨 1마리");
+    await say("간장치킨 2마리");
+    expect(await find(/간장치킨 2마리를 담았어요/)).toBeTruthy();
+    expect(inCard("간장치킨 4마리 · 80,000원")).toBe(true);
+    await say("간장치킨 1마리로");
+    expect(await find(/간장치킨 수량을 1마리로 바꿨어요/)).toBeTruthy();
+    expect(inCard("간장치킨 1마리 · 20,000원")).toBe(true);
+    await say("양념치킨 3마리 바꿔줘");
+    expect(await find(/양념치킨 수량을 3마리로 바꿨어요/)).toBeTruthy();
+    // 이름 없이 수량만 말하면 마지막에 담은 메뉴의 수량을 바꾼다 (예전과 같다)
+    await say("2마리로 해줘");
+    expect(await find(/양념치킨 수량을 2마리로 바꿨어요/)).toBeTruthy();
+    expect(inCard("62,000원")).toBe(true);
+    // 주문서를 보는 중에도 같은 규칙: "로"가 없으면 더 담고 장바구니로 돌아간다
+    await click("이대로 주문");
+    await say("양념치킨 1마리");
+    expect(await find(/양념치킨 1마리를 담았어요/)).toBeTruthy();
+    expect(inCard("양념치킨 3마리 · 63,000원")).toBe(true);
+  });
+
   it("주문서를 보는 중의 '그만 담을게'는 주문하지도 지우지도 않고 다시 묻는다", async () => {
     await renderChat();
     await say("간장치킨 1마리");
