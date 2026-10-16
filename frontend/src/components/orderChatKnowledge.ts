@@ -292,6 +292,20 @@ export const priceText = (d: DeliveryItem) =>
 // 맛 고르기가 있는 메뉴는 맛 이름으로도 찾는다 ("간장" → 간장 파닭을 고를 수 있는 1마리 치킨·세트)
 const flavorNamed = (d: DeliveryItem, typed: string) => !!d.choice && choiceKeys(d.choice.options).some(({ key }) => typed.includes(key));
 
+// 한 문장에 메뉴 이름을 여럿 말했을 때("간장치킨 1마리랑 양념치킨 2마리"): 말한 순서대로 그 메뉴와, 그 이름부터 다음 메뉴 이름 전까지의 말(part, 수량을 찾는다).
+// 다른 이름 안에 든 짧은 이름("소떡소떡" ⊂ "소떡소떡 2개 묶음")은 긴 이름으로 본다. 판매 중지 메뉴는 빼고, 품절 메뉴는 넣는다 (부르는 쪽이 알린다).
+// 이름은 띄어쓰기가 달라도 찾는다 ("양념 치킨")
+export function menusNamedIn(text: string): { item: DeliveryItem; start: number; part: string }[] {
+  const hits: { item: DeliveryItem; start: number; end: number }[] = [];
+  for (const d of deliveryMenu()) {
+    const m = new RegExp(d.name.trim().split(/\s+/).map(escapeRegExp).join("\\s*"), "i").exec(text);
+    if (m) hits.push({ item: d, start: m.index, end: m.index + m[0].length });
+  }
+  const kept = hits.filter((h) => !hits.some((o) => o !== h && o.start <= h.start && o.end >= h.end && o.end - o.start > h.end - h.start));
+  kept.sort((a, b) => a.start - b.start);
+  return kept.map((h, i) => ({ item: h.item, start: h.start, part: text.slice(h.start, kept[i + 1]?.start ?? text.length) }));
+}
+
 // storeId: 그 가게 메뉴 중에서만 찾는다 ("못말리는파닭 간장"처럼 가게 이름을 말했을 때)
 export function findDeliveryItems(text: string, storeId?: string): DeliveryItem[] {
   const typed = squash(text);
@@ -739,10 +753,12 @@ export const isYes = (text: string) =>
 export const isNo = (text: string) => has(text, ["아니", "취소", "싫어", "안 해", "안해", "no"]);
 
 export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
-// 주문 금액(합계) 표시. 할인한 메뉴가 있으면 같이 적는다: 할인율이 하나면 "32,000원 (20% 할인)", 여러 메뉴의 할인율이 다르면 "… (할인 전 50,000원)"
+// 주문 금액(합계) 표시. 할인한 메뉴가 있으면 같이 적는다: 모든 메뉴가 같은 할인율이면 "32,000원 (20% 할인)",
+// 일부 메뉴만 할인했거나 할인율이 서로 다르면 할인 전 합계를 적는다 ("… (할인 전 50,000원)". 전체가 할인된 것처럼 보이지 않게)
 export function orderPriceLabel(order: Pick<Order, "items" | "price" | "listPrice">): string {
-  const pcts = new Set(order.items.flatMap((l) => (l.discountPct ? [l.discountPct] : [])));
-  if (pcts.size === 1) return `${won(order.price)} (${[...pcts][0]}% 할인)`;
+  const pcts = new Set(order.items.map((l) => l.discountPct ?? 0));
+  const [pct] = [...pcts];
+  if (pcts.size === 1 && pct > 0) return `${won(order.price)} (${pct}% 할인)`;
   if (order.listPrice && order.listPrice > order.price) return `${won(order.price)} (할인 전 ${won(order.listPrice)})`;
   return won(order.price);
 }

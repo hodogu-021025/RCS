@@ -873,7 +873,7 @@ describe("세트 메뉴 맛 고르기", () => {
     server.db.addMenuItem({ restaurantId: store.id, name: "1마리 치킨", price: 18000, unit: "마리", keywords: ["한마리", "치킨"], choice: { label: "맛", count: 1, options: FLAVORS } });
     await renderChat();
     await say("간장");
-    expect(await find(/이런 메뉴를 추천해요/)).toBeTruthy();
+    expect(await find(/몇 마리 주문할까요|이런 메뉴를 추천해요/)).toBeTruthy(); // 담지 않고 묻는다 (예전과 같은 방식)
     const listed = buttonsIn(/이런 메뉴를 추천해요/);
     expect(listed).toEqual(expect.arrayContaining(["간장치킨", "1마리 치킨", "2마리 치킨 세트"]));
 
@@ -1226,5 +1226,128 @@ describe("장바구니: 한 주문에 메뉴 여러 개", () => {
     expect(await find(/지난번에 드신 간장치킨 2마리, 양념치킨 1마리로 주문서를 만들었어요/)).toBeTruthy();
     expect(inCard("간장치킨 2마리 · 40,000원")).toBe(true);
     expect(inCard("61,000원")).toBe(true);
+  });
+});
+
+describe("장바구니 점검에서 찾은 문제", () => {
+  type Saved = { order: { price: number; items: { item: string; qty: number; price: number }[] } };
+  const lastSaved = () => server.db.orderById(server.db.listOrders().at(-1)!.id) as unknown as Saved;
+  beforeEach(() => {
+    server.db.addMenuItem({ restaurantId: "h3", name: "양념치킨", price: 21000, unit: "마리", keywords: ["양념", "치킨"] });
+  });
+
+  it.each(["그만 담을게", "더 안 시킬게", "이제 됐어", "없어", "그게 다야", "아니요 괜찮아요"])("담는 중 '%s'는 주문을 지우지 않고 주문서로 간다", async (text) => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("양념치킨 1마리");
+    await say(text);
+    expect(await find(/주문할까요\?/)).toBeTruthy();
+    expect(screen.queryByText(/주문을 취소했어요/)).not.toBeInTheDocument();
+    expect(inCard("41,000원")).toBe(true);
+  });
+
+  it("담는 중 '그만할래'·'취소'는 담은 것을 모두 접는다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("그만할래");
+    expect(await find(/주문을 취소했어요/)).toBeTruthy();
+  });
+
+  it("같은 메뉴를 더 담아 10개를 넘기면 담지 않고 이유를 알린다", async () => {
+    await renderChat();
+    await say("간장치킨 8마리");
+    await say("간장치킨 5마리 더");
+    expect(await find(/간장치킨은 한 번에 10마리까지 주문할 수 있어요\. 이미 8마리 담겨 있어서 더 담지 못했어요/)).toBeTruthy();
+    expect(inCard("간장치킨 8마리")).toBe(true);
+    await say("간장치킨 2마리 더");
+    expect(await find(/간장치킨 2마리를 담았어요/)).toBeTruthy();
+    expect(inCard("간장치킨 10마리")).toBe(true);
+  });
+
+  it("주문 때 서버가 거절해도 장바구니는 남고, 그사이 품절된 메뉴만 빼고 다시 주문할 수 있다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("양념치킨 2마리");
+    await click("이대로 주문");
+    server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { soldOut: true } } }); // 화면은 아직 모른다
+    await click("응 해줘");
+    expect(await find(/간장치킨은\(는\) 지금 품절이에요/)).toBeTruthy();
+    expect(await find(/주문이 접수되지 않았어요/)).toBeTruthy();
+    expect(await find(/간장치킨은 지금 담을 수 없어 뺐어요/)).toBeTruthy();
+    expect(await find(/남은 메뉴는 그대로 담아 두었어요/)).toBeTruthy();
+    expect(inCard("양념치킨 2마리")).toBe(true);
+    await click("이대로 주문");
+    await click("응 해줘");
+    expect(await find(/주문을 받았어요/)).toBeTruthy();
+    expect(lastSaved().order.items.map((l) => [l.item, l.qty])).toEqual([["양념치킨", 2]]);
+  });
+
+  it("한 문장에 두 메뉴를 말하면 둘 다 담고, 수량을 말하지 않은 메뉴는 수량을 묻는다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리랑 양념치킨 2마리 주세요");
+    expect(await find(/간장치킨 1마리, 양념치킨 2마리를 담았어요/)).toBeTruthy();
+    expect(inCard("62,000원")).toBe(true);
+    await say("취소");
+
+    await say("간장치킨 2마리랑 양념치킨 시켜줘");
+    expect(await find(/간장치킨 2마리를 담았어요/)).toBeTruthy();
+    expect(await find(/몇 마리 주문할까요/)).toBeTruthy();
+    await click(/1마리 · 21,000원 선택/);
+    expect(await find(/양념치킨 1마리를 담았어요/)).toBeTruthy();
+    expect(inCard("61,000원")).toBe(true);
+  });
+
+  it("한 문장에 다른 가게 메뉴가 섞이면 같은 가게 것만 담고 알린다. 수량도 주문하는 말도 없으면 그중에서 고르게 한다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리랑 옛날통닭 1마리");
+    expect(await find(/옛날통닭은 다른 가게 메뉴라 한 주문에 같이 담지 않았어요/)).toBeTruthy();
+    expect(inCard("간장치킨 1마리")).toBe(true);
+    expect(inCard("옛날통닭 1마리")).toBe(false);
+    await say("취소");
+    const added = screen.queryAllByText(/를 담았어요/).length;
+    await say("간장치킨이랑 옛날통닭 뭐가 나아");
+    expect(screen.queryAllByText(/를 담았어요/)).toHaveLength(added);
+    expect(await find(/몇 마리 주문할까요|이런 메뉴를 추천해요/)).toBeTruthy();
+  });
+
+  it("일부 메뉴만 할인이면 합계에 할인율 대신 할인 전 합계를 적는다", async () => {
+    server.db.updateStoreSettings("h3", { item: { id: "d2", patch: { discountPct: 20 } } });
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("양념치킨 1마리");
+    expect(inCard("간장치킨 1마리 · 16,000원 (20% 할인)")).toBe(true);
+    expect(inCard("37,000원 (할인 전 41,000원)")).toBe(true);
+  });
+
+  it("담는 중 '배달'을 골라도 장바구니를 비우지 않고 그 가게 메뉴를 보여 준다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("배달");
+    expect(await find(/어떤 메뉴를 더 담을까요/)).toBeTruthy();
+    await say("양념치킨 1마리");
+    expect(inCard("간장치킨 1마리 · 20,000원")).toBe(true);
+    expect(inCard("41,000원")).toBe(true);
+  });
+
+  it("담는 중에도 '아까 그거 하나 더'는 그 메뉴를 더 담고, '내 주문 어디쯤 왔어'에 답한 뒤 '응'이면 주문서로 간다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await say("아까 그거 하나 더");
+    expect(await find(/간장치킨 1마리를 담았어요/)).toBeTruthy();
+    expect(inCard("간장치킨 2마리")).toBe(true);
+    await say("내 주문 어디쯤 왔어");
+    expect(await find(/최근 주문 내역이 없어요/)).toBeTruthy();
+    await say("응");
+    expect(await find(/주문할까요\?/)).toBeTruthy();
+    expect(inCard("40,000원")).toBe(true);
+  });
+
+  it("주문서를 보는 중의 '그만 담을게'는 주문하지도 지우지도 않고 다시 묻는다", async () => {
+    await renderChat();
+    await say("간장치킨 1마리");
+    await click("이대로 주문");
+    await say("그만 담을게");
+    expect(await find(/'응' 또는 '취소'로 답해 주세요/)).toBeTruthy();
+    expect(server.db.listOrders()).toHaveLength(0);
   });
 });

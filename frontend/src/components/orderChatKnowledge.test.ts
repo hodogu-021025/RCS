@@ -386,3 +386,14 @@ describe("장바구니 주문서 (메뉴 여러 개)", () => {
     expect(orderItemText(apart)).toBe("2마리 치킨 세트 1세트 (간장 파닭, 블랙스완 파닭(+1,000원)), 2마리 치킨 세트 1세트 (간장 파닭, 양념 파닭)");
   });
 });
+
+describe("장바구니 합계 표시", () => {
+  it("일부 메뉴만 할인하면 할인율 대신 할인 전 합계를, 모두 같은 할인율이면 할인율을 적는다", () => {
+    const chicken = item("간장치킨");
+    const sale = makeOrderItem({ ...chicken, price: 16000, listPrice: 20000, discountPct: 20 }, 1);
+    const plain = makeOrderItem({ ...chicken, id: "x3", name: "양념치킨", price: 21000 }, 1);
+    expect(orderPriceLabel(addItem(makeOrder({ ...chicken, price: 16000, listPrice: 20000, discountPct: 20 }, 1), plain))).toBe("37,000원 (할인 전 41,000원)");
+    const both = addItem(makeOrder({ ...chicken, price: 16000, listPrice: 20000, discountPct: 20 }, 1), { ...sale, item: "양념치킨" });
+    expect(orderPriceLabel(both)).toBe("32,000원 (20% 할인)");
+  });
+});
