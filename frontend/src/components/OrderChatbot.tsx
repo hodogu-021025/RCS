@@ -777,8 +777,10 @@ export function OrderChatbot() {
   }
 
   // 차례로 담는 메뉴 하나: 수량을 말했으면 담고(세트면 맛부터), 아니면 수량을 묻는다
-  function takeQueued({ item, qty }: PendingAdd) {
+  function takeQueued({ item, qty: said }: PendingAdd) {
     setLastItem(item);
+    // 세트 메뉴(맛 고르기가 있고 단위가 "세트")는 수량을 말하지 않았으면 1세트로 바로 맛을 고른다 (deliverItems 와 같은 규칙)
+    const qty = said ?? (item.choice && item.unit === "세트" ? 1 : undefined);
     if (qtyInRange(qty)) {
       startOrder(item, qty);
       return;
