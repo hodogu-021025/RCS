@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { refreshSession, useSession } from "../auth/auth";
-import { choiceRows, clockText, orderHeadText, findRestaurantById, untilText, formatDate, orderItemText, orderPriceLabel, won, type DeliveryItem, type MenuChoice, type Restaurant } from "../components/orderChatKnowledge";
+import { choicesText, clockText, findRestaurantById, untilText, formatDate, orderItemText, orderPriceLabel, won, type DeliveryItem, type MenuChoice, type Restaurant } from "../components/orderChatKnowledge";
 import { todayKST } from "../components/deals";
 import { DISCOUNT_MAX, discountedPrice, specialItemId } from "../components/deals";
 import {
@@ -28,7 +28,6 @@ import { ChoiceEditor } from "./ChoiceEditor";
 import { choiceFromDraft, choiceSummary, draftFromChoice, emptyDraft, type ChoiceDraft } from "./menuChoice";
 import { InstallBanner } from "../components/InstallBanner";
 import { Select } from "../components/Select";
-import { OrderLines } from "./OrderLines";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
 
@@ -306,28 +305,21 @@ function OrderRow({ record: o }: { record: OrderRecord }) {
   return (
     <li className={"record" + (needsAction(o) ? " pending" : "")}>
       <div className="record-head">
-        {/* 담은 메뉴들 (여러 개면 쉼표로). 금액은 합계 */}
-        <b>{orderHeadText(o.order)}</b>
+        <b>
+          {o.order.item} {o.order.qty}
+          {o.order.unit}
+        </b>
         <span className="price">{orderPriceLabel(o.order)}</span>
         <span className={statusClass(o.status)}>{o.status}</span>
       </div>
       <dl>
-        {/* 메뉴가 여럿이면 한 줄씩(맛은 그 메뉴 아래), 하나면 세트의 고른 맛만 */}
-        {o.order.items.length > 1 ? (
+        {/* 세트 메뉴의 고른 맛 */}
+        {o.order.choices?.length ? (
           <div>
-            <dt>메뉴</dt>
-            <dd>
-              <OrderLines items={o.order.items} />
-            </dd>
+            <dt>{o.order.choiceLabel ?? "맛"}</dt>
+            <dd>{choicesText(o.order.choices)}</dd>
           </div>
-        ) : (
-          choiceRows(o.order).map((r) => (
-            <div key={r.label}>
-              <dt>{r.label}</dt>
-              <dd>{r.value}</dd>
-            </div>
-          ))
-        )}
+        ) : null}
         {o.order.address && (
           <div>
             <dt>배달지</dt>
@@ -1040,13 +1032,10 @@ function SalesTab({ orders }: { orders: OrderRecord[] }) {
   const today = valid.filter((o) => o.createdAt >= todayStart);
   const week = valid.filter((o) => o.createdAt >= now - 7 * DAY);
   const sum = (list: OrderRecord[]) => list.reduce((a, o) => a + o.order.price, 0);
-  // 메뉴별: 한 주문에 담긴 메뉴마다 따로 센다 (매출은 그 줄의 금액)
   const byItem = new Map<string, { qty: number; sales: number }>();
   for (const o of week) {
-    for (const line of o.order.items) {
-      const cur = byItem.get(line.item) ?? { qty: 0, sales: 0 };
-      byItem.set(line.item, { qty: cur.qty + line.qty, sales: cur.sales + line.price });
-    }
+    const cur = byItem.get(o.order.item) ?? { qty: 0, sales: 0 };
+    byItem.set(o.order.item, { qty: cur.qty + o.order.qty, sales: cur.sales + o.order.price });
   }
   const top = [...byItem.entries()].sort((a, b) => b[1].sales - a[1].sales);
 

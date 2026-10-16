@@ -28,35 +28,25 @@ function send(text: string) {
   fireEvent.click(screen.getByRole("button", { name: "Say 전송" }));
 }
 
-// 메뉴와 수량을 한 번에 말해 장바구니("더 담을까요?")에 담고 → "이대로 주문"으로 주문서를 받은 뒤 → "응 해줘"
+// 메뉴와 수량을 한 번에 말해 주문서까지 간 뒤 "응 해줘"
 function orderAndConfirm() {
   send("간장치킨 1마리 시켜줘");
   wait(1000);
-  fireEvent.click(screen.getByRole("button", { name: "이대로 주문" }));
-  wait(700);
   fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
   wait(700);
 }
 
 describe("OrderChatbot", () => {
-  it("메뉴와 수량을 한 번에 말하면 장바구니에 담고 더 담을지 묻고, 이대로 주문하면 매장·음식·가격·위치가 든 주문서를 보여 준다", () => {
+  it("메뉴와 수량을 한 번에 말하면 매장·음식·가격·위치를 보여 준다", () => {
     renderChat();
     send("간장치킨 1마리 시켜줘");
     wait(1000);
 
-    expect(screen.getByText("간장치킨 1마리를 담았어요.")).toBeInTheDocument();
-    expect(screen.getByText("청전 치킨공방")).toBeInTheDocument();
+    expect(screen.getByText("청전 치킨공방 · 1.8km")).toBeInTheDocument();
     expect(screen.getByText("간장치킨 1마리")).toBeInTheDocument();
     expect(screen.getByText("20,000원")).toBeInTheDocument();
-    expect(screen.getByText("더 담을까요?")).toBeInTheDocument();
-    expect(screen.queryByText("주문할까요?")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "이대로 주문" }));
-    wait(700);
-    expect(screen.getByText("청전 치킨공방 · 1.8km")).toBeInTheDocument();
     expect(screen.getByText("제천시 장락동 제천빌라 331호")).toBeInTheDocument();
     expect(screen.getByText("주문할까요?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "이대로 주문" })).toBeDisabled(); // 장바구니 버튼은 잠긴다
   });
 
   it("배달: 메뉴 버튼을 고르면 단위에 맞춰 수량을 묻고, 수량을 고르면 주문서를 보여 준다", () => {
@@ -459,8 +449,6 @@ describe("OrderChatbot", () => {
     renderChat();
     send("옛날통닭 2마리 시켜줘");
     wait(1000);
-    fireEvent.click(screen.getByRole("button", { name: "이대로 주문" }));
-    wait(700);
     fireEvent.click(screen.getByRole("button", { name: "취소" }));
     wait(700);
 
@@ -549,24 +537,15 @@ describe("OrderChatbot", () => {
     expect(menuRows[0]).toBe("옛날통닭18,000원 · 장락 옛날통닭");
     expect(menuRows).toHaveLength(4);
 
-    // 표가 있는 답(장바구니·주문서)은 자막에 제목·질문만 적고, 다 적은 뒤에 그 아래 표를 띄운다
+    // 표가 있는 답(주문서)은 자막에 제목·질문만 적고, 다 적은 뒤에 그 아래 표를 띄운다
     send("간장치킨 1마리 시켜줘");
     wait(1000);
     wait(45 * 3);
     expect(document.querySelector(".caption-card")).not.toBeInTheDocument(); // 적는 중에는 아직 없다
     wait(10_000);
-    expect(caption()).toBe("간장치킨 1마리를 담았어요.\n더 담을까요?");
-    const cart = document.querySelector(".caption-card") as HTMLElement;
-    expect(cart).toBeInTheDocument();
-    expect(within(cart).getByText("청전 치킨공방")).toBeInTheDocument();
-    expect(within(cart).getByText("간장치킨 1마리")).toBeInTheDocument();
-    expect(within(cart).getByText("20,000원")).toHaveClass("price");
-
-    send("이대로 주문");
-    wait(1000);
-    wait(10_000);
-    expect(caption()).toBe("주문 내역을 확인해 주세요.\n주문할까요?");
+    expect(caption()).toBe("근처 매장을 찾았어요.\n주문 내역을 확인해 주세요.\n주문할까요?");
     const card = document.querySelector(".caption-card") as HTMLElement;
+    expect(card).toBeInTheDocument();
     expect(within(card).getByText("청전 치킨공방 · 1.8km")).toBeInTheDocument();
     expect(within(card).getByText("간장치킨 1마리")).toBeInTheDocument();
     expect(within(card).getByText("20,000원")).toHaveClass("price");
@@ -581,7 +560,7 @@ describe("OrderChatbot", () => {
 
     expect(screen.getByText(/오늘은 이런 식당 어떠세요\?/)).toBeInTheDocument();
     expect(screen.queryByText(/어떤 걸로 결제하시겠어요/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "이대로 주문" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "응 해줘" })).toBeDisabled();
   });
 
   it("배달 수량 단계에서 날짜 같은 숫자는 수량으로 보지 않는다", () => {

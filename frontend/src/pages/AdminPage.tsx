@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { FOODS, RESTAURANTS, choiceRows, orderHeadText, formatDate, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
+import { FOODS, RESTAURANTS, choicesText, formatDate, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
 import {
   addOwner,
   approveOwner,
@@ -12,7 +12,6 @@ import {
   type ReservationRecord,
 } from "../data/db";
 import { Select } from "../components/Select";
-import { OrderLines } from "./OrderLines";
 import { DashLayout, Tabs } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
 import { PasswordField } from "./PasswordField";
@@ -211,7 +210,10 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
           {shown.map((o) => (
             <li key={o.id} className={"record" + (o.status === "입금 대기" ? " pending" : "")}>
               <div className="record-head">
-                <b>{orderHeadText(o.order)}</b>
+                <b>
+                  {o.order.item} {o.order.qty}
+                  {o.order.unit}
+                </b>
                 <span className="price">{orderPriceLabel(o.order)}</span>
                 <span className={statusClass(o.status)}>{o.status}</span>
               </div>
@@ -220,21 +222,12 @@ function TransfersView({ orders }: { orders: OrderRecord[] }) {
                   <dt>매장</dt>
                   <dd>{o.order.store.name}</dd>
                 </div>
-                {o.order.items.length > 1 ? (
+                {o.order.choices?.length ? (
                   <div>
-                    <dt>메뉴</dt>
-                    <dd>
-                      <OrderLines items={o.order.items} />
-                    </dd>
+                    <dt>{o.order.choiceLabel ?? "맛"}</dt>
+                    <dd>{choicesText(o.order.choices)}</dd>
                   </div>
-                ) : (
-                  choiceRows(o.order).map((r) => (
-                    <div key={r.label}>
-                      <dt>{r.label}</dt>
-                      <dd>{r.value}</dd>
-                    </div>
-                  ))
-                )}
+                ) : null}
                 <div>
                   <dt>입금 계좌</dt>
                   <dd>{o.order.bank ? `${o.order.bank.bank} ${o.order.bank.account} · ${o.order.bank.holder}` : "-"}</dd>

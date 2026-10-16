@@ -90,7 +90,7 @@ function CaptionCards({ cards, onPick, onPickOption }: { cards: CaptionCard[]; o
   );
 }
 
-// 표 아래 선택 버튼 (더 담기·이대로 주문, 응 해줘·취소…): 채팅 말풍선의 버튼과 같은 말을 보낸다. 그 질문이 지금 차례일 때만 누를 수 있다
+// 표 아래 선택 버튼 (응 해줘·취소, 식당 찾기…): 채팅 말풍선의 버튼과 같은 말을 보낸다. 그 질문이 지금 차례일 때만 누를 수 있다
 function CaptionOptions({ card, onPickOption }: { card: CaptionCard; onPickOption?: (messageId: number, option: CaptionOption) => void }) {
   return (
     <div className="caption-choices" role="group" aria-label="선택">

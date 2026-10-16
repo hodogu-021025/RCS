@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useSession } from "../auth/auth";
 import { AccountText, CopyButton } from "../components/CopyButton";
 import { TelLink } from "../components/TelLink";
-import { accountDigits, formatDate, orderHeadText, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
+import { accountDigits, formatDate, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
 import { cancelMyOrder, useDb, type OrderRecord } from "../data/db";
 import { DashLayout } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
@@ -66,8 +66,8 @@ function OrderItem({ record: o }: { record: OrderRecord }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { bank, depositor, payBy, cancelNote } = o.order;
-  // 주문서 줄 중 가격(합계)·결제 안내는 아래 "결제" 줄로 합친다
-  const rows = orderCardRows(o.order).filter((r) => r.label !== "가격" && r.label !== "합계" && r.label !== "결제");
+  // 주문서 줄 중 가격·결제 안내는 아래 "결제" 줄로 합친다
+  const rows = orderCardRows(o.order).filter((r) => r.label !== "가격" && r.label !== "결제");
 
   async function cancel() {
     setBusy(true);
@@ -84,12 +84,15 @@ function OrderItem({ record: o }: { record: OrderRecord }) {
   return (
     <li className={"record" + (o.status === "입금 대기" ? " pending" : "")}>
       <div className="record-head">
-        <b>{orderHeadText(o.order)}</b>
+        <b>
+          {o.order.item} {o.order.qty}
+          {o.order.unit}
+        </b>
         <span className={statusClass(o.status)}>{o.status}</span>
       </div>
       <dl>
-        {rows.map((r, i) => (
-          <div key={i}>
+        {rows.map((r) => (
+          <div key={r.label}>
             <dt>{r.label}</dt>
             <dd>{r.value}</dd>
           </div>

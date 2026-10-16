@@ -27,8 +27,7 @@ describe("할인과 오늘의 메뉴 계산", () => {
 
     expect(quantityQuestion(chicken)).toContain("1마리 16,000원이에요. (20% 할인, 원래 20,000원)");
     const order = makeOrder(chicken, 2);
-    expect(order).toMatchObject({ price: 32000, listPrice: 40000 });
-    expect(order.items[0]).toMatchObject({ price: 32000, discountPct: 20, listPrice: 40000 });
+    expect(order).toMatchObject({ price: 32000, discountPct: 20, listPrice: 40000 });
     expect(orderCardRows(order).find((r) => r.label === "가격")?.value).toBe("32,000원 (20% 할인)");
 
     server.db.updateStoreSettings("s1", { special: { itemId: "d4", date: "2020-01-01" } } as never);

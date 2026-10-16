@@ -41,22 +41,10 @@ export const PHONE_ERROR = "전화번호를 010-1234-5678 형식으로 적어 �
 // username: 기억해 둔 계정. 로그인 전에 기억한 것(null)은 그 탭에서 로그인한 계정이 이어 받는다
 const RESUME_KEY = "saylo.resumeDelivery";
 const RESUME_TTL_MS = 30 * 60_000;
-// 담아 둔 메뉴 한 줄 (메뉴 id·수량·세트면 고른 맛 이름). 돌아오면 지금 메뉴 목록·가격으로 다시 담는다
-export interface ResumeLine {
-  itemId: string;
-  qty: number;
-  choices?: string[];
-}
 export interface ResumeDelivery {
-  itemId?: string; // 고르던 메뉴 (수량까지 골랐으면 qty 도)
+  itemId?: string;
   qty?: number;
-  cart?: ResumeLine[]; // 그 전에 이미 담아 둔 메뉴들 (장바구니)
 }
-const isLine = (v: unknown): v is ResumeLine => {
-  if (!v || typeof v !== "object") return false;
-  const { itemId, qty, choices } = v as Record<string, unknown>;
-  return typeof itemId === "string" && typeof qty === "number" && (choices === undefined || (Array.isArray(choices) && choices.every((c) => typeof c === "string")));
-};
 export function rememberResume(username: string | null, resume: ResumeDelivery) {
   try {
     sessionStorage.setItem(RESUME_KEY, JSON.stringify({ ...resume, username, at: Date.now() }));
@@ -68,10 +56,9 @@ function readResume(username: string): ResumeDelivery | null {
   try {
     const v: unknown = JSON.parse(sessionStorage.getItem(RESUME_KEY) ?? "null");
     if (!v || typeof v !== "object") return null;
-    const { itemId, qty, cart, at, username: owner } = v as Record<string, unknown>;
+    const { itemId, qty, at, username: owner } = v as Record<string, unknown>;
     if ((owner !== username && owner !== null) || typeof at !== "number" || Date.now() - at > RESUME_TTL_MS) return null;
-    const lines = Array.isArray(cart) ? cart.filter(isLine) : [];
-    return { ...(typeof itemId === "string" ? { itemId } : {}), ...(typeof qty === "number" ? { qty } : {}), ...(lines.length ? { cart: lines } : {}) };
+    return { ...(typeof itemId === "string" ? { itemId } : {}), ...(typeof qty === "number" ? { qty } : {}) };
   } catch {
     return null;
   }

@@ -9,7 +9,7 @@ import { markTutorialSeen, tutorialSeen } from "./tutorialSeen";
 import { useSpeechOutput, useVoiceInput } from "./useSpeech";
 import { useSession } from "../auth/auth";
 import { addOrder, addReservation, cancelMyOrder, fetchMyOrders, refresh, storePausedUntil, useDb, type OrderRecord } from "../data/db";
-import { deliveryChange, hasDelivery, rememberResume, takeResume, type DeliveryInfo, type ResumeDelivery, type ResumeLine } from "./delivery";
+import { deliveryChange, hasDelivery, rememberResume, takeResume, type DeliveryInfo, type ResumeDelivery } from "./delivery";
 import { CalendarPicker } from "./CalendarPicker";
 import { ChoicePicker } from "./ChoicePicker";
 import { CountPicker } from "./CountPicker";
@@ -37,22 +37,8 @@ import {
   MAX_DAYS_AHEAD,
   MAX_PEOPLE,
   MAX_QTY,
-  MAX_ORDER_ITEMS,
   ORDER_CARD_QUESTION,
   ORDER_CARD_TITLE,
-  CART_QUESTION,
-  CART_MORE,
-  CART_CHECKOUT,
-  addItem,
-  cartCardRows,
-  itemText,
-  makeOrderItem,
-  replaceItem,
-  storeOrder,
-  withItems,
-  menusNamedIn,
-  orderPriceLabel,
-  itemPriceLabel,
   checkVisitTime,
   orderCardRows,
   datePrompt,
@@ -62,6 +48,7 @@ import {
   isNo,
   isYes,
   km,
+  makeOrder,
   matchFood,
   nearbyRestaurants,
   parseQuantity,
@@ -80,7 +67,6 @@ import {
   withTopicParticle,
   spokenTime,
   withObjectParticle,
-  withRoParticle,
   won,
   matchChoices,
   withoutQuantity,
@@ -90,7 +76,6 @@ import {
   type DeliveryItem,
   type InfoCard,
   type Order,
-  type OrderItem,
   type OrderRow,
   type Reservation,
   type Restaurant,
@@ -126,15 +111,14 @@ import {
   type ReservationSlots,
 } from "./understanding";
 
-// 배달: idle → menu(메뉴 대기) → qty(수량 대기) → [세트 메뉴면 choose(맛 고르기)] → cart("더 담을까요?": 더 담으면 menu 부터 다시)
-//       → confirm(주문서 확인 대기) → done. 한 주문에 한 가게 메뉴를 여러 개 담는다(장바구니). 다른 가게 메뉴를 말하면 switchStore(비우고 새로 시작할지 묻는 중)
+// 배달: idle → menu(메뉴 대기) → qty(수량 대기) → [세트 메뉴면 choose(맛 고르기)] → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
 // 식당: idle → food(음식 종류 대기) → restaurant(식당 목록에서 선택 대기)
 //      → rsvDate(날짜) → rsvTime(시간) → rsvPeople(인원) → rsvConfirm(예약 확인) → idle
 // 배달 주문은 로그인한 고객님만, 계정의 배달지·연락처로 한다. 로그인 전이면 needLogin(로그인하러 갈지 묻는 중),
 //        계정에 배달지·연락처가 없으면 needContact(계정 관리로 갈지 묻는 중)에서 멈춘다
 // 그 밖: info(어느 가게 정보인지 고르는 중), cancelConfirm(내 주문 취소 확인)
 type Stage =
-  | "idle" | "menu" | "qty" | "choose" | "cart" | "switchStore" | "confirm" | "done"
+  | "idle" | "menu" | "qty" | "choose" | "confirm" | "done"
   | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm"
   | "info" | "cancelConfirm" | "needLogin" | "needContact";
 
@@ -159,9 +143,6 @@ type Message =
       picked?: string;
     }
   | { id: number; role: "bot"; kind: "order"; order: Order }
-  // 장바구니: 담은 메뉴 목록과 "더 담을까요?" (더 담기 · 이대로 주문). text: 표 위 한 줄 ("간장치킨 2마리를 담았어요.")
-  // midway: 바로 앞 모습에 메뉴를 더 담기만 한 것 ("아까 거"로 되살릴 때 그 앞 모습은 담는 도중이라 뺀다)
-  | { id: number; role: "bot"; kind: "cart"; text: string; order: Order; midway?: boolean }
   | { id: number; role: "bot"; kind: "confirm" }
   // heading: "근처 ○○ 맛집을 추천해요" 대신 쓸 첫 문장 (가장 가까운 곳, 어느 가게인지 묻기)
   // choices: 카드 아래 작은 버튼 (식당 찾기 첫 추천의 음식 종류), picked: 누른 버튼의 value
@@ -221,27 +202,6 @@ const REDIRECT_MS = 3000; // 안내를 보여 준 뒤 로그인 화면·계정 �
 const ACCOUNT_CHOICE: Choice = { label: "계정 관리로 가기", value: "계정 관리로 갈게요" };
 const INQUIRY_CHOICE: Choice = { label: "문의하러 가기", value: "문의 화면으로 갈게요" };
 const greeting = (): Message[] => [{ id: nextId++, ...botText(GREETING) } as Message];
-
-// 장바구니("더 담을까요?")에서 더 담지 않고 주문하겠다는 말: "그만 담을게", "더 안 시킬게", "이제 됐어", "없어", "그게 다야", "이대로 주문"
-const DONE_ADDING = /그만\s?(담|시킬|골라|고를)|더\s?(안|없|필요\s?없)|더는\s?(안|없|됐|괜찮)|안\s?담|됐어|됐습니다|됐네|괜찮|없어|없습니다|없을|그게\s?다|이게\s?다|다\s?담았|이대로|그대로|주문(할|해|하자|하고|이요)|결제|끝/;
-// 담은 것을 모두 접겠다는 말 ("취소"는 따로 본다): "그만할래", "주문 안 할래", "안 먹을래"
-const DROP_ALL = /그만\s?(할|둘|하|해)|주문\s?안\s?(할|해)|안\s?(먹|할래|할게|시킬래)/;
-// 더 담겠다는 말 ("더 담기", "더 시킬게", "추가할래"). "더 담을 거 없어"처럼 뒤집는 말은 아니다
-const MORE = /더\s?담|더\s?시킬|더\s?주문|추가(할|로|하고|해)/;
-const MORE_NEGATED = /없|안\s|됐|괜찮|그만/;
-// 메뉴 이름 없이 "하나 더", "두 개 더", "더 추가": 마지막 메뉴를 그만큼 더 (주문을 마친 뒤에도 그 메뉴로 새로 담는다)
-const MORE_OF_LAST = /^\s*(하나|한\s?개|둘|두\s?개|셋|세\s?개|넷|네\s?개|\d+\s*[가-힣]*)?\s*(더|추가)\s*(요|해\s?줘|줘|주세요|할게요?|할래요?|시켜\s?줘|로)?\s*[.!~]*$/;
-// 값을 묻는 말: "얼마야?", "다 해서 얼마", "합계", "간장치킨 가격"
-const PRICE_ASK = /얼마|합계|총\s?(액|금액)|금액|가격/;
-// 담아 둔 메뉴를 다시 보자는 말: "장바구니", "담은 거 보여줘", "담아 둔 메뉴"
-const CART_WORDS = /장바구니|담은\s?(거|것|메뉴)|담아\s?둔/;
-// 담긴 메뉴의 수량을 바꾸는 말: "1마리로", "3묶음으로 해줘", "2개로 바꿔", "수량 변경"
-const QTY_CHANGE = /\S(으로|로)(?=\s|$|[.!?,~]|해|바꿔|변경|수정|할|주|요|만|부탁)|바꿔|바꾸|변경|수정/;
-// 띄어쓰기를 지우고 메뉴 이름도 지운 말 (이름 속 "로"(로제 떡볶이)에 걸리지 않게)
-const withoutNames = (text: string, names: string[]) => names.reduce((rest, name) => rest.split(squash(name)).join(" "), squash(text));
-
-// 한 문장에 여러 메뉴를 말했을 때 차례로 담을 메뉴 (수량을 말하지 않았으면 qty 없음)
-type PendingAdd = { item: DeliveryItem; qty?: number };
 
 // 배달 수량 카운터 말풍선
 const deliveryQty = (item: DeliveryItem, lead?: string): NewMessage => ({
@@ -306,8 +266,6 @@ function spokenText(m: Message): string {
       return "";
     case "order":
       return `${ORDER_CARD_TITLE} ${orderCardRows(m.order).map((r) => `${r.label} ${r.value}`).join(", ")}. ${ORDER_CARD_QUESTION}`;
-    case "cart":
-      return `${line(m.text)} ${cartCardRows(m.order).map((r) => `${r.label} ${r.value}`).join(", ")}. ${CART_QUESTION} ${CART_MORE} 또는 ${CART_CHECKOUT}이라고 말씀해 주세요.`;
     case "restaurants":
       if (m.heading) return `${line(m.heading)} ${recommend(m.list.map((r) => r.name))}`;
       return `근처 ${m.foodLabel} 맛집으로 ${recommend(m.list.map((r) => r.name))} 가까운 순서예요. 마음에 드는 곳을 말씀해 주세요.`;
@@ -418,22 +376,18 @@ export interface CaptionCard {
   pickable?: boolean; // 줄을 눌러 고를 수 있는지 (그 질문이 지금 답할 차례일 때만)
   choices?: boolean; // 맛 고르기: 줄 대신 채팅창과 같은 체크 표(ChoicePicker)를 띄운다 (picker 는 그릴 때 붙인다)
   picker?: ReactNode;
-  // 표 아래의 선택 버튼 (채팅 말풍선의 버튼과 같은 것: 더 담기·이대로 주문, 응 해줘·취소, 식당 찾기…). 말로 해도 되고 눌러도 된다
+  // 표 아래의 선택 버튼 (채팅 말풍선의 버튼과 같은 것: 응 해줘·취소, 식당 찾기…). 말로 해도 되고 눌러도 된다
   options?: CaptionOption[];
   optionsActive?: boolean; // 그 질문이 지금 답할 차례일 때만 누를 수 있다 (그릴 때 붙인다)
 }
 export interface CaptionOption extends Choice {
-  primary?: boolean; // 가장 흔한 답(이대로 주문, 응 해줘)은 파란 버튼
+  primary?: boolean; // 가장 흔한 답(응 해줘)은 파란 버튼
 }
 // 주문서·확인 질문의 버튼 (채팅 말풍선의 confirmActions 와 같은 말)
 const CONFIRM_OPTIONS = (delivery: boolean): CaptionOption[] => [
   { label: "응 해줘", value: "응 해줘", primary: true },
   { label: "취소", value: "취소할게" },
   ...(delivery ? [{ label: "배달지 변경", value: "배달지 변경" }] : []),
-];
-const CART_OPTIONS: CaptionOption[] = [
-  { label: CART_MORE, value: CART_MORE },
-  { label: CART_CHECKOUT, value: CART_CHECKOUT, primary: true },
 ];
 
 function captionCard(m: Message, now: Date): CaptionCard | null {
@@ -443,8 +397,6 @@ function captionCard(m: Message, now: Date): CaptionCard | null {
   switch (m.kind) {
     case "order":
       return { key, messageId, rows: orderCardRows(m.order), options: CONFIRM_OPTIONS(true) };
-    case "cart":
-      return { key, messageId, rows: cartCardRows(m.order), options: CART_OPTIONS };
     case "confirm":
       return { key, messageId, rows: [], options: CONFIRM_OPTIONS(false) };
     // 맛 고르기: 채팅창과 같은 체크 표 (눌러서 고르거나 맛 이름을 말해서 고른다)
@@ -501,8 +453,6 @@ function captionLine(m: Message): string {
   switch (m.kind) {
     case "order":
       return `${ORDER_CARD_TITLE} ${ORDER_CARD_QUESTION}`;
-    case "cart":
-      return `${m.text} ${CART_QUESTION}`;
     case "reservation":
       return "예약 내용을 확인해 주세요. 예약할까요?";
     case "restaurantPicked":
@@ -529,35 +479,7 @@ function lastIdOf(messages: Message[], kinds: string[]): number | undefined {
 export function OrderChatbot() {
   const [messages, setMessages] = useState<Message[]>(greeting);
   const [stage, setStage] = useState<Stage>("idle");
-  // 장바구니: 담은 메뉴들이 든 주문서. 담는 중(cart)·더 담을 메뉴의 수량·맛 고르기·주문서 확인(confirm) 동안 유지된다.
-  // 한 처리 안에서 담은 직후 바로 읽어야 하는 곳이 있어(상태는 다음 렌더에 바뀐다) ref 로도 든다
-  const [, setOrder] = useState<Order | null>(null); // 값은 cartRef 로 읽는다 (바뀌면 다시 그리게 상태로도 둔다)
-  const cartRef = useRef<Order | null>(null);
-  const cart = () => cartRef.current;
-  function setCart(next: Order | null) {
-    cartRef.current = next;
-    setOrder(next);
-  }
-  // 담은 것과 다른 가게 메뉴를 말해 "새로 시작할까요?"라고 묻는 동안 기억해 둔 그 메뉴들과 말
-  // lines: 한 문장에 여러 메뉴를 말한 경우 차례로 담을 메뉴들
-  const [pendingSwitch, setPendingSwitch] = useState<{ items: DeliveryItem[]; text: string; lines?: PendingAdd[] } | null>(null);
-  // 한 문장에 여러 메뉴를 말했을 때 아직 담지 않은 메뉴들, 그리고 담은 것·못 담은 이유 (다 담은 뒤 한 번에 알린다)
-  const queueRef = useRef<PendingAdd[]>([]);
-  // 주문서를 보다가 세트 수를 바꿔 맛을 다시 고르는 중: 다 고르면 장바구니가 아니라 주문서로 돌아간다
-  const backToOrderRef = useRef(false);
-  // 세트 수 바꾸기·바꿔 담기·세트 일부 빼기로 맛을 다시 고르는 동안 빼 둔 장바구니 (고르다 취소하면 이걸로 되돌린다)
-  const undoRef = useRef<{ cart: Order; toOrder: boolean } | null>(null);
-  const notesRef = useRef<{ added: string[]; notes: string[] }>({ added: [], notes: [] });
-  // 모아 둔 안내를 한 문장으로 꺼내고 비운다: "양념치킨은 지금 주문할 수 없어요. 간장치킨 1마리, 보쌈 중 2개를 담았어요."
-  function takeNotesText(): string {
-    const { added, notes } = notesRef.current;
-    notesRef.current = { added: [], notes: [] };
-    return [...notes, ...(added.length ? [`${withObjectParticle(added.join(", "))} 담았어요.`] : [])].join("\n");
-  }
-  const takeNotes = (): NewMessage[] => {
-    const text = takeNotesText();
-    return text ? [botText(text)] : [];
-  };
+  const [order, setOrder] = useState<Order | null>(null);
   // 메뉴를 고르고 수량을 기다리는 중인 배달 메뉴
   const [pendingItem, setPendingItem] = useState<DeliveryItem | null>(null);
   // 진행 중인 식당 예약
@@ -768,201 +690,53 @@ export function OrderChatbot() {
     botReply(() => push(...(opts.lead ?? []), { role: "bot", kind: "restaurants", foodLabel, list, heading: opts.heading, choices: opts.choices, placeholder: opts.placeholder }), opts.delay ?? 900);
   }
 
-  // 메뉴·수량이 정해지면 장바구니에 담는다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
-  // 세트 메뉴(맛 고르기가 있는 메뉴)는 맛부터 고르고, 고른 맛(choices)으로 담는다
+  // 메뉴·수량이 정해지면 계정의 배달지·연락처로 주문서를 만든다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
+  // 세트 메뉴(맛 고르기가 있는 메뉴)는 맛부터 고르고, 고른 맛(choices)으로 주문서를 만든다
   function startOrder(item: DeliveryItem, qty: number, choices?: ChosenOption[]) {
-    if (deliveryBlocked({ itemId: item.id, qty, ...resumeCartOf(cart()) }) || !hasDelivery(myDelivery)) return;
+    if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
     setPendingItem(null);
     setLastItem(item);
     if (item.choice && !choices) {
       setChoosing({ item, qty });
       setStage("choose");
-      const lead = takeNotes();
-      botReply(() => push(...lead, choicePrompt(item, qty)));
+      botReply(() => push(choicePrompt(item, qty)));
       return;
     }
     setChoosing(null);
-    addToCart(item, qty, choices);
-  }
-
-  // 한 문장에 여러 메뉴를 말했을 때("간장치킨 1마리랑 양념치킨 2마리"): 같은 가게 메뉴를 말한 순서대로 담는다.
-  // 수량을 말하지 않은 메뉴는 수량을, 세트는 맛을 차례로 묻는다. 담은 메뉴와 다른 가게 메뉴만 말했으면 새로 시작할지 묻는다
-  function addNamed(lines: PendingAdd[], text: string) {
-    const bag = cart();
-    const storeId = bag?.items.length ? bag.storeId : lines[0].item.restaurantId;
-    const here = lines.filter((l) => l.item.restaurantId === storeId);
-    if (!here.length) {
-      askSwitchStore(lines.map((l) => l.item), text, lines);
-      return;
-    }
-    notesRef.current = { added: [], notes: [] };
-    const others = lines.filter((l) => l.item.restaurantId !== storeId);
-    if (others.length) {
-      notesRef.current.notes.push(`${withTopicParticle(others.map((l) => l.item.name).join(", "))} 다른 가게 메뉴라 한 주문에 같이 담지 않았어요.`);
-    }
-    const menu = availableDeliveryMenu();
-    const ok = here.flatMap((l) => menu.filter((d) => d.id === l.item.id).map((item) => ({ item, qty: l.qty })));
-    const gone = here.filter((l) => !menu.some((d) => d.id === l.item.id));
-    if (gone.length) notesRef.current.notes.push(`${withTopicParticle(gone.map((l) => l.item.name).join(", "))} 지금 주문할 수 없어요.`);
-    if (!ok.length) {
-      const head = takeNotesText();
-      if (bag?.items.length) showCart(bag, `${head}\n지금 담은 메뉴예요.`);
-      else offerInstead(head.replace(/\n/g, " "), alternativesFor(gone[0].item));
-      return;
-    }
-    const restLines: ResumeLine[] = ok.slice(1).flatMap((l) => (qtyInRange(l.qty) ? [{ itemId: l.item.id, qty: l.qty }] : []));
-    const remembered = resumeCartOf(bag);
-    if (deliveryBlocked({ itemId: ok[0].item.id, qty: ok[0].qty, ...(remembered.cart || restLines.length ? { cart: [...(remembered.cart ?? []), ...restLines] } : {}) })) return;
-    queueRef.current = ok.slice(1);
-    takeQueued(ok[0]);
-  }
-
-  // 차례로 담는 메뉴 하나: 수량을 말했으면 담고(세트면 맛부터), 아니면 수량을 묻는다
-  function takeQueued({ item, qty: said }: PendingAdd) {
-    setLastItem(item);
-    // 세트 메뉴(맛 고르기가 있고 단위가 "세트")는 수량을 말하지 않았으면 1세트로 바로 맛을 고른다 (deliverItems 와 같은 규칙)
-    const qty = said ?? (item.choice && item.unit === "세트" ? 1 : undefined);
-    if (qtyInRange(qty)) {
-      startOrder(item, qty);
-      return;
-    }
-    setPendingQty(null);
-    setPendingItem(item);
-    setStage("qty");
-    const lead = takeNotes();
-    botReply(() => push(...lead, deliveryQty(item, qty !== undefined ? rangeLead(item) : undefined)));
-  }
-
-  // 계정의 배달지·연락처 (둘 다 있을 때만. 주문서에 적는다)
-  const deliveryInfo = () => (hasDelivery(myDelivery) ? myDelivery : undefined);
-
-  // 장바구니에 담고 "더 담을까요?"를 묻는다. 같은 메뉴가 이미 있으면 합친다 (addItem).
-  // 담은 메뉴가 있으면 같은 가게 것만 온다 (다른 가게 메뉴는 deliverItems 가 먼저 새로 시작할지 묻는다)
-  function addToCart(item: DeliveryItem, qty: number, choices?: ChosenOption[]) {
-    undoRef.current = null;
-    const line = makeOrderItem(item, qty, choices);
-    const bag = cart();
-    const base = bag && bag.storeId === item.restaurantId ? bag : storeOrder(item.restaurantId, [], deliveryInfo());
-    let next = addItem(base, line);
-    const notes = notesRef.current;
-    if (next.items.length > MAX_ORDER_ITEMS) {
-      notes.notes.push(`메뉴는 ${MAX_ORDER_ITEMS}가지까지 담을 수 있어서 ${withObjectParticle(item.name)} 담지 못했어요.`);
-      next = base;
-    } else if (next.items.some((l) => l.qty > MAX_QTY)) {
-      // 같은 메뉴를 더 담아 합친 수량이 상한을 넘으면 담지 않는다 (서버도 받지 않는다)
-      const had = base.items.filter((l) => l.item === item.name).reduce((sum, l) => sum + l.qty, 0);
-      notes.notes.push(`${withTopicParticle(item.name)} 한 번에 ${MAX_QTY}${item.unit}까지 주문할 수 있어요. 이미 ${had}${item.unit} 담겨 있어서 더 담지 못했어요.`);
-      next = base;
-    } else {
-      notes.added.push(itemText(line)); // 고른 맛은 아래 표에 적힌다
-    }
-    // 한 문장에 말한 메뉴가 더 남았으면 다음 메뉴로 (다 담은 뒤 한 번에 장바구니를 보여 준다)
-    const queued = queueRef.current.shift();
-    if (queued) {
-      setCart(next.items.length ? next : null);
-      takeQueued(queued);
-      return;
-    }
-    if (backToOrderRef.current) {
-      backToOrderRef.current = false;
-      showOrderCard(next, takeNotes());
-      return;
-    }
-    showCart(next, takeNotesText(), bag?.items.length ? next !== base : false); // 담은 것에 더 담았으면 그 앞 모습은 담는 도중
-  }
-
-  // 담은 메뉴 목록을 보여 주고 더 담을지 묻는다 (더 담기 · 이대로 주문)
-  function showCart(next: Order, text: string, midway = false) {
-    setCart(next);
-    setStage("cart");
-    botReply(() => push({ role: "bot", kind: "cart", text, order: next, ...(midway ? { midway } : {}) }));
-  }
-
-  // 담은 메뉴로 주문서를 보여 주고 "응 해줘"를 기다린다
-  function showOrderCard(next: Order, lead: NewMessage[] = []) {
-    // 담은 뒤 사장님이 가격·할인을 바꿨으면 지금 가격으로 다시 계산해 보여 준다 (주문 금액은 서버가 지금 가격으로 정한다)
-    const fresh = repriced(next);
-    const changed = !!fresh && fresh.price !== next.price;
-    const card = changed ? fresh : next;
-    setCart(card);
+    const next = makeOrder(item, qty, myDelivery, choices);
+    setOrder(next);
     setStage("confirm");
-    const note: NewMessage[] = changed ? [botText("담으신 뒤 가격이 바뀌어 지금 가격으로 다시 계산했어요.")] : [];
-    botReply(() => push(...lead, ...note, { role: "bot", kind: "order", order: card }));
+    botReply(() => push(botText("근처 매장을 찾았어요."), { role: "bot", kind: "order", order: next }), 1000);
   }
 
-  // 담은 메뉴를 지금 메뉴 목록·가격으로 다시 계산한 주문서. 그사이 담을 수 없게 된 메뉴가 있으면 null (주문하면 서버가 그 이유를 알린다)
-  function repriced(o: Order): Order | null {
-    const { lines, gone, repick } = rebuildLines(o.storeId ?? "", o.items);
-    if (gone.length || repick || lines.length !== o.items.length) return null;
-    return withItems(o, lines);
-  }
-
-  // 장바구니를 로그인·배달지 등록 뒤에 이어 가려고 기억해 둘 모양 (메뉴 id·수량·고른 맛 이름)
-  function resumeCartOf(bag: Order | null): Pick<ResumeDelivery, "cart"> {
-    const lines = (bag?.items ?? []).flatMap((line): ResumeLine[] => {
-      const d = deliveryMenu().find((x) => x.restaurantId === bag!.storeId && x.name === line.item);
-      return d ? [{ itemId: d.id, qty: line.qty, ...(line.choices?.length ? { choices: line.choices.map((c) => c.name) } : {}) }] : [];
-    });
-    return lines.length ? { cart: lines } : {};
-  }
-
-  // 전에 담았던 메뉴들(이번 대화의 주문서·지난 주문·로그인 전에 기억한 장바구니)을 지금 메뉴 목록·가격으로 다시 담는다.
-  // 품절·일시 중지·사라진 메뉴는 gone 에 두고, 세트인데 고른 맛을 그대로 쓸 수 없는(세트 수가 바뀌었거나 그 맛이 메뉴에서 빠진) 첫 메뉴는
-  // repick 에 둔다 (맛만 다시 고르면 담긴다. 그런 세트가 둘 이상이면 나머지는 gone). saidQty: 메뉴가 하나일 때 새로 말한 수량
-  type LineSpec = { item: string; qty: number; choices?: { name: string }[] };
-  function rebuildLines(storeId: string, specs: LineSpec[], saidQty?: number) {
-    const lines: OrderItem[] = [];
-    const gone: { name: string; known?: DeliveryItem }[] = [];
-    let repick: { item: DeliveryItem; qty: number } | undefined;
-    for (const spec of specs) {
-      const known = deliveryMenu().find((d) => d.restaurantId === storeId && d.name === spec.item);
-      const item = known && availableDeliveryMenu().find((d) => d.id === known.id);
-      if (!item) {
-        gone.push({ name: spec.item, known });
-        continue;
-      }
-      const qty = specs.length === 1 && qtyInRange(saidQty) ? saidQty : spec.qty;
-      const picked = (spec.choices ?? []).map((c) => item.choice?.options.find((o) => o.name === c.name));
-      const choices = item.choice && qty === spec.qty && picked.length === item.choice.count * qty && picked.every(Boolean) ? (picked as ChosenOption[]) : undefined;
-      if (item.choice && !choices) {
-        if (repick) gone.push({ name: spec.item, known });
-        else repick = { item, qty };
-        continue;
-      }
-      lines.push(makeOrderItem(item, qty, choices));
-    }
-    return { lines, gone, repick };
-  }
-  // 다시 담지 못한 메뉴 안내
-  const goneNote = (gone: { name: string }[]): NewMessage[] => (gone.length ? [botText(`${withTopicParticle(gone.map((g) => g.name).join(", "))} 지금 담을 수 없어 뺐어요.`)] : []);
-  // 주문서 맨 마지막 메뉴 ("아까 그거"가 가리킬 메뉴)
-  const lastItemOf = (bag: Order) => availableDeliveryMenu().find((d) => d.restaurantId === bag.storeId && d.name === bag.items.at(-1)?.item) ?? null;
-
-  // 전에 보여 드린 주문서를 다시: 같은 메뉴들·수량(메뉴가 하나고 새로 말한 수량이 있으면 그 수량)·고른 맛으로, 값과 배달지는 지금 것으로 만든다.
-  // 그사이 품절·일시 중지된 메뉴는 빼고 알리고(다 그러면 다른 메뉴를 권한다), 세트 수가 바뀌었거나 고른 맛이 메뉴에서 빠졌으면 맛만 다시 고른다
+  // 전에 보여 드린 주문서를 다시: 같은 메뉴·수량(새로 말한 수량이 있으면 그 수량)·고른 맛으로, 값과 배달지는 지금 것으로 만든다.
+  // 그사이 품절·일시 중지면 이유를 말하고 다른 메뉴를 권하고, 수량이 바뀌었거나 고른 맛이 메뉴에서 빠졌으면 맛만 다시 고른다
   function restoreOrder(draft: Order, text: string, first: boolean) {
     startFresh();
-    const storeId = draft.storeId ?? "";
-    const { lines, gone, repick } = rebuildLines(storeId, draft.items, parseQuantity(text));
-    if (!lines.length && !repick) {
-      const g = gone[0];
-      const paused = g?.known && storePausedUntil(g.known.restaurantId);
+    const known = deliveryMenu().find((d) => d.restaurantId === draft.storeId && d.name === draft.item);
+    const item = known && availableDeliveryMenu().find((d) => d.id === known.id);
+    if (!item) {
+      const paused = known && storePausedUntil(known.restaurantId);
       offerInstead(
-        g?.known && paused ? pausedText(restaurantById(g.known.restaurantId).name, paused) : `${withTopicParticle(g?.name ?? "그 메뉴")} 지금 주문할 수 없어요.`,
-        g?.known ? alternativesFor(g.known) : availableDeliveryMenu(),
+        known && paused ? pausedText(restaurantById(known.restaurantId).name, paused) : `${withTopicParticle(draft.item)} 지금 주문할 수 없어요.`,
+        known ? alternativesFor(known) : availableDeliveryMenu(),
       );
       return;
     }
-    const base = storeOrder(storeId, lines, deliveryInfo());
-    if (deliveryBlocked({ ...(repick ? { itemId: repick.item.id, qty: repick.qty } : {}), ...resumeCartOf(base) }) || !hasDelivery(myDelivery)) return;
-    setCart(lines.length ? base : null);
-    if (repick) {
-      push(...goneNote(gone));
-      startOrder(repick.item, repick.qty);
+    const said = parseQuantity(text);
+    const qty = qtyInRange(said) ? said : draft.qty;
+    if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
+    const picked = (draft.choices ?? []).map((c) => item.choice?.options.find((o) => o.name === c.name));
+    const choices = item.choice && qty === draft.qty && picked.length === item.choice.count * qty && picked.every(Boolean) ? (picked as ChosenOption[]) : undefined;
+    if (item.choice && !choices) {
+      startOrder(item, qty);
       return;
     }
-    setLastItem(lastItemOf(base));
-    showOrderCard(base, [...goneNote(gone), botText(`${first ? "처음에" : "아까"} 고르신 ${withRoParticle(orderItemText(base))} 주문서를 다시 만들었어요.`)]);
+    const next = makeOrder(item, qty, myDelivery, choices);
+    setLastItem(item);
+    setOrder(next);
+    setStage("confirm");
+    botReply(() => push(botText(`${first ? "처음에" : "아까"} 고르신 ${orderItemText(next)}로 주문서를 다시 만들었어요.`), { role: "bot", kind: "order", order: next }));
   }
 
   // 배달 주문은 로그인한 고객님이 계정에 배달지·연락처를 적어 둬야 할 수 있다. 아니면 안내하고 멈춘다(true).
@@ -1002,22 +776,11 @@ export function OrderChatbot() {
     botReply(() => push(botPrompt({ text, choices: [ACCOUNT_CHOICE], noDirect: true })));
   }
 
-  // 로그인하거나 배달지를 등록하고 돌아왔을 때: 담아 두었던 메뉴들은 다시 담고, 고르던 메뉴는 수량까지 골랐으면 담고, 메뉴만 골랐으면 수량부터.
-  // 고르던 메뉴가 없으면(배달지만 바꾸고 온 경우) 담은 메뉴로 주문서를 바로 보여 주고, 아무것도 없으면 메뉴부터
+  // 로그인하거나 배달지를 등록하고 돌아왔을 때: 메뉴·수량을 다 골랐으면 주문서로, 메뉴만 골랐으면 수량부터, 아니면 메뉴부터
   function continueOrder(resume: ResumeDelivery) {
     const chosen = resume.itemId ? deliveryMenu().find((d) => d.id === resume.itemId) : undefined;
     const item = chosen && availableDeliveryMenu().find((d) => d.id === chosen.id);
     push(botText(`${session ? `${session.name}님, ` : ""}고르시던 배달 주문을 이어서 도와드릴게요.`));
-    // 담아 두었던 메뉴들 (한 가게 것만. 그사이 품절된 것은 빼고 알린다)
-    const specs = (resume.cart ?? []).flatMap((l) => {
-      const d = deliveryMenu().find((x) => x.id === l.itemId);
-      return d ? [{ storeId: d.restaurantId, item: d.name, qty: l.qty, choices: l.choices?.map((name) => ({ name })) }] : [];
-    });
-    const storeId = specs[0]?.storeId;
-    const rebuilt = storeId ? rebuildLines(storeId, specs.filter((s) => s.storeId === storeId)) : { lines: [], gone: [], repick: undefined };
-    push(...goneNote(rebuilt.gone));
-    const bag = storeId && rebuilt.lines.length ? storeOrder(storeId, rebuilt.lines, deliveryInfo()) : null;
-    setCart(bag);
     // 그사이 그 가게가 일시 중지했거나 메뉴가 품절됐으면 이유를 말하고 다른 메뉴를 권한다
     if (chosen && !item) {
       const paused = storePausedUntil(chosen.restaurantId);
@@ -1026,8 +789,6 @@ export function OrderChatbot() {
     }
     if (item && qtyInRange(resume.qty)) startOrder(item, resume.qty);
     else if (item) deliverItems([item], "");
-    else if (rebuilt.repick) startOrder(rebuilt.repick.item, rebuilt.repick.qty);
-    else if (bag) showOrderCard(bag);
     else startMenu("배달");
   }
 
@@ -1037,24 +798,8 @@ export function OrderChatbot() {
   // 고른 메뉴(들)로 주문을 이어 간다. 수량까지 있으면 바로 주문서로, 없으면 수량을 묻고,
   // 여러 메뉴면 그중에서 고르게 한다. 같이 말한 수량("두 마리")은 기억해 뒀다가 쓴다
   function deliverItems(items: DeliveryItem[], text: string) {
-    // 한 주문은 한 가게: 담은 메뉴가 있으면 같은 가게 메뉴만 남기고, 없으면 담은 것을 비우고 새로 시작할지 묻는다
-    const bag = cart();
-    if (bag?.items.length) {
-      const same = items.filter((d) => d.restaurantId === bag.storeId);
-      if (!same.length) {
-        askSwitchStore(items, text);
-        return;
-      }
-      items = same;
-      // "치킨 하나 더": 종류만 말해 여러 메뉴에 걸려도 더 담는 말이면 담긴 메뉴로 본다 (마지막에 담은 것부터). 그냥 "치킨"이면 그중에서 고르게 한다
-      if (items.length > 1 && (/더|추가|또\s/.test(text) || parseQuantity(text) !== undefined)) {
-        const held = [...bag.items].reverse().map((l) => items.find((d) => d.name === l.item)).find(Boolean);
-        if (held) items = [held];
-      }
-    }
     const said = parseQuantity(text);
-    queueRef.current = [];
-    if (deliveryBlocked({ ...(items.length === 1 ? { itemId: items[0].id, qty: said ?? pendingQty ?? undefined } : {}), ...resumeCartOf(bag) })) return;
+    if (deliveryBlocked(items.length === 1 ? { itemId: items[0].id, qty: said ?? pendingQty ?? undefined } : {})) return;
     if (items.length > 1) {
       setPendingItem(null);
       setPendingQty(qtyInRange(said) ? said : null);
@@ -1080,15 +825,6 @@ export function OrderChatbot() {
 
   // 말 속에서 배달 메뉴를 찾는다. 이름을 정확히 말한 메뉴가 품절이면 비슷한 메뉴를 권한다. 둘 다 아니면 false
   function tryDelivery(text: string): boolean {
-    // "간장치킨 1마리랑 양념치킨 2마리": 메뉴 이름을 둘 이상 말했으면 메뉴마다 그 뒤에 말한 수량으로 차례로 담는다
-    // (같은 이름이 여러 가게에 있어 한 자리에 여러 메뉴가 걸리면 아래 원래 방식으로 고르게 한다)
-    const named = menusNamedIn(text);
-    // 수량도 주문하는 말도 없으면("간장치킨이랑 옛날통닭 뭐가 나아?") 담지 않고 아래에서 그중에 고르게 한다
-    const wantsAll = named.some((n) => parseQuantity(n.part) !== undefined) || /주세요|줘|시켜|주문|담아|추가/.test(text);
-    if (wantsAll && named.length >= 2 && new Set(named.map((n) => n.start)).size === named.length) {
-      addNamed(named.map((n) => ({ item: n.item, qty: parseQuantity(n.part) })), text);
-      return true;
-    }
     const items = findDeliveryItems(text);
     if (items.length > 0) {
       // "깐장치킨"은 "치킨"으로 여러 메뉴에 걸리지만, 이름이 비슷한 메뉴가 그중에 있으면 그 메뉴로 본다.
@@ -1126,254 +862,12 @@ export function OrderChatbot() {
     );
   }
 
-  // 고르던 메뉴(수량·맛을 묻는 중)를 그만둔다. 한 문장에 말한 메뉴가 더 남았으면 다음 메뉴로 가고,
-  // 이미 담은 메뉴가 있으면 그것은 그대로 두고 더 담을지 다시 묻는다
   function cancelDelivery() {
+    setStage("idle");
     setPendingItem(null);
     setPendingQty(null);
     setChoosing(null);
-    backToOrderRef.current = false;
-    // 세트 수를 바꾸거나 바꿔 담으려고 맛을 다시 고르던 중이면, 빼 두었던 메뉴를 되돌린다
-    const undo = undoRef.current;
-    if (undo) {
-      undoRef.current = null;
-      queueRef.current = [];
-      const note = "바꾸지 않고 전처럼 둘게요.";
-      if (undo.toOrder) showOrderCard(undo.cart, [botText(note)]);
-      else showCart(undo.cart, note);
-      return;
-    }
-    const queued = queueRef.current.shift();
-    if (queued) {
-      notesRef.current.notes.push("그 메뉴는 담지 않을게요.");
-      takeQueued(queued);
-      return;
-    }
-    const bag = cart();
-    if (bag?.items.length) {
-      showCart(bag, "그 메뉴는 담지 않을게요. 지금 담은 메뉴예요.");
-      return;
-    }
-    setStage("idle");
     botReply(() => push(botText("배달 주문을 그만할게요. 다른 게 필요하면 말씀해 주세요!")));
-  }
-
-  // 더 담을 메뉴의 수량·맛을 묻는 중에 "이대로 주문", "그만 담을게": 그 메뉴는 담지 않고 담아 둔 메뉴로 주문서를 보여 준다
-  function skipToOrder(bag: Order) {
-    const undo = undoRef.current;
-    undoRef.current = null;
-    if (undo) bag = undo.cart; // 맛을 다시 고르던 중이면 빼 두었던 메뉴까지 그대로
-    setPendingItem(null);
-    setPendingQty(null);
-    setChoosing(null);
-    queueRef.current = [];
-    notesRef.current = { added: [], notes: [] };
-    backToOrderRef.current = false;
-    showOrderCard(bag, [botText("고르시던 메뉴는 담지 않고, 담아 두신 메뉴로 주문서를 보여 드릴게요.")]);
-  }
-
-  // "얼마야?": 담은 메뉴 이름을 말했으면 그 줄의 금액, 담지 않은 메뉴면 1단위 값, 아니면 합계(메뉴가 여럿이면 줄마다)를 알려 주고 묻던 것을 다시 묻는다
-  function answerPrice(text: string, bag: Order, inCart: boolean) {
-    const named = findDeliveryItems(text); // 담지 않은 메뉴(다른 가게 것도)는 1단위 값을 알려 준다
-    const inBag = bag.items.filter((l) => named.some((d) => d.name === l.item));
-    const answer = inBag.length
-      ? `${inBag.map((l) => `${itemText(l)} ${itemPriceLabel(l)}`).join(", ")}이에요.`
-      : named.length === 1
-        ? `${withTopicParticle(named[0].name)} ${restaurantById(named[0].restaurantId).name}에서 1${named[0].unit}에 ${priceText(named[0])}이에요.`
-        : `지금 담은 메뉴는 모두 ${orderPriceLabel(bag)}이에요.${bag.items.length > 1 ? `\n${bag.items.map((l) => `${itemText(l)} ${won(l.price)}`).join(", ")}` : ""}`;
-    botReply(() =>
-      push(botText(`${answer}\n${inCart ? CART_QUESTION : ORDER_CARD_QUESTION}`), ...(inCart ? [] : [{ role: "bot", kind: "confirm" } as NewMessage])),
-    );
-  }
-
-  // 담은 메뉴를 모두 비우고 주문을 접는다
-  function cancelAll() {
-    startFresh();
-    setStage("idle");
-    botReply(() => push(botText("주문을 취소했어요. 다른 게 필요하면 말씀해 주세요!")));
-  }
-
-  // 담은 것과 다른 가게 메뉴를 말했을 때: 담은 것을 비우고 새로 시작할지 묻는다 (한 주문은 한 가게)
-  function askSwitchStore(items: DeliveryItem[], text: string, lines?: PendingAdd[]) {
-    const bag = cart()!;
-    setPendingItem(null);
-    setChoosing(null);
-    queueRef.current = [];
-    setPendingSwitch({ items, text, lines });
-    setStage("switchStore");
-    const other = restaurantById(items[0].restaurantId).name;
-    const head = `지금 담은 건 ${bag.store.name} 거예요. ${withTopicParticle(other)} 다른 가게라 한 주문에 같이 담을 수 없어요.`;
-    botReply(() =>
-      push(
-        botPrompt({
-          text: `${head}\n담은 것을 비우고 새로 시작할까요?`,
-          say: `${head} 담은 것을 비우고 새로 시작할까요?`,
-          choices: [
-            { label: "새로 시작", value: "응 새로 시작할게" },
-            { label: "담은 것 그대로", value: "아니 그대로 둘게" },
-          ],
-          noDirect: true,
-        }),
-      ),
-    );
-  }
-
-  // "더 담기": 그 가게의 메뉴를 보여 주고 고르게 한다
-  function showMoreMenu(bag: Order) {
-    const menu = availableDeliveryMenu().filter((d) => d.restaurantId === bag.storeId);
-    if (!menu.length) {
-      showCart(bag, "이 가게에 지금 더 담을 수 있는 메뉴가 없어요.");
-      return;
-    }
-    const prompt = pickDeliveryPrompt(menu);
-    setPendingItem(null);
-    setStage("menu");
-    botReply(() =>
-      push(
-        botPrompt({
-          ...prompt,
-          text: `${bag.store.name} 메뉴예요. 어떤 메뉴를 더 담을까요?\n이름을 말씀하시거나 아래에서 골라 주세요.`,
-          say: `어떤 메뉴를 더 담을까요? ${recommend((prompt.menu ?? []).map((d) => d.name))}`,
-        }),
-      ),
-    );
-  }
-
-  // "족발 빼줘", "소떡소떡 취소": 담은 메뉴 중 그 메뉴만 뺀다. 마지막 메뉴를 빼면 주문을 접는다. 뺄 메뉴 이름이 없으면 false
-  // resume: 다른 메뉴의 수량·맛을 묻는 중에 뺐을 때, 빼고 나서 다시 보여 줄 그 질문 (장바구니 카드·주문서 대신)
-  function removeFromCart(text: string, bag: Order, resume?: () => NewMessage): boolean {
-    if (!/빼|제외|취소|지워|삭제|없애/.test(text)) return false;
-    const typed = squash(text);
-    const named = new Set(findDeliveryItems(text, bag.storeId).map((d) => d.name));
-    const targets = bag.items.map((_, i) => i).filter((i) => named.has(bag.items[i].item) || typed.includes(squash(bag.items[i].item)));
-    if (!targets.length) return false;
-    // "족발 빼줘"인데 족발 소·족발 중이 다 담겨 있으면 어느 것인지 묻는다
-    if (targets.length > 1 && !/다\s|전부|모두/.test(text)) {
-      botReply(() =>
-        push(
-          botPrompt({
-            text: "어느 메뉴를 뺄까요?",
-            choices: targets.map((i) => ({ label: itemText(bag.items[i]), value: `${bag.items[i].item} 빼줘` })),
-            noDirect: true,
-          }),
-        ),
-      );
-      return true;
-    }
-    // 한 메뉴를 담긴 수량보다 적게 말했으면("3마리 중 1마리 빼줘") 그만큼만 뺀다
-    const less = parseQuantity(text);
-    const one = targets.length === 1 ? bag.items[targets[0]] : undefined;
-    if (one && less !== undefined && less >= 1 && less < one.qty) {
-      const left = one.qty - less;
-      const gone = withObjectParticle(itemText({ ...one, qty: less }));
-      const item = availableDeliveryMenu().find((d) => d.restaurantId === bag.storeId && d.name === one.item);
-      // 세트는 남은 세트 수만큼 맛을 다시 고른다 (고르면 다시 담긴다)
-      if (one.choices?.length && item?.choice && !resume) {
-        const rest = replaceItem(bag, targets[0]);
-        setCart(rest.items.length ? rest : null);
-        notesRef.current = { added: [], notes: [`${gone} 뺐어요. 남은 ${left}${one.unit}의 ${withObjectParticle(one.choiceLabel ?? "맛")} 다시 골라 주세요.`] };
-        undoRef.current = { cart: bag, toOrder: stage === "confirm" };
-        backToOrderRef.current = stage === "confirm";
-        startOrder(item, left);
-        return true;
-      }
-      if (!one.choices?.length) {
-        const each = (v: number | undefined) => (v === undefined ? undefined : (v / one.qty) * left);
-        const listPrice = each(one.listPrice);
-        const fewer = replaceItem(bag, targets[0], { ...one, qty: left, price: each(one.price)!, ...(listPrice !== undefined ? { listPrice } : {}) });
-        if (resume) {
-          cartRef.current = fewer;
-          botReply(() => push(botText(`${gone} 뺐어요.`), resume()));
-        } else if (stage === "cart") showCart(fewer, `${gone} 뺐어요.`);
-        else showOrderCard(fewer, [botText(`${gone} 뺐어요.`)]);
-        return true;
-      }
-    }
-    const removed = withObjectParticle(targets.map((i) => itemText(bag.items[i])).join(", "));
-    const next = withItems(bag, bag.items.filter((_, i) => !targets.includes(i)));
-    if (resume) {
-      cartRef.current = next.items.length ? next : null; // 묻던 질문(수량·맛)은 그대로 이어 간다
-      botReply(() => push(botText(`${removed} 뺐어요.`), resume()));
-      return true;
-    }
-    if (!next.items.length) {
-      startFresh();
-      setStage("idle");
-      botReply(() => push(botText(`${removed} 뺐어요. 담은 메뉴가 없어서 주문을 접었어요.\n다른 게 필요하면 말씀해 주세요!`)));
-      return true;
-    }
-    if (stage === "cart") showCart(next, `${removed} 뺐어요.`);
-    else showOrderCard(next, [botText(`${removed} 뺐어요.`)]);
-    return true;
-  }
-
-  // "간장치킨 말고 양념치킨으로", "치즈볼 대신 감자튀김": 담긴 앞 메뉴를 빼고 뒤 메뉴를 담는다. 바꾸는 말이 아니면 false
-  function replaceInCart(text: string, bag: Order): boolean {
-    const word = /말고|대신|빼고|바꿔|바꾸|변경/.exec(text);
-    if (!word) return false;
-    const named = menusNamedIn(text);
-    const inBag = (n: { item: DeliveryItem }) => bag.items.some((l) => l.item === n.item.name);
-    // 바꿀 메뉴: 장바구니에 없는 메뉴 (말고·대신·빼고 뒤에 말한 것, 아니면 "양념치킨으로 바꿔줘"처럼 하나만 말한 것)
-    const to = named.find((n) => n.start > word.index && !inBag(n)) ?? (named.length === 1 && !inBag(named[0]) ? named[0] : undefined);
-    if (!to || to.item.restaurantId !== bag.storeId) return false;
-    // 뺄 메뉴: 말한 담긴 메뉴, 말하지 않았으면 마지막에 담은 메뉴
-    const from = named.filter((n) => n !== to && inBag(n)).at(-1);
-    const at = from ? bag.items.findIndex((l) => l.item === from.item.name) : bag.items.length - 1;
-    const item = availableDeliveryMenu().find((d) => d.id === to.item.id);
-    if (at < 0 || !item) return false;
-    const old = bag.items[at];
-    const said = parseQuantity(to.part);
-    const qty = qtyInRange(said) ? said : old.unit === item.unit ? old.qty : 1;
-    const rest = replaceItem(bag, at);
-    setCart(rest.items.length ? rest : null);
-    setPendingItem(null);
-    setChoosing(null);
-    queueRef.current = [];
-    notesRef.current = { added: [], notes: [`${withObjectParticle(itemText(old))} 뺐어요.`] };
-    if (item.choice) undoRef.current = { cart: bag, toOrder: stage === "confirm" };
-    backToOrderRef.current = stage === "confirm";
-    startOrder(item, qty);
-    return true;
-  }
-
-  // "3개로 해줘": 마지막에 담은 메뉴(또는 이름을 말한 메뉴)의 수량을 바꾼다. 수량 바꾸는 말이 아니면 false
-  function changeCartQty(text: string, bag: Order): boolean {
-    const n = parseQuantity(text);
-    if (n === undefined) return false;
-    if (/더|추가|또\s/.test(text)) return false; // "소떡소떡 하나 더": 더 담는 말
-    const typed = squash(text);
-    const named = bag.items.filter((l) => typed.includes(squash(l.item)) || findDeliveryItems(text, bag.storeId).some((d) => d.name === l.item));
-    // 같은 세트가 맛이 겹쳐 두 줄로 담겼으면 한 메뉴로 본다 (줄을 다 빼고 그 수만큼 맛을 다시 고른다)
-    const sameSet = named.length > 1 && named.every((l) => l.item === named[0].item && l.choices?.length);
-    const target = named.length === 1 || sameSet ? named[0] : named.length === 0 ? bag.items.at(-1) : undefined;
-    if (!target) return false;
-    // 담긴 메뉴 이름을 말했으면 "로/으로"나 "바꿔"가 있을 때만 수량을 바꾼다 ("간장치킨 1마리로").
-    // 없으면("간장치킨 2마리") 그만큼 더 담는다 (아래에서 메뉴를 담는 흐름으로)
-    if (named.length && !QTY_CHANGE.test(withoutNames(text, bag.items.map((l) => l.item)))) return false;
-    const item = availableDeliveryMenu().find((d) => d.restaurantId === bag.storeId && d.name === target.item);
-    if (!item) return false;
-    // 수량 표현("2세트")을 빼고도 장바구니에 없는 다른 메뉴가 걸리면 수량 바꾸기가 아니라 더 담는 말이다 ("세트"가 세트 메뉴 키워드라도)
-    // (메뉴 이름을 다 말했으면 "2마리 치킨 세트 2세트로"의 "치킨"처럼 이름 속 낱말이 다른 메뉴에 걸려도 그 메뉴의 수량 바꾸기다)
-    if (!typed.includes(squash(target.item)) && findDeliveryItems(withoutQuantity(text, item.unit)).some((d) => !bag.items.some((l) => l.item === d.name))) return false;
-    if (!qtyInRange(n)) {
-      botReply(() => push(botText(rangeLead(item)), ...(stage === "confirm" ? [{ role: "bot", kind: "confirm" } as NewMessage] : [])));
-      return true;
-    }
-    const at = bag.items.indexOf(target);
-    // 세트 메뉴는 고를 맛 수가 바뀌므로 그 줄을 빼고 맛부터 다시 고른다 (고르면 다시 담긴다)
-    if (item.choice) {
-      const rest = sameSet ? withItems(bag, bag.items.filter((l) => l.item !== target.item)) : replaceItem(bag, at);
-      setCart(rest.items.length ? rest : null);
-      undoRef.current = { cart: bag, toOrder: stage === "confirm" };
-      backToOrderRef.current = stage === "confirm";
-      startOrder(item, n);
-      return true;
-    }
-    const next = replaceItem(bag, at, makeOrderItem(item, n));
-    const note = `${bag.items.length > 1 ? `${item.name} ` : ""}수량을 ${withRoParticle(`${n}${item.unit}`)} 바꿨어요.`;
-    if (stage === "cart") showCart(next, note);
-    else showOrderCard(next, [botText(note)]);
-    return true;
   }
 
   // 예약은 날짜 → 시간 → 인원 → 확인 순서. 이미 받은 값은 건너뛰고, 쓸 수 없는 값은 이유와 함께 다시 묻는다
@@ -1585,30 +1079,29 @@ export function OrderChatbot() {
           push(botPrompt({ ...deliveryPrompt(), text: "아직 주문하신 기록이 없어요.\n오늘은 이런 메뉴 어떠세요?" }));
         };
       }
-      // 지난 주문의 메뉴들을 지금 메뉴 목록·가격으로 다시 담는다 (메뉴가 하나고 새로 말한 수량이 있으면 그 수량).
-      // 세트 메뉴는 지난번에 고른 맛 그대로 (수량이 바뀌었거나 그 맛이 메뉴에서 빠졌으면 맛부터 다시 고른다)
-      const { lines, gone, repick } = rebuildLines(last.storeId, last.order.items, parseQuantity(text));
-      if (!lines.length && !repick) {
-        const name = gone[0]?.name ?? "지난번 메뉴";
+      const item = availableDeliveryMenu().find((d) => d.restaurantId === last.storeId && d.name === last.order.item);
+      if (!item) {
         return () => {
-          if (!tryDelivery(name)) push(botPrompt({ ...deliveryPrompt(), text: `${withTopicParticle(name)} 지금 주문할 수 없어요.\n대신 이런 메뉴는 어떠세요?` }));
+          if (!tryDelivery(last.order.item)) push(botPrompt({ ...deliveryPrompt(), text: `${last.order.item}은(는) 지금 주문할 수 없어요.\n대신 이런 메뉴는 어떠세요?` }));
         };
       }
+      const said = parseQuantity(text);
+      const qty = qtyInRange(said) ? said : last.order.qty;
       // 지금 계정의 배달지로 보낸다 (로그인이나 배달지가 없으면 그 안내에서 멈춘다)
       return () => {
-        startFresh();
-        const base = storeOrder(last.storeId, lines, deliveryInfo());
-        if (deliveryBlocked({ ...(repick ? { itemId: repick.item.id, qty: repick.qty } : {}), ...resumeCartOf(base) }) || !hasDelivery(myDelivery)) return;
-        setCart(lines.length ? base : null);
-        if (repick) {
-          push(...goneNote(gone));
-          startOrder(repick.item, repick.qty);
+        if (deliveryBlocked({ itemId: item.id, qty }) || !hasDelivery(myDelivery)) return;
+        // 세트 메뉴는 지난번에 고른 맛 그대로 (수량이 바뀌었거나 그 맛이 메뉴에서 빠졌으면 맛부터 다시 고른다)
+        const picked = (last.order.choices ?? []).map((c) => item.choice?.options.find((o) => o.name === c.name));
+        const choices = item.choice && qty === last.order.qty && picked.length === item.choice.count * qty && picked.every(Boolean) ? (picked as ChosenOption[]) : undefined;
+        if (item.choice && !choices) {
+          startOrder(item, qty);
           return;
         }
-        setLastItem(lastItemOf(base));
-        setCart(base);
+        const next = makeOrder(item, qty, myDelivery, choices);
+        setLastItem(item);
+        setOrder(next);
         setStage("confirm");
-        push(...goneNote(gone), botText(`지난번에 드신 ${withRoParticle(orderItemText(base))} 주문서를 만들었어요.`), { role: "bot", kind: "order", order: base });
+        push(botText(`지난번에 드신 ${orderItemText(next)}로 주문서를 만들었어요.`), { role: "bot", kind: "order", order: next });
       };
     });
   }
@@ -1631,7 +1124,7 @@ export function OrderChatbot() {
   // 오늘의 메뉴와 할인 중인 메뉴 ("할인하는 거 있어?", "오늘의 메뉴 뭐야?")
   function showDeals() {
     const deals = popularFirst(availableDeliveryMenu()).filter((d) => d.special || d.discountPct);
-    startFresh(true); // 담아 둔 메뉴는 그대로 (다른 가게 메뉴를 고르면 새로 시작할지 묻는다)
+    startFresh();
     setStage("menu");
     if (deals.length === 0) {
       botReply(() => push(botPrompt({ ...deliveryPrompt(), text: "지금 진행 중인 할인이나 오늘의 메뉴는 없어요.\n대신 이런 메뉴는 어떠세요?" })));
@@ -1655,7 +1148,7 @@ export function OrderChatbot() {
     const word = MEAL_WORD[mealOf(now)];
     const items = recommendItems(now);
     const canReorder = session?.role === "user"; // 지난 주문은 로그인한 고객님 계정에만 있다
-    startFresh(true); // 담아 둔 메뉴는 그대로
+    startFresh();
     setStage("menu");
     botReply(() =>
       push(
@@ -1705,9 +1198,8 @@ export function OrderChatbot() {
 
     // "치킨집 예약", "근처 맛집": 메뉴 이름(치킨)이 들어 있어도 식당·예약 말이면 배달이 아니라 식당 찾기로 본다
     const wantsRestaurant = menuIntent(text) === "식당";
-    // 담는 중·주문 확인 단계에서 빠른 메뉴(배달·식당 등)를 고르거나 식당·예약 얘기를 하면 주문을 접고 아래 일반 처리로 넘어간다
-    const switchingMenu = (stage === "confirm" || stage === "cart" || stage === "switchStore") && (!!quickMenuReply(text) || wantsRestaurant);
-    const bag = cart();
+    // 주문 확인 단계에서 빠른 메뉴(배달·식당 등)를 고르거나 식당·예약 얘기를 하면 주문을 접고 아래 일반 처리로 넘어간다
+    const switchingMenu = stage === "confirm" && (!!quickMenuReply(text) || wantsRestaurant);
 
     // 로그인하러 갈지, 계정 관리로 갈지 묻는 중. 가겠다는 말이면 가고, 다른 말이면 아래 일반 처리로
     if (stage === "needLogin" || stage === "needContact") {
@@ -1725,168 +1217,64 @@ export function OrderChatbot() {
     // "처음"이면 맨 처음 주문서, 아니면 지금 보고 있는 것 바로 전 주문서
     const earlier = refersToEarlierOrder(text);
     if (earlier) {
-      // 보여 드린 주문서와 장바구니 (같은 주문서가 장바구니로도 주문서로도 나왔으면 한 번만)
-      const snaps = messages
-        .flatMap((m) => (m.role === "bot" && (m.kind === "order" || m.kind === "cart") ? [{ order: m.order, midway: m.kind === "cart" && !!m.midway }] : []))
-        .filter((x, i, all) => all.findIndex((y) => y.order === x.order) === i);
-      // 바로 다음 모습이 이 모습에 메뉴를 더 담기만 한 것이면 담는 도중이라 뺀다 (수량을 바꾸거나 뺀 모습은 되살릴 수 있다)
-      const drafts = snaps.filter((_, i) => !snaps[i + 1]?.midway).map((x) => x.order);
-      const draft = earlier.first ? drafts[0] : drafts.filter((o) => o !== cart()).at(-1);
+      const shown = messages.flatMap((m) => (m.role === "bot" && m.kind === "order" ? [m.order] : []));
+      const draft = earlier.first ? shown[0] : shown.filter((o) => o !== order).at(-1);
       if (draft) {
         restoreOrder(draft, text, earlier.first);
         return;
       }
-      // 되살릴 다른 주문서가 없는데 담는 중이면 지금 담은 메뉴를 그대로 보여 준다 (방금 담은 메뉴를 버리지 않게)
-      if (bag?.items.length) {
-        showCart(bag, "지금 담아 두신 메뉴예요.");
-        return;
-      }
     }
 
-    // 담아 둔 배달 메뉴가 있으면 어느 단계에서든(식당 찾기·예약 중에도) "장바구니", "담은 거 보여줘"로 다시 본다
-    if (bag?.items.length && stage !== "cart" && stage !== "confirm" && CART_WORDS.test(text) && findDeliveryItems(text).length === 0) {
-      startFresh(true);
-      showCart(bag, "담아 두신 메뉴예요.");
-      return;
-    }
-
-    // 다른 가게 메뉴를 말해 "담은 것을 비우고 새로 시작할까요?"라고 묻는 중
-    if (stage === "switchStore" && pendingSwitch && bag && !switchingMenu) {
-      const keep = /아니|그대로|둘게|말고|취소/.test(text);
-      if (!keep && (isYes(text) || /새로|비우/.test(text))) {
-        setPendingSwitch(null);
-        setCart(null);
-        if (pendingSwitch.lines) addNamed(pendingSwitch.lines, pendingSwitch.text);
-        else deliverItems(pendingSwitch.items, pendingSwitch.text);
-        return;
-      }
-      if (keep) {
-        setPendingSwitch(null);
-        showCart(bag, "담은 메뉴 그대로 둘게요.");
-        return;
-      }
-      botReply(() => push(botText("담은 것을 비우고 새로 시작할까요? '새로 시작' 또는 '그대로'로 답해 주세요.")));
-      return;
-    }
-
-    // 담는 중("더 담을까요?")이거나 주문서를 보는 중: 메뉴를 더 담거나 빼거나 수량을 바꾸거나, 주문으로 넘어간다
-    if ((stage === "cart" || stage === "confirm") && bag && !switchingMenu) {
-      const inCart = stage === "cart";
-      // "주소 바꿔줘", "연락처 바꿀래": 배달지·연락처는 계정 관리에서 바꾼다. 바꾸고 돌아오면 담은 메뉴 그대로 주문서를 다시 만든다
+    if (stage === "confirm" && order && !switchingMenu) {
+      // "주소 바꿔줘", "연락처 바꿀래": 배달지·연락처는 계정 관리에서 바꾼다. 바꾸고 돌아오면 같은 메뉴·수량으로 주문서를 다시 만든다
       const change = deliveryChange(text);
-      if (change) {
+      const ordered = availableDeliveryMenu().find((d) => d.restaurantId === order.storeId && d.name === order.item);
+      if (change && ordered) {
         sendAway(
           "account",
           `${change === "address" ? "배달지" : "연락처"}는 계정 관리에서 바꿀 수 있어요.\n바꾸고 돌아오시면 같은 메뉴로 주문서를 다시 만들어 드릴게요.`,
-          resumeCartOf(bag),
+          { itemId: ordered.id, qty: order.qty },
         );
         return;
       }
-      const namesMenu = findDeliveryItems(text).length > 0;
-      // "얼마야?", "다 해서 얼마": 합계를, 메뉴 이름을 말했으면 그 메뉴 값을 알려 주고 묻던 것을 다시 묻는다
-      if (PRICE_ASK.test(text)) {
-        answerPrice(text, bag, inCart);
-        return;
-      }
-      // 메뉴 이름 없이 "하나 더", "두 개 더": 마지막에 담은 메뉴를 그만큼 더 담는다. "추가", "더"만 말하면 그 가게 메뉴를 보여 준다
-      if (!namesMenu && /더|추가|또/.test(text) && !MORE_NEGATED.test(text)) {
-        const n = parseQuantity(text);
-        const last = lastItemOf(bag);
-        if (n !== undefined && last) {
-          if (!qtyInRange(n)) botReply(() => push(botText(rangeLead(last))));
-          else startOrder(last, n);
+      // "3마리로 해줘": 수량만 바꿔 주문서를 다시 보여 준다 ("해줘"가 들어 있어도 '응'보다 먼저 본다)
+      const newQty = parseQuantity(text);
+      const item = availableDeliveryMenu().find((d) => d.restaurantId === order.storeId && d.name === order.item);
+      // 수량 표현("2세트")을 빼고도 다른 메뉴가 걸리지 않으면 수량을 바꾸는 말이다 ("세트"가 세트 메뉴 키워드라도)
+      if (newQty !== undefined && item && findDeliveryItems(withoutQuantity(text, item.unit)).every((d) => d.id === item.id)) {
+        if (!qtyInRange(newQty)) {
+          botReply(() => push(botText(rangeLead(item)), { role: "bot", kind: "confirm" }));
           return;
         }
-        if (n === undefined && /^\s*(추가|더)\s*(요|해\s?줘|줘|할게요?|할래요?)?\s*[.!?~]*\s*$/.test(text)) {
-          showMoreMenu(bag);
+        // 세트 메뉴는 고를 맛 수가 바뀌므로 맛부터 다시 고른다
+        if (item.choice) {
+          setOrder(null);
+          startOrder(item, newQty);
           return;
         }
-      }
-      // "더 담기", "더 시킬게": 그 가게 메뉴를 보여 준다 (주문서를 보는 중에도. 메뉴 이름을 같이 말했으면 아래에서 바로 담는다. "더 담을 거 없어"는 아니다)
-      if (MORE.test(text) && !MORE_NEGATED.test(text) && !namesMenu) {
-        showMoreMenu(bag);
+        // 배달지·연락처는 지금 주문서의 것을 그대로 둔다
+        const info = order.address && order.phone ? { address: order.address, phone: order.phone } : myDelivery;
+        const next = makeOrder(item, newQty, hasDelivery(info) ? info : undefined);
+        setOrder(next);
+        botReply(() => push(botText(`수량을 ${newQty}${item.unit}로 바꿨어요.`), { role: "bot", kind: "order", order: next }));
         return;
       }
-      // "간장치킨 말고 양념치킨으로": 바꿔 담는다
-      if (replaceInCart(text, bag)) return;
-      // "족발 빼줘": 그 메뉴만 뺀다. "3개로 해줘": 수량을 바꾼다 ("해줘"가 들어 있어도 '응'보다 먼저 본다)
-      if (removeFromCart(text, bag)) return;
-      // 메뉴 이름 없이 "다 빼줘", "전부 지워", "장바구니 비워줘": 모두 비운다
-      if (!namesMenu && /(다|전부|모두|싹|전체)\s?(빼|지워|삭제|없애|취소)|비워|비우/.test(text)) {
-        cancelAll();
-        return;
-      }
-      if (changeCartQty(text, bag)) return;
-      // 가게 정보("청전 치킨공방 영업시간")·가게 정보의 "배달 주문" 버튼("청전 치킨공방 배달"): 가게 이름 속 "치킨"을 메뉴로 보기 전에 받는다.
-      // 답만 하는 가게 정보 뒤에는 담던 단계(더 담을까요?·주문할까요?)를 그대로 이어 간다 ('응'이면 다음으로)
-      const storeAsk = detectIntent(text) === "storeInfo";
-      const storeOrderAsk = !!restaurantNamed(text) && menuIntent(text) === "배달";
-      if (storeAsk || storeOrderAsk) {
-        const back = stage;
-        routeGeneral(text);
-        if (storeAsk && (!!restaurantNamed(text) || (refersToPlace(text) && !!lastPlace))) setStage(back);
-        return;
-      }
-      // "떡볶이도 추가", "소떡소떡 하나 더", 메뉴 이름만: 그 메뉴를 더 담는다 (수량·맛을 묻는 흐름 그대로)
-      if (findDeliveryItems(text).length > 0) {
-        tryDelivery(text);
-        return;
-      }
-      // "취소": 담은 것을 모두 비운다 (메뉴 이름을 같이 말했으면 위에서 그 메뉴만 뺐다)
-      if (/취소/.test(text)) {
-        cancelAll();
-        return;
-      }
-      // "지난번 메뉴 다시 주문해줘", "아까 그거 하나 더": '주문해줘'가 들어 있어도 지금 장바구니를 주문하는 말이 아니다
-      const intent = detectIntent(text);
-      if (intent === "reorder" || refersToItem(text)) {
-        routeGeneral(text);
-        return;
-      }
-      // 담는 중: "그만 담을게", "더 안 시킬게", "이제 됐어", "아니"는 더 담지 않겠다는 말(주문서로). 주문서를 보는 중에는 '응'만 주문한다
-      const done = isYes(text) || (inCart && (DONE_ADDING.test(text) || isNo(text)));
-      if (!done && DROP_ALL.test(text)) {
-        cancelAll();
-        return;
-      }
-      if (!done && !inCart && isNo(text)) {
-        showCart(bag, "주문하지 않고, 담은 메뉴는 그대로 둘게요.\n더 담거나 빼실 수 있어요. 모두 지우려면 '취소'라고 말씀해 주세요.");
-        return;
-      }
-      if (done) {
+      if (isNo(text)) {
+        setStage("idle");
+        setOrder(null);
+        botReply(() => push(botText("주문을 취소했어요. 다른 게 필요하면 말씀해 주세요!")));
+      } else if (isYes(text) && storePausedUntil(order.storeId ?? "")) {
         // 주문서를 보는 사이에 가게가 일시 중지했으면 주문하지 않는다
-        const until = storePausedUntil(bag.storeId ?? "");
-        if (until) {
-          startFresh();
-          setStage("idle");
-          botReply(() => push(botText(`${pausedText(bag.store.name, until)}\n이 주문은 접었어요. 다른 메뉴를 주문하시겠어요?`)));
-          return;
-        }
-        if (inCart) showOrderCard(bag);
-        else placeOrder(bag);
-        return;
-      }
-      // "내 주문 어디쯤 왔어", "할인하는 거 있어?", "영업시간" 같은 다른 질문에는 답한다 (담은 메뉴는 그대로 둔다)
-      if (intent && intent !== "orderCancel") {
-        const back = stage;
-        routeGeneral(text);
-        // 인사처럼 그 자리에서 답만 하는 말이면 담던 단계를 그대로 이어 간다
-        if (intent === "greeting" || intent === "thanks") setStage(back);
-        return;
-      }
-      if (inCart) {
-        botReply(() =>
-          push(
-            botPrompt({
-              text: `${CART_QUESTION}\n'${CART_MORE}' 또는 '${CART_CHECKOUT}'으로 답해 주세요. 메뉴 이름을 말씀하시면 그 메뉴를 더 담아요.`,
-              say: `${CART_QUESTION} ${CART_MORE} 또는 ${CART_CHECKOUT}이라고 말씀해 주세요. 메뉴 이름을 말씀하시면 그 메뉴를 더 담아요.`,
-              choices: [
-                { label: CART_MORE, value: CART_MORE },
-                { label: CART_CHECKOUT, value: CART_CHECKOUT },
-              ],
-            }),
-          ),
-        );
+        const until = storePausedUntil(order.storeId ?? "")!;
+        setStage("idle");
+        setOrder(null);
+        botReply(() => push(botText(`${pausedText(order.store.name, until)}\n이 주문은 접었어요. 다른 메뉴를 주문하시겠어요?`)));
+      } else if (isYes(text)) {
+        placeOrder(order);
+      } else if (findDeliveryItems(text).length > 0) {
+        // 다른 메뉴를 말하면 그 메뉴로 다시
+        setOrder(null);
+        tryDelivery(text);
       } else {
         botReply(() => push(botText(`${ORDER_CARD_QUESTION} '응' 또는 '취소'로 답해 주세요.`), { role: "bot", kind: "confirm" }));
       }
@@ -1921,15 +1309,6 @@ export function OrderChatbot() {
         botReply(() => push(choicePrompt(choosing.item, choosing.qty, lead)));
         return;
       }
-      // 맛을 고르는 중에 "치즈볼 빼줘": 담아 둔 메뉴에서 빼고, 맛 고르기를 다시 보여 준다
-      const held = cart();
-      if (held?.items.length && removeFromCart(text, held, () => choicePrompt(choosing.item, choosing.qty))) return;
-      // (맛을 다시 고르려고 빼 둔 메뉴가 있으면 그것까지 그대로)
-      const kept = held?.items.length ? held : undoRef.current?.cart;
-      if (kept && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
-        skipToOrder(kept);
-        return;
-      }
       if (isNo(text)) {
         cancelDelivery();
         return;
@@ -1943,20 +1322,11 @@ export function OrderChatbot() {
 
     // 배달 수량: 숫자만 오면 그 수량으로 주문서를 만든다. 다른 메뉴를 말하면 아래 일반 처리에서 메뉴부터 다시 받는다
     if (stage === "qty" && pendingItem) {
-      // 수량을 묻는 중에 "치즈볼 빼줘": 담아 둔 메뉴에서 빼고, 묻던 수량을 다시 묻는다
-      const held = cart();
-      if (held?.items.length && removeFromCart(text, held, () => deliveryQty(pendingItem))) return;
       const qty = parseQuantity(text);
       // "1세트"처럼 단위가 메뉴 키워드("세트")와 같아도 수량으로 본다. 수량 표현을 빼고도 다른 메뉴가 걸릴 때만 메뉴를 다시 받는다
       if (qty !== undefined && findDeliveryItems(withoutQuantity(text, pendingItem.unit)).every((d) => d.id === pendingItem.id)) {
         if (qtyInRange(qty)) startOrder(pendingItem, qty);
         else botReply(() => push(deliveryQty(pendingItem, rangeLead(pendingItem))));
-        return;
-      }
-      // (맛을 다시 고르려고 빼 둔 메뉴가 있으면 그것까지 그대로)
-      const kept = held?.items.length ? held : undoRef.current?.cart;
-      if (kept && DONE_ADDING.test(text) && findDeliveryItems(text).length === 0) {
-        skipToOrder(kept);
         return;
       }
       if (isNo(text)) {
@@ -1973,21 +1343,10 @@ export function OrderChatbot() {
     const understood = () =>
       !!menuIntent(text) || !!detectIntent(text) || !!matchFood(text) || !!restaurantNamed(text) || !!fuzzyFind(text) || refersToItem(text);
 
-    // 배달 메뉴 고르는 중 ("더 담기"로 왔으면 담은 메뉴가 있다)
+    // 배달 메뉴 고르는 중
     if (stage === "menu") {
       // 식당·예약 말이나 가게 이름("청전 치킨공방 영업시간")이 있으면 아래 일반 처리가 그 가게 기준으로 다룬다
       if (!wantsRestaurant && !restaurantNamed(text) && tryDelivery(text)) return;
-      if (bag?.items.length) {
-        // 더 담지 않겠다는 말이면 담은 메뉴로 주문서를, "취소"·"그만할래"면 모두 비운다
-        if (/취소/.test(text) || (DROP_ALL.test(text) && !DONE_ADDING.test(text))) {
-          cancelAll();
-          return;
-        }
-        if (isNo(text) || DONE_ADDING.test(text)) {
-          showOrderCard(bag, [botText("그럼 담은 메뉴로 주문서를 보여 드릴게요.")]);
-          return;
-        }
-      }
       if (isNo(text)) {
         cancelDelivery();
         return;
@@ -2093,22 +1452,9 @@ export function OrderChatbot() {
     // 주문 조회·취소는 "주문"이 들어 있어 배달로 오해하기 쉬우므로 가장 먼저
     if (intent === "orderStatus") return showOrderStatus();
     if (intent === "orderCancel") return askCancelOrder();
-    // 담아 둔 배달 메뉴가 있을 때 (식당 예약·가게 정보를 보고 돌아왔을 때): "장바구니"·"응"은 담은 메뉴를, "이대로 주문"·"주문할게"는 주문서를 보여 준다
-    const held = cart();
-    if (held?.items.length && !place && menu !== "식당" && findDeliveryItems(text).length === 0 && intent !== "reorder") {
-      if (/이대로|주문(할|해|하자|하고)|결제/.test(text)) return showOrderCard(held);
-      if (CART_WORDS.test(text) || isYes(text)) return showCart(held, "담아 두신 메뉴예요.");
-    }
     // "아까 그거 하나 더": 이번 대화에서 말한 메뉴, 없으면 지난 주문
     if (refersToItem(text) && lastItem) {
-      // 담아 둔 메뉴는 그대로 두고 그 메뉴를 더 담는다
-      startFresh(true);
-      deliverItems([lastItem], text);
-      return;
-    }
-    // "하나 더", "두 개 더": 주문을 마쳤거나 접은 뒤에도 마지막에 고른 메뉴를 그만큼 새로 담는다
-    if (MORE_OF_LAST.test(text) && !MORE_NEGATED.test(text) && lastItem) {
-      startFresh(true);
+      startFresh();
       deliverItems([lastItem], text);
       return;
     }
@@ -2129,7 +1475,7 @@ export function OrderChatbot() {
       const paused = storePausedUntil(place.id);
       const placeItemNamed = deliveryMenu().some((d) => d.restaurantId === place.id && squash(text).includes(squash(d.name)));
       if (!wantsBooking && paused && (menu === "배달" || placeItemNamed)) {
-        startFresh(true);
+        startFresh();
         const sameFood = availableDeliveryMenu().filter((d) => restaurantById(d.restaurantId).food === place.food);
         offerInstead(pausedText(place.name, paused), sameFood.length ? sameFood : availableDeliveryMenu());
         return;
@@ -2137,14 +1483,13 @@ export function OrderChatbot() {
       const storeMenu = availableDeliveryMenu().filter((d) => d.restaurantId === place.id);
       const named = findDeliveryItems(text, place.id); // 그 가게 메뉴 중에서 ("못말리는파닭 간장" → 간장 파닭을 고를 수 있는 메뉴)
       if (!wantsBooking && storeMenu.length && (named.length || menu === "배달" || !hasSlots(slots))) {
-        startFresh(true); // 다른 가게 메뉴면 deliverItems 가 새로 시작할지 묻는다
+        startFresh();
         setLastPlace(place);
         deliverItems(named.length ? named : storeMenu, text);
         return;
       }
-      const lead = keptNote();
-      startFresh(true);
-      beginReservation(place, { ...rsvSlots, ...slots }, lead);
+      startFresh();
+      beginReservation(place, { ...rsvSlots, ...slots });
       return;
     }
 
@@ -2157,20 +1502,18 @@ export function OrderChatbot() {
     }
 
     if (intent === "nearest" && !food) {
-      const lead = keptNote();
-      startFresh(true);
+      startFresh();
       setRsvSlots(slots);
-      showRestaurants("", nearestRestaurants(), { lead, heading: "가장 가까운 곳들이에요!\n마음에 드는 곳을 고르시면 예약을 도와드릴게요." });
+      showRestaurants("", nearestRestaurants(), { heading: "가장 가까운 곳들이에요!\n마음에 드는 곳을 고르시면 예약을 도와드릴게요." });
       return;
     }
 
     // "중식 식당 예약해줘": 식당 말과 음식 종류를 같이 말했으면 바로 근처 식당 추천으로
     if (menu === "식당") {
       if (food) {
-        const lead = keptNote();
-        startFresh(true);
+        startFresh();
         setRsvSlots(slots);
-        showRestaurants(food.label, nearbyRestaurants(food.key), { lead });
+        showRestaurants(food.label, nearbyRestaurants(food.key));
       } else {
         startMenu("식당");
         setRsvSlots(slots);
@@ -2203,10 +1546,9 @@ export function OrderChatbot() {
 
     // "한식 먹고 싶어": 배달 메뉴에는 없는 음식 종류만 말했으면 근처 식당 추천으로
     if (food) {
-      const lead = keptNote();
-      startFresh(true);
+      startFresh();
       setRsvSlots(slots);
-      showRestaurants(food.label, nearbyRestaurants(food.key), { lead });
+      showRestaurants(food.label, nearbyRestaurants(food.key));
       return;
     }
 
@@ -2284,21 +1626,12 @@ export function OrderChatbot() {
     );
   }
 
-  // 담아 둔 배달 메뉴가 있는데 식당 찾기·예약으로 넘어갈 때 알려 줄 말 (메뉴는 지우지 않는다)
-  const keptNote = (): NewMessage[] =>
-    cart()?.items.length ? [botText("담아 두신 배달 메뉴는 그대로 둘게요. 나중에 '장바구니'라고 말씀하시면 다시 보여 드려요.")] : [];
-
-  // 진행 중이던 주문·예약을 접고 처음부터. keepCart 가 아니면 담은 메뉴도 비운다
-  function startFresh(keepCart = false) {
+  // 진행 중이던 주문·예약을 접고 처음부터
+  function startFresh() {
     setPendingItem(null);
     setPendingQty(null);
     setChoosing(null);
-    if (!keepCart) setCart(null);
-    setPendingSwitch(null);
-    queueRef.current = [];
-    backToOrderRef.current = false;
-    undoRef.current = null;
-    notesRef.current = { added: [], notes: [] };
+    setOrder(null);
     setRsv(null);
     setRsvSlots({});
     setCancelTarget(null);
@@ -2307,11 +1640,9 @@ export function OrderChatbot() {
   // 배달·식당의 첫 질문으로. 식당도 배달처럼 바로 추천 목록(카드)을 보여 주고, 다른 음식을 말하면 그 음식 맛집으로 바꾼다
   function startMenu(menu: "배달" | "식당") {
     if (menu === "식당") {
-      const lead = keptNote();
-      startFresh(true);
+      startFresh();
       // 카드 아래에는 음식 종류 버튼을 붙여 눌러서 그 음식 맛집으로 바로 갈 수 있게 한다
       showRestaurants("", recommendRestaurants(new Date()), {
-        lead,
         heading: RESTAURANT_PICKS_HEADING,
         choices: FOOD_PROMPT.choices,
         placeholder: FOOD_PROMPT.placeholder,
@@ -2320,13 +1651,6 @@ export function OrderChatbot() {
       return;
     }
     if (deliveryBlocked({})) return;
-    // 담아 둔 메뉴가 있으면 비우지 않고 그 가게 메뉴를 보여 준다 ("배달" 빠른 메뉴를 눌러도 장바구니가 사라지지 않게)
-    const bag = cart();
-    if (bag?.items.length) {
-      startFresh(true);
-      showMoreMenu(bag);
-      return;
-    }
     const reply = menuReply(menu)!;
     startFresh();
     setStage(reply.next);
@@ -2336,45 +1660,18 @@ export function OrderChatbot() {
   // 주문서를 확인하면 계좌이체 주문으로 넣는다. 서버가 그 매장의 입금 계좌와 입금 기한을 붙여 돌려주면 입금 안내를 보여 준다.
   // 그사이 가게가 일시 중지했거나 품절됐거나 입금 계좌가 없으면 서버가 거절하므로 그 이유를 알린다
   function placeOrder(placed: Order) {
-    setCart(null);
+    setOrder(null);
     setStage("done");
     botReplyAsync(async () => {
-      // 주문 직전에 매장 설정·메뉴를 새로 받아, 주문서를 보는 사이 가격이 바뀌었으면 주문하지 않고 바뀐 금액으로 다시 확인받는다
-      await refresh(["settings", "menu"]).catch(() => undefined);
-      const fresh = repriced(placed);
-      if (fresh && fresh.price !== placed.price) {
-        return () => {
-          setCart(fresh);
-          setStage("confirm");
-          push(botText("그사이 가격이 바뀌었어요. 바뀐 금액으로 다시 확인해 주세요."), { role: "bot", kind: "order", order: fresh });
-        };
-      }
       try {
         const rec = await addOrder(placed);
         return () => push({ role: "bot", kind: "info", card: transferCard(rec) });
       } catch (e) {
         const why = e instanceof Error && e.message ? e.message : "잠시 후 다시 시도해 주세요.";
-        // 서버가 거절하면(그사이 품절·일시 중지 등) 매장 설정·메뉴를 새로 받아, 지금 담을 수 있는 메뉴는 장바구니에 그대로 남긴다
-        await refresh(["settings", "menu"]).catch(() => undefined);
         return () => {
-          const head = botText(`${why}\n주문이 접수되지 않았어요.`);
-          const storeId = placed.storeId ?? "";
-          const { lines, gone, repick } = storePausedUntil(storeId) ? { lines: [], gone: [], repick: undefined } : rebuildLines(storeId, placed.items);
-          if (!lines.length && !repick) {
-            setStage("idle");
-            push(head);
-            return;
-          }
-          const info = placed.address && placed.phone ? { address: placed.address, phone: placed.phone } : deliveryInfo();
-          const kept = storeOrder(storeId, lines, info);
-          setCart(lines.length ? kept : null);
-          if (repick) {
-            push(head, ...goneNote(gone));
-            startOrder(repick.item, repick.qty);
-            return;
-          }
-          setStage("cart");
-          push(head, ...goneNote(gone), { role: "bot", kind: "cart", text: gone.length ? "남은 메뉴는 그대로 담아 두었어요." : "담은 메뉴는 그대로 있어요.", order: kept });
+          setStage("idle");
+          push(botText(`${why}
+주문이 접수되지 않았어요.`));
         };
       }
     });
@@ -2386,10 +1683,7 @@ export function OrderChatbot() {
     timersRef.current = [];
     setMessages(greeting());
     setStage("idle");
-    setCart(null);
-    setPendingSwitch(null);
-    queueRef.current = [];
-    notesRef.current = { added: [], notes: [] };
+    setOrder(null);
     setThinking(false);
     setManualInputFor(null);
     setPickerOpenFor(null);
@@ -2524,8 +1818,6 @@ export function OrderChatbot() {
   // 주문 확인과 예약 확인이 같은 "응 해줘 / 취소" 버튼을 쓴다
   const activeConfirmId =
     stage === "confirm" || stage === "rsvConfirm" ? lastIdOf(messages, ["order", "reservation", "confirm"]) : undefined;
-  // 장바구니의 "더 담기 · 이대로 주문"은 더 담을지 묻는 중인 마지막 장바구니 말풍선에서만
-  const activeCartId = stage === "cart" ? lastIdOf(messages, ["cart"]) : undefined;
   const activeRestaurantsId = stage === "restaurant" || stage === "info" ? lastIdOf(messages, ["restaurants"]) : undefined;
 
   // delivery: 배달 주문서에는 "배달지 변경"도 붙인다
@@ -2601,35 +1893,6 @@ export function OrderChatbot() {
       }
       case "confirm":
         return confirmActions(m.id);
-      case "cart": {
-        const active = m.id === activeCartId && !thinking;
-        return (
-          <>
-            {m.text}
-            <div>
-              <div className="card">
-                <dl>
-                  {cartCardRows(m.order).map((row, i) => (
-                    <Fragment key={i}>
-                      <dt>{row.label}</dt>
-                      <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
-                    </Fragment>
-                  ))}
-                </dl>
-              </div>
-              <div style={{ marginTop: 10 }}>{CART_QUESTION}</div>
-              <div className="actions">
-                <button type="button" disabled={!active} onClick={() => handle(CART_MORE)}>
-                  {CART_MORE}
-                </button>
-                <button className="primary" type="button" disabled={!active} onClick={() => handle(CART_CHECKOUT)}>
-                  {CART_CHECKOUT}
-                </button>
-              </div>
-            </div>
-          </>
-        );
-      }
       case "order":
         return (
           <>
@@ -2637,8 +1900,8 @@ export function OrderChatbot() {
             <div>
               <div className="card">
                 <dl>
-                  {orderCardRows(m.order).map((row, i) => (
-                    <Fragment key={i}>
+                  {orderCardRows(m.order).map((row) => (
+                    <Fragment key={row.label}>
                       <dt>{row.label}</dt>
                       <dd className={row.emphasis ? "price" : undefined}>{row.value}</dd>
                     </Fragment>
@@ -2714,8 +1977,8 @@ export function OrderChatbot() {
             {m.card.title}
             <div className="card">
               <dl>
-                {m.card.rows.map((row, i) => (
-                  <Fragment key={i}>
+                {m.card.rows.map((row) => (
+                  <Fragment key={row.label}>
                     <dt>{row.label}</dt>
                     <dd className={row.emphasis ? "price" : undefined}>
                       {row.tel ? <TelLink phone={row.value} /> : row.copy ? <AccountText value={row.value} /> : row.value}
@@ -2930,7 +2193,7 @@ export function OrderChatbot() {
               ...c,
               pickable: c.list && (c.messageId === activeChoicesId || c.messageId === activeRestaurantsId),
               picker: c.choices ? choicePickerFor(c.messageId) : undefined,
-              optionsActive: !thinking && [activeChoicesId, activeCartId, activeConfirmId].includes(c.messageId),
+              optionsActive: !thinking && [activeChoicesId, activeConfirmId].includes(c.messageId),
             }))}
             thinking={thinking}
             onPick={pickCaptionRow}

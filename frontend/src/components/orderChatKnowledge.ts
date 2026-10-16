@@ -11,26 +11,18 @@ export interface Store {
 
 export type Unit = string; // 마리·판·인분 등 (catalog.json 의 deliveryMenu[].unit)
 
-// 배달 주문서 (확인하면 계좌이체 주문으로 들어간다). 한 주문에 한 매장의 메뉴를 여러 개 담는다 (장바구니).
-// 서버(server/app.mjs POST /api/orders)도 같은 모양으로 저장하고, 장바구니 전에 저장된 메뉴 하나짜리 주문은 서버가 읽을 때 items 하나짜리로 바꿔 준다
+// 배달 주문서 (확인하면 계좌이체 주문으로 들어간다)
 
-// 담은 메뉴 한 줄
-export interface OrderItem {
+export interface Order {
+  store: Store; // 매장
   item: string; // 메뉴 이름
   qty: number;
   unit: string; // 마리·판·인분
-  price: number; // 이 줄의 금액 (수량만큼, 할인했으면 할인한 금액, 세트면 고른 맛의 추가금까지)
+  price: number; // 결제 금액 (할인했으면 할인한 금액)
   discountPct?: number; // 할인율 (%)
   listPrice?: number; // 할인 전 금액
   choices?: ChosenOption[]; // 세트 메뉴에서 고른 맛 (추가금은 price 에 들어 있다)
   choiceLabel?: string; // 고른 것의 이름 ("맛")
-}
-
-export interface Order {
-  store: Store; // 매장
-  items: OrderItem[]; // 담은 메뉴들 (모두 같은 매장)
-  price: number; // 결제 금액: 담은 메뉴 금액의 합계
-  listPrice?: number; // 할인 전 합계 (할인한 메뉴가 있을 때만)
   address?: string; // 배달지
   phone?: string; // 가게가 연락할 전화번호
   storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
@@ -52,8 +44,6 @@ export interface BankAccount {
   holder: string; // 예금주
 }
 export const PAYMENT_LABEL = "계좌이체";
-// 한 주문에 담을 수 있는 메뉴 가짓수 (server/stores.mjs 의 MAX_ORDER_ITEMS 와 같게)
-export const MAX_ORDER_ITEMS = 10;
 export const PAY_WINDOW_MIN = 30; // 입금 기한 (server/stores.mjs 의 PAY_WINDOW_MS 와 같게)
 // 입금 계좌를 등록할 때 고르는 은행
 export const BANKS = [
@@ -206,14 +196,6 @@ export const withObjectParticle = (word: string) => withParticle(word, "을", "�
 export const withTopicParticle = (word: string) => withParticle(word, "은", "는");
 export const withSubjectParticle = (word: string) => withParticle(word, "이", "가");
 export const withCopula = (word: string) => withParticle(word, "이에요", "예요"); // 간장치킨이에요 / 피자예요
-// 로/으로: "2마리로", "3묶음으로". ㄹ 받침은 "로"(1일로). 괄호로 끝나면("…(+1,000원))") 괄호 앞 글자로 정한다
-export function withRoParticle(word: string): string {
-  const spoken = word.trim().replace(/\)+$/, "");
-  const code = spoken.slice(-1).charCodeAt(0) - 0xac00;
-  if (code >= 0 && code <= 11171 && code % 28 === 8) return `${word}로`;
-  const picked = withParticle(spoken, "으로", "로").slice(spoken.length);
-  return word + picked;
-}
 
 // ---- 배달 ----
 // 배달 메뉴 (catalog.json 의 deliveryMenu). 매장은 식당 찾기의 식당과 같은 곳이다 (restaurantId).
@@ -253,20 +235,9 @@ export const choicesText = (choices: ChosenOption[]) =>
   choices.map((c) => (c.extra ? `${c.name}(+${won(c.extra)})` : c.name)).join(", ");
 export const choicesExtra = (choices: ChosenOption[] | undefined) => (choices ?? []).reduce((sum, c) => sum + c.extra, 0);
 
-// 담은 메뉴 한 줄을 글로: "간장치킨 2마리", 세트면 고른 맛까지 "2마리 치킨 세트 1세트 (간장 파닭, 양념 파닭)"
-export const itemText = (line: Pick<OrderItem, "item" | "qty" | "unit">) => `${line.item} ${line.qty}${line.unit}`;
-export const itemLabel = (line: Pick<OrderItem, "item" | "qty" | "unit" | "choices">) =>
-  `${itemText(line)}${line.choices?.length ? ` (${choicesText(line.choices)})` : ""}`;
-// 주문 카드 위 칸의 짧은 제목: 메뉴가 여럿이면 첫 메뉴 + "외 N가지" (전체는 카드 안 "메뉴" 줄에 한 줄씩)
-export const orderHeadText = (order: Pick<Order, "items">) =>
-  order.items.length > 1 ? `${itemText(order.items[0])} 외 ${order.items.length - 1}가지` : order.items[0] ? itemText(order.items[0]) : "";
-// 주문한 메뉴를 한 줄로 (사장님·관리자·내 주문 화면·입금 안내): 여러 개면 쉼표로 이어 "족발 소 1개, 보쌈 중 2개 (…)"
-export const orderItemText = (order: Pick<Order, "items">) => order.items.map(itemLabel).join(", ");
-// 세트 메뉴의 고른 맛 줄들 (화면의 표에): 메뉴가 하나면 "맛", 여럿이면 어느 메뉴의 맛인지 앞에 붙인다
-export const choiceRows = (order: Pick<Order, "items">): { label: string; value: string }[] =>
-  order.items.flatMap((line) =>
-    line.choices?.length ? [{ label: order.items.length > 1 ? `${line.item} ${line.choiceLabel ?? "맛"}` : (line.choiceLabel ?? "맛"), value: choicesText(line.choices) }] : [],
-  );
+// 주문한 메뉴를 한 줄로 (사장님·관리자·내 주문 화면): "2마리 치킨 세트 1세트 (간장 파닭, 양념 파닭)"
+export const orderItemText = (order: Pick<Order, "item" | "qty" | "unit" | "choices">) =>
+  `${order.item} ${order.qty}${order.unit}${order.choices?.length ? ` (${choicesText(order.choices)})` : ""}`;
 
 // 고를 것을 부르는 말 (띄어쓰기 없이): 전체 이름과, 여러 맛이 같이 쓰는 끝말("파닭", "치킨")을 뗀 짧은 이름.
 // "간장 파닭" → "간장", "뿌링클 치킨" → "뿌링클". 한 맛에만 있는 끝말("굽는 불닭"의 "불닭")은 떼지 않는다
@@ -334,20 +305,6 @@ export const priceText = (d: DeliveryItem) =>
 
 // 맛 고르기가 있는 메뉴는 맛 이름으로도 찾는다 ("간장" → 간장 파닭을 고를 수 있는 1마리 치킨·세트)
 const flavorNamed = (d: DeliveryItem, typed: string) => !!d.choice && choiceKeys(d.choice.options).some(({ key }) => typed.includes(key));
-
-// 한 문장에 메뉴 이름을 여럿 말했을 때("간장치킨 1마리랑 양념치킨 2마리"): 말한 순서대로 그 메뉴와, 그 이름부터 다음 메뉴 이름 전까지의 말(part, 수량을 찾는다).
-// 다른 이름 안에 든 짧은 이름("소떡소떡" ⊂ "소떡소떡 2개 묶음")은 긴 이름으로 본다. 판매 중지 메뉴는 빼고, 품절 메뉴는 넣는다 (부르는 쪽이 알린다).
-// 이름은 띄어쓰기가 달라도 찾는다 ("양념 치킨")
-export function menusNamedIn(text: string): { item: DeliveryItem; start: number; part: string }[] {
-  const hits: { item: DeliveryItem; start: number; end: number }[] = [];
-  for (const d of deliveryMenu()) {
-    const m = new RegExp(d.name.trim().split(/\s+/).map(escapeRegExp).join("\\s*"), "i").exec(text);
-    if (m) hits.push({ item: d, start: m.index, end: m.index + m[0].length });
-  }
-  const kept = hits.filter((h) => !hits.some((o) => o !== h && o.start <= h.start && o.end >= h.end && o.end - o.start > h.end - h.start));
-  kept.sort((a, b) => a.start - b.start);
-  return kept.map((h, i) => ({ item: h.item, start: h.start, part: text.slice(h.start, kept[i + 1]?.start ?? text.length) }));
-}
 
 // storeId: 그 가게 메뉴 중에서만 찾는다 ("못말리는파닭 간장"처럼 가게 이름을 말했을 때)
 export function findDeliveryItems(text: string, storeId?: string): DeliveryItem[] {
@@ -434,60 +391,22 @@ export function quantityQuestion(item: DeliveryItem, lead?: string): string {
   return `${lead ?? info}\n몇 ${item.unit} 주문할까요?`;
 }
 
-// 담을 메뉴 한 줄. choices: 세트 메뉴에서 고른 맛 (추가금을 세트 값에 더한다. 할인은 세트 값에만)
-export function makeOrderItem(item: DeliveryItem, qty: number, choices?: ChosenOption[]): OrderItem {
+// delivery: 손님이 알려 준 배달지·연락처 (없으면 주문서에 비워 둔다. 챗봇은 받은 뒤에만 주문서를 만든다)
+// choices: 세트 메뉴에서 고른 맛 (추가금을 세트 값에 더한다. 할인은 세트 값에만)
+export function makeOrder(item: DeliveryItem, qty: number, delivery?: { address: string; phone: string }, choices?: ChosenOption[]): Order {
+  const store = restaurantById(item.restaurantId);
   const extra = choicesExtra(choices);
   return {
+    store: { name: store.name, distance: km(store.distanceKm) },
+    storeId: store.id,
     item: item.name,
     qty,
     unit: item.unit,
     price: item.price * qty + extra,
     ...(item.discountPct ? { discountPct: item.discountPct, listPrice: (item.listPrice ?? item.price) * qty + extra } : {}),
     ...(choices?.length ? { choices, choiceLabel: item.choice?.label ?? "맛" } : {}),
+    ...(delivery ? { address: delivery.address, phone: delivery.phone } : {}),
   };
-}
-
-// 그 매장의 주문서. delivery: 손님의 배달지·연락처 (없으면 비워 둔다. 챗봇은 받은 뒤에만 주문서를 만든다)
-export function storeOrder(storeId: string, items: OrderItem[], delivery?: { address: string; phone: string }): Order {
-  const store = restaurantById(storeId);
-  return withItems(
-    { store: { name: store.name, distance: km(store.distanceKm) }, storeId: store.id, items: [], price: 0, ...(delivery ? { address: delivery.address, phone: delivery.phone } : {}) },
-    items,
-  );
-}
-
-// 담은 메뉴를 바꿔 끼우고 합계(할인 전 합계는 할인한 메뉴가 있을 때만)를 다시 계산한 주문서
-export function withItems(order: Order, items: OrderItem[]): Order {
-  const { listPrice: _old, ...rest } = order;
-  const price = items.reduce((sum, line) => sum + line.price, 0);
-  const listPrice = items.reduce((sum, line) => sum + (line.listPrice ?? line.price), 0);
-  return { ...rest, items, price, ...(listPrice > price ? { listPrice } : {}) };
-}
-
-// 메뉴를 더 담는다. 같은 메뉴가 이미 있으면 합친다 (수량을 더하고 고른 맛을 이어 붙인다).
-// 세트의 맛은 같은 맛을 한 번만 고를 수 있으므로, 맛이 겹치는 세트는 따로 둔다 (서버 POST /api/orders 와 같은 규칙)
-export function addItem(order: Order, line: OrderItem): Order {
-  const names = (l: OrderItem) => (l.choices ?? []).map((c) => c.name);
-  const at = order.items.findIndex((l) => l.item === line.item && !names(l).some((n) => names(line).includes(n)));
-  if (at < 0) return withItems(order, [...order.items, line]);
-  const same = order.items[at];
-  const merged: OrderItem = {
-    ...same,
-    qty: same.qty + line.qty,
-    price: same.price + line.price,
-    ...(same.listPrice !== undefined || line.listPrice !== undefined ? { listPrice: (same.listPrice ?? same.price) + (line.listPrice ?? line.price) } : {}),
-    ...(same.choices || line.choices ? { choices: [...(same.choices ?? []), ...(line.choices ?? [])] } : {}),
-  };
-  return withItems(order, order.items.map((l, i) => (i === at ? merged : l)));
-}
-
-// 담은 메뉴 한 줄을 빼거나(line 없음) 바꾼다
-export const replaceItem = (order: Order, at: number, line?: OrderItem): Order =>
-  withItems(order, order.items.flatMap((l, i) => (i !== at ? [l] : line ? [line] : [])));
-
-// 메뉴 하나짜리 주문서 (지난 주문 되살리기·테스트에서 쓴다)
-export function makeOrder(item: DeliveryItem, qty: number, delivery?: { address: string; phone: string }, choices?: ChosenOption[]): Order {
-  return storeOrder(item.restaurantId, [makeOrderItem(item, qty, choices)], delivery);
 }
 
 // ---- 식당 예약 ----
@@ -814,17 +733,8 @@ export const isYes = (text: string) =>
 export const isNo = (text: string) => has(text, ["아니", "취소", "싫어", "안 해", "안해", "no"]);
 
 export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
-// 주문 금액(합계) 표시. 할인한 메뉴가 있으면 같이 적는다: 모든 메뉴가 같은 할인율이면 "32,000원 (20% 할인)",
-// 일부 메뉴만 할인했거나 할인율이 서로 다르면 할인 전 합계를 적는다 ("… (할인 전 50,000원)". 전체가 할인된 것처럼 보이지 않게)
-export function orderPriceLabel(order: Pick<Order, "items" | "price" | "listPrice">): string {
-  const pcts = new Set(order.items.map((l) => l.discountPct ?? 0));
-  const [pct] = [...pcts];
-  if (pcts.size === 1 && pct > 0) return `${won(order.price)} (${pct}% 할인)`;
-  if (order.listPrice && order.listPrice > order.price) return `${won(order.price)} (할인 전 ${won(order.listPrice)})`;
-  return won(order.price);
-}
-// 메뉴 한 줄의 금액 표시 (여러 메뉴를 담은 주문서에서 줄마다)
-export const itemPriceLabel = (line: OrderItem) => (line.discountPct ? `${won(line.price)} (${line.discountPct}% 할인)` : won(line.price));
+// 주문 금액 표시. 할인된 주문이면 할인율도 같이 ("32,000원 (20% 할인)")
+export const orderPriceLabel = (order: Order) => (order.discountPct ? `${won(order.price)} (${order.discountPct}% 할인)` : won(order.price));
 
 // 채팅의 주문서 카드에 들어갈 줄들. emphasis 는 파랗게 강조할 금액
 // 값이 비어 있는 줄은 뺀다 (관리자가 직접 만든 매장은 주소·대표 메뉴·거리가 없을 수 있다)
@@ -840,39 +750,17 @@ export interface OrderRow {
   tel?: boolean; // 값이 전화번호: 누르면 전화를 건다
 }
 
-// 담은 메뉴 줄들: 메뉴마다 "음식" 줄(여러 개면 줄마다 금액도), 세트면 바로 아래에 고른 맛 줄
-export const itemRows = (order: Pick<Order, "items">): OrderRow[] => {
-  const many = order.items.length > 1;
-  return order.items.flatMap((line) => [
-    { label: "음식", value: many ? `${itemText(line)} · ${itemPriceLabel(line)}` : itemText(line) },
-    ...(line.choices?.length ? [{ label: line.choiceLabel ?? "맛", value: choicesText(line.choices) }] : []),
-  ]);
-};
-// 금액 줄의 이름: 메뉴가 여럿이면 "합계"
-export const priceLabelOf = (order: Pick<Order, "items">) => (order.items.length > 1 ? "합계" : "가격");
-
 export function orderCardRows(order: Order): OrderRow[] {
   return [
     { label: "매장", value: `${order.store.name}${order.store.distance ? ` · ${order.store.distance}` : ""}` },
-    ...itemRows(order),
-    { label: priceLabelOf(order), value: orderPriceLabel(order), emphasis: true },
+    { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
+    ...(order.choices?.length ? [{ label: order.choiceLabel ?? "맛", value: choicesText(order.choices) }] : []),
+    { label: "가격", value: orderPriceLabel(order), emphasis: true },
     { label: "결제", value: `${PAYMENT_LABEL} (주문 후 ${PAY_WINDOW_MIN}분 안에 입금)` },
     { label: "배달지", value: order.address ?? "" },
     ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
   ];
 }
-
-// 장바구니 카드("더 담을까요?")에 들어갈 줄들: 매장, 담은 메뉴들, 합계
-export const cartCardRows = (order: Order): OrderRow[] => [
-  { label: "매장", value: order.store.name },
-  ...itemRows(order),
-  { label: priceLabelOf(order), value: orderPriceLabel(order), emphasis: true },
-];
-
-// 장바구니 말풍선 위아래 문구
-export const CART_QUESTION = "더 담을까요?";
-export const CART_MORE = "더 담기";
-export const CART_CHECKOUT = "이대로 주문";
 
 // 주문서 카드 위아래 문구
 export const ORDER_CARD_TITLE = "주문 내역을 확인해 주세요.";
