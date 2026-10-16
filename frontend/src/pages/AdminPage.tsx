@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { passwordError, usernameError } from "../auth/auth";
-import { FOODS, RESTAURANTS, choicesText, formatDate, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
+import { FOODS, RESTAURANTS, choicesText, formatDate, isMockPayment, orderItemText, untilText, orderPriceLabel, withStoreSettings, won, type BankAccount } from "../components/orderChatKnowledge";
 import {
   addOwner,
   approveOwner,
@@ -118,7 +118,7 @@ function AllTab({ rows, orders }: { rows: Row[]; orders: OrderRecord[] }) {
         onChange={setKind}
       />
       {kind === "transfers" ? (
-        <TransfersView orders={orders} />
+        <TransfersView orders={orders.filter((o) => !isMockPayment(o.payment))} />
       ) : (
       <section className="dash-section">
         <div className="section-head">
@@ -158,7 +158,8 @@ function AllTab({ rows, orders }: { rows: Row[]; orders: OrderRecord[] }) {
   );
 }
 
-// 관리자 거래 내역: 계좌이체 주문마다 입금 계좌·입금자명·금액·입금 확인 시각·상태를 본다 (입금 확인은 사장님이 한다)
+// 관리자 거래 내역: 계좌이체 주문마다 입금 계좌·입금자명·금액·입금 확인 시각·상태를 본다 (입금 확인은 사장님이 한다).
+// 모의 결제(자체 테스트용) 주문은 돈이 오가지 않아 여기서 빼고 주문 목록에서만 본다
 type PayFilter = "all" | "입금 대기" | "입금 확인" | "취소";
 const payState = (o: OrderRecord): Exclude<PayFilter, "all"> => (o.status === "입금 대기" ? "입금 대기" : o.status === "취소" ? "취소" : "입금 확인");
 function TransfersView({ orders }: { orders: OrderRecord[] }) {

@@ -48,6 +48,11 @@ export const sameStoreName = (a, b) => a.replace(/\s+/g, "").toLowerCase() === b
 // 입금 기한(PAY_WINDOW_MS) 안에 확인되지 않으면 서버가 자동으로 취소한다
 export const PAYMENT_METHOD = "계좌이체";
 export const PAY_WINDOW_MS = 30 * 60_000;
+// 모의 결제 (자체 테스트용): 실제로 돈이 오가지 않는다. 손님이 화면의 결제 창에서 결제를 마치면 바로 "접수"로 들어온다.
+// 주문 기록의 결제수단은 "카카오페이 (모의 결제)"처럼 남겨 사장님·관리자가 진짜 결제와 헷갈리지 않게 한다
+export const MOCK_PAYMENTS = ["신용카드", "카카오페이", "토스페이"];
+export const mockPaymentName = (method) => `${method} (모의 결제)`;
+export const isMockPayment = (payment) => String(payment ?? "").endsWith("(모의 결제)");
 export const ORDER_STATUSES = new Set(["입금 대기", "접수", "준비 중", "완료", "취소"]);
 export const RESERVATION_STATUSES = new Set(["예약 확정", "방문 완료", "취소"]);
 // 사장님이 바꿀 수 있는 다음 상태 (끝난 주문·예약은 되돌리지 못한다)

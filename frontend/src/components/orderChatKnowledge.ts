@@ -11,7 +11,7 @@ export interface Store {
 
 export type Unit = string; // 마리·판·인분 등 (catalog.json 의 deliveryMenu[].unit)
 
-// 배달 주문서 (확인하면 계좌이체 주문으로 들어간다)
+// 배달 주문서 (확인하면 결제수단을 골라 주문한다: 모의 결제 또는 계좌이체)
 
 export interface Order {
   store: Store; // 매장
@@ -26,24 +26,48 @@ export interface Order {
   address?: string; // 배달지
   phone?: string; // 가게가 연락할 전화번호
   storeId?: string; // 사장님 화면에서 내 매장 주문을 찾는 열쇠 (식당 id)
-  // 아래는 서버가 주문을 받을 때 채운다 (계좌이체)
+  // 아래는 서버가 주문을 받을 때 채운다 (bank·depositor·payBy 는 계좌이체만)
   bank?: BankAccount; // 입금할 계좌 (그 매장 계좌. 주문할 때의 것 그대로)
   depositor?: string; // 입금자명 (주문한 회원 이름)
   payBy?: number; // 입금 기한 (밀리초). 지나면 서버가 자동으로 취소한다
-  paidAt?: number; // 사장님이 입금을 확인한 시각
+  paidAt?: number; // 결제가 끝난 시각: 계좌이체는 사장님이 입금을 확인한 시각, 모의 결제는 주문한 시각
   storePhone?: string; // 가게 전화번호 (그 매장 사장님 계정의 번호. 주문할 때의 것 그대로)
   cancelNote?: string; // 자동 취소된 이유
 }
 
-// ---- 결제: 계좌이체 하나 ----
-// 결제 대행(PG)을 붙일 수 없어 계좌이체만 받는다. 주문하면 "입금 대기"로 들어오고,
-// 사장님이 통장을 보고 "입금 확인"을 누르면 접수돼 준비를 시작한다 (기한 안에 확인되지 않으면 자동 취소)
+// ---- 결제: 모의 결제(신용카드·카카오페이·토스페이) 또는 계좌이체 ----
+// 모의 결제는 자체 테스트용이다. 결제 창(PaymentSheet)에서 결제를 누르면 돈이 오가지 않고 결제된 것으로 보고 바로 "접수"된다.
+// 계좌이체는 주문하면 "입금 대기"로 들어오고, 사장님이 통장을 보고 "입금 확인"을 누르면 접수돼 준비를 시작한다 (기한 안에 확인되지 않으면 자동 취소)
 export interface BankAccount {
   bank: string; // 은행 이름
   account: string; // 계좌번호 (숫자와 '-')
   holder: string; // 예금주
 }
 export const PAYMENT_LABEL = "계좌이체";
+export type PaymentId = "card" | "kakao" | "toss" | "transfer";
+export interface PaymentMethod {
+  id: PaymentId;
+  label: string; // 서버에 보내는 결제수단 이름 (server/stores.mjs 의 MOCK_PAYMENTS·PAYMENT_METHOD 와 같게)
+  icon: string; // 결제 창 머리의 작은 글자
+  mock: boolean; // 모의 결제 (돈이 오가지 않는다)
+}
+export const PAYMENTS: PaymentMethod[] = [
+  { id: "card", label: "신용카드", icon: "카드", mock: true },
+  { id: "kakao", label: "카카오페이", icon: "K", mock: true },
+  { id: "toss", label: "토스페이", icon: "T", mock: true },
+  { id: "transfer", label: PAYMENT_LABEL, icon: "이체", mock: false },
+];
+// 주문 기록의 결제수단이 모의 결제인지 ("카카오페이 (모의 결제)")
+export const isMockPayment = (payment: string) => payment.endsWith("(모의 결제)");
+// "카카오로 할게", "카드로", "토스", "무통장으로"처럼 줄여 말해도 결제수단을 찾는다
+export function findPayment(text: string): PaymentMethod | undefined {
+  const t = squash(text);
+  if (/계좌|이체|무통장|입금/.test(t)) return PAYMENTS[3];
+  if (/카카오|카톡/.test(t)) return PAYMENTS[1];
+  if (/토스/.test(t)) return PAYMENTS[2];
+  if (/카드|신용|체크/.test(t)) return PAYMENTS[0];
+  return undefined;
+}
 export const PAY_WINDOW_MIN = 30; // 입금 기한 (server/stores.mjs 의 PAY_WINDOW_MS 와 같게)
 // 입금 계좌를 등록할 때 고르는 은행
 export const BANKS = [
@@ -756,7 +780,7 @@ export function orderCardRows(order: Order): OrderRow[] {
     { label: "음식", value: `${order.item} ${order.qty}${order.unit}` },
     ...(order.choices?.length ? [{ label: order.choiceLabel ?? "맛", value: choicesText(order.choices) }] : []),
     { label: "가격", value: orderPriceLabel(order), emphasis: true },
-    { label: "결제", value: `${PAYMENT_LABEL} (주문 후 ${PAY_WINDOW_MIN}분 안에 입금)` },
+    { label: "결제", value: "주문하면 골라요 (모의 결제 또는 계좌이체)" },
     { label: "배달지", value: order.address ?? "" },
     ...(order.phone ? [{ label: "연락처", value: order.phone }] : []),
   ];

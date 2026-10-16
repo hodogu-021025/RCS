@@ -13,7 +13,8 @@
 //   POST   /api/auth/withdraw          { password }                   회원 탈퇴 (고객님·사장님). 주문·예약 기록은 이름을 지우고 남긴다
 //   GET    /api/orders                 고객: 내 것 / 사장님: 내 매장 / 관리자: 전체
 //   POST   /api/orders                 { order }                      로그인한 고객님만. order.address·order.phone 필수.
-//                                      결제는 계좌이체: "입금 대기"로 들어오고, 응답의 order.bank 계좌로 order.payBy 까지 입금한다
+//                                      payment: "계좌이체"(기본) → "입금 대기"로 들어오고, 응답의 order.bank 계좌로 order.payBy 까지 입금한다
+//                                               "신용카드"·"카카오페이"·"토스페이" → 모의 결제(자체 테스트용, 돈이 오가지 않음): 바로 "접수"
 //   PATCH  /api/orders/:id             { status }                     그 매장 사장님·관리자 (입금 대기 → 접수 가 입금 확인)
 //   POST   /api/orders/:id/cancel                                     주문한 고객님이 취소 (입금 대기·접수 상태일 때만)
 //   GET    /api/reservations           (주문과 같은 범위)
@@ -61,9 +62,11 @@ import {
   CUSTOMER_CANCELABLE,
   ORDER_NEXT,
   ORDER_STATUSES,
+  MOCK_PAYMENTS,
   PAYMENT_METHOD,
   PAY_WINDOW_MS,
   cleanBankAccount,
+  mockPaymentName,
   RESERVATION_NEXT,
   RESERVATION_STATUSES,
   hoursError,
@@ -375,15 +378,22 @@ export function createApp({ db, verifier, mailer, adminEmail, now = () => Date.n
         address,
         phone,
       };
-      // 결제는 계좌이체: 그 매장의 입금 계좌를 주문에 적어 두고, 사장님이 입금을 확인할 때까지 "입금 대기". 계좌가 없는 매장은 주문을 받지 않는다
-      const bank = db.bankAccount(o.storeId);
-      if (!bank) throw bad(`${withTopic(storeName(o.storeId))} 아직 입금 계좌를 등록하지 않아 주문을 받을 수 없어요.`);
-      // 입금 기한은 주문 시각 기준: 기한이 지났는지도 같은 주문 시각(created_at)으로 본다
-      const at = now();
-      Object.assign(order, { bank, depositor: user.name, payBy: at + PAY_WINDOW_MS });
       // 가게 전화번호 (손님이 입금·배달 일로 가게에 전화할 수 있게). 사장님이 번호를 등록하지 않았으면 싣지 않는다
       const shopPhone = storePhone(o.storeId);
       if (shopPhone) order.storePhone = shopPhone;
+      const at = now();
+      // 모의 결제(신용카드·카카오페이·토스페이): 화면의 결제 창에서 이미 결제를 마친 것으로 보고 바로 "접수". 입금 계좌는 쓰지 않는다
+      const payment = str(body.payment, 20);
+      if (payment && payment !== PAYMENT_METHOD && !MOCK_PAYMENTS.includes(payment)) throw bad("결제수단이 맞지 않아요.");
+      if (MOCK_PAYMENTS.includes(payment)) {
+        order.paidAt = at;
+        return db.addOrder({ customer: user.username, customerName: user.name, payment: mockPaymentName(payment), storeId: o.storeId, order, status: "접수", createdAt: at });
+      }
+      // 계좌이체: 그 매장의 입금 계좌를 주문에 적어 두고, 사장님이 입금을 확인할 때까지 "입금 대기". 계좌가 없는 매장은 계좌이체 주문을 받지 않는다
+      const bank = db.bankAccount(o.storeId);
+      if (!bank) throw bad(`${withTopic(storeName(o.storeId))} 아직 입금 계좌를 등록하지 않아 계좌이체 주문을 받을 수 없어요.`);
+      // 입금 기한은 주문 시각 기준: 기한이 지났는지도 같은 주문 시각(created_at)으로 본다
+      Object.assign(order, { bank, depositor: user.name, payBy: at + PAY_WINDOW_MS });
       return db.addOrder({ customer: user.username, customerName: user.name, payment: PAYMENT_METHOD, storeId: o.storeId, order, status: "입금 대기", createdAt: at });
     }],
     // 손님이 취소: 주문한 고객님이 로그인해 있고, 가게가 아직 준비를 시작하지 않았을 때만

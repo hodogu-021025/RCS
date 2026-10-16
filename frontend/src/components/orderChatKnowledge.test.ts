@@ -8,6 +8,8 @@ import {
   findDeliveryItems,
   orderCardRows,
   accountDigits,
+  findPayment,
+  isMockPayment,
   findRestaurant,
   matchChoices,
   formatDate,
@@ -133,11 +135,22 @@ describe("배달 메뉴", () => {
   });
 });
 
-describe("계좌이체", () => {
-  it("주문서에 결제 방법(계좌이체)과 입금 기한을 알리고, 계좌번호는 숫자만 복사한다", () => {
+describe("결제: 모의 결제와 계좌이체", () => {
+  it("주문서에는 주문하면 결제수단을 고른다고 알리고, 계좌번호는 숫자만 복사한다", () => {
     const rows = orderCardRows(makeOrder(item("간장치킨"), 1));
-    expect(rows.find((r) => r.label === "결제")?.value).toBe("계좌이체 (주문 후 30분 안에 입금)");
+    expect(rows.find((r) => r.label === "결제")?.value).toBe("주문하면 골라요 (모의 결제 또는 계좌이체)");
     expect(accountDigits("123456-01-234567")).toBe("12345601234567");
+  });
+
+  it("줄여 말해도 결제수단을 찾고, 기록의 결제수단으로 모의 결제인지 안다", () => {
+    expect(findPayment("카카오로 할게")?.label).toBe("카카오페이");
+    expect(findPayment("토스")?.label).toBe("토스페이");
+    expect(findPayment("카드로 결제")?.label).toBe("신용카드");
+    expect(findPayment("무통장 입금")?.label).toBe("계좌이체");
+    expect(findPayment("계좌이체로")?.mock).toBe(false);
+    expect(findPayment("응 해줘")).toBeUndefined();
+    expect(isMockPayment("카카오페이 (모의 결제)")).toBe(true);
+    expect(isMockPayment("계좌이체")).toBe(false);
   });
 });
 

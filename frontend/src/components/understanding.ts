@@ -26,6 +26,7 @@ import {
   toMinutes,
   withStoreSettings,
   accountDigits,
+  isMockPayment,
   won,
   type DeliveryItem,
   type Order,
@@ -359,11 +360,27 @@ export function transferCard(o: OrderRecord): InfoCard {
   };
 }
 
+// 모의 결제(자체 테스트용)를 마친 직후: 결제수단·금액과 도착 예정
+export function paidCard(o: OrderRecord): InfoCard {
+  const { order } = o;
+  return {
+    title: `${won(order.price)} 결제가 끝나 주문이 접수됐어요!`,
+    rows: [
+      { label: "주문", value: orderLabel(o) },
+      { label: "결제", value: o.payment },
+      { label: "도착 예정", value: `약 ${hhmm(o.createdAt + ETA_MINUTES * 60_000)}`, emphasis: true },
+      ...storePhoneRows(order),
+    ],
+    note: "모의 결제라 실제로 돈이 나가지 않았어요. 가게에서 곧 준비를 시작해요.",
+  };
+}
+
 // 내 주문 상태를 표로: 주문 내용, 상태, (입금 전이면) 입금 안내, (오는 중이면) 도착 예정
 export function orderStatusCard(o: OrderRecord): InfoCard {
   const coming = o.status === "접수" || o.status === "준비 중";
   return {
-    title: STATUS_TITLE[o.status],
+    // 모의 결제로 바로 접수된 주문은 입금 확인을 거치지 않았다
+    title: o.status === "접수" && isMockPayment(o.payment) ? "결제가 끝나 주문이 접수됐어요." : STATUS_TITLE[o.status],
     rows: [
       { label: "주문", value: orderLabel(o) },
       { label: "상태", value: o.status },

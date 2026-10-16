@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useSession } from "../auth/auth";
 import { AccountText, CopyButton } from "../components/CopyButton";
 import { TelLink } from "../components/TelLink";
-import { accountDigits, formatDate, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
+import { accountDigits, formatDate, isMockPayment, untilText, orderCardRows, orderPriceLabel } from "../components/orderChatKnowledge";
 import { cancelMyOrder, useDb, type OrderRecord } from "../data/db";
 import { DashLayout } from "./DashLayout";
 import { formatDateTime, statusClass } from "./format";
@@ -154,7 +154,13 @@ function OrderItem({ record: o }: { record: OrderRecord }) {
           {error}
         </p>
       )}
-      {o.status === "접수" && <p className="hint">입금이 확인된 주문이에요. 취소하면 가게에서 입금하신 금액을 돌려드려요.</p>}
+      {o.status === "접수" && (
+        <p className="hint">
+          {isMockPayment(o.payment)
+            ? "모의 결제로 접수된 주문이에요. 취소해도 실제로 나간 돈은 없어요."
+            : "입금이 확인된 주문이에요. 취소하면 가게에서 입금하신 금액을 돌려드려요."}
+        </p>
+      )}
       {(o.status === "입금 대기" || o.status === "접수") && (
         <div className="record-actions">
           <button type="button" className="btn small" disabled={busy} onClick={() => void cancel()}>

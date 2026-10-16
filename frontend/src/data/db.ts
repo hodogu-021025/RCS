@@ -144,8 +144,9 @@ export const toDateKey = (d: Date) =>
 
 // ---- 바꾸는 요청들. 성공하면 관련된 것을 다시 받아 온다 ----
 // 결제는 계좌이체 하나라 결제수단은 보내지 않는다. 돌려받은 주문에 입금 계좌·기한이 들어 있다
-export async function addOrder(order: Order): Promise<OrderRecord> {
-  const rec = await api<OrderRecord>("POST", "/api/orders", { order });
+// payment: "계좌이체"(기본) 또는 모의 결제 "신용카드"·"카카오페이"·"토스페이" (모의 결제는 서버가 바로 접수한다)
+export async function addOrder(order: Order, payment?: string): Promise<OrderRecord> {
+  const rec = await api<OrderRecord>("POST", "/api/orders", { order, ...(payment ? { payment } : {}) });
   if (getSession()) await refresh(["records"]);
   return rec;
 }

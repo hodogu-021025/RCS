@@ -29,10 +29,13 @@ function send(text: string) {
 }
 
 // 메뉴와 수량을 한 번에 말해 주문서까지 간 뒤 "응 해줘"
-function orderAndConfirm() {
+// 주문서를 확인하고 결제수단 버튼을 누른다 (pay: 버튼 글자. 모의 결제는 "카카오페이 (모의)"처럼)
+function orderAndConfirm(pay = "계좌이체") {
   send("간장치킨 1마리 시켜줘");
   wait(1000);
   fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
+  wait(700);
+  fireEvent.click(screen.getByRole("button", { name: pay }));
   wait(700);
 }
 
@@ -109,14 +112,20 @@ describe("OrderChatbot", () => {
     expect(screen.queryByRole("button", { name: "국물떡볶이" })).not.toBeInTheDocument();
   });
 
-  it("주문을 확인하면 결제수단을 묻지 않고 계좌이체로 주문하고, 입금 계좌·금액·기한과 계좌번호 복사 버튼을 보여 준다", async () => {
+  it("주문을 확인하면 결제수단(모의 결제 3가지·계좌이체)을 묻고, 계좌이체를 고르면 입금 계좌·금액·기한과 계좌번호 복사 버튼을 보여 준다", async () => {
     server.createAccount({ username: "chickenboss", name: "청전 치킨공방 사장님", role: "owner", storeId: "h3", phone: "043-111-2222" });
     const writeText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     renderChat();
-    orderAndConfirm();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /신용카드|카카오페이|토스페이/ })).not.toBeInTheDocument();
+    send("간장치킨 1마리 시켜줘");
+    wait(1000);
+    fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
+    wait(700);
+    expect(screen.getByText(/어떤 걸로 결제하시겠어요\?/)).toBeInTheDocument();
+    for (const name of ["신용카드 (모의)", "카카오페이 (모의)", "토스페이 (모의)", "계좌이체"]) expect(screen.getByRole("button", { name })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "계좌이체" }));
+    wait(700);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); // 계좌이체는 결제 창 없이 바로 주문
 
     // 서버가 주문을 받은 뒤 입금 안내를 보여 준다: 실제 응답을 기다리도록 진짜 시계로 바꾼다
     vi.useRealTimers();
@@ -144,8 +153,47 @@ describe("OrderChatbot", () => {
     renderChat();
     orderAndConfirm();
     vi.useRealTimers();
-    expect(await screen.findByText(/아직 입금 계좌를 등록하지 않아 주문을 받을 수 없어요/, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText(/아직 입금 계좌를 등록하지 않아 계좌이체 주문을 받을 수 없어요/, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getByText(/주문이 접수되지 않았어요/)).toBeInTheDocument();
+  });
+
+  it("모의 결제를 고르면 결제 창이 뜨고, 결제하면 바로 접수돼 결제 완료 안내를 보여 준다 (입금 계좌가 없는 매장도)", async () => {
+    server.db.setBankAccount("h3", null);
+    renderChat();
+    orderAndConfirm("카카오페이 (모의)");
+    const sheet = screen.getByRole("dialog", { name: "카카오페이" });
+    expect(sheet).toHaveTextContent("모의 결제");
+    expect(sheet).toHaveTextContent("실제로 돈이 빠져나가지 않아요");
+    expect(sheet).toHaveTextContent("20,000원");
+    // 결제 창이 떠 있는 동안은 글자 입력을 받지 않는다
+    expect(screen.getByRole("button", { name: "새 대화" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "20,000원 결제하기" }));
+    expect(screen.getByText("결제 진행 중…")).toBeInTheDocument();
+    wait(1600);
+    expect(screen.getByText("결제 완료")).toBeInTheDocument();
+    wait(1100 + 250);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    vi.useRealTimers();
+    expect(await screen.findByText(/20,000원 결제가 끝나 주문이 접수됐어요!/, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByText("카카오페이 (모의 결제)")).toBeInTheDocument();
+    expect(screen.getByText(/모의 결제라 실제로 돈이 나가지 않았어요/)).toBeInTheDocument();
+    const [rec] = server.db.listOrders();
+    expect(rec).toMatchObject({ status: "접수", payment: "카카오페이 (모의 결제)" });
+  });
+
+  it("결제 창을 닫으면 주문하지 않고 결제수단을 다시 묻는다. 처음에 말해 둔 결제수단은 고르는 단계를 건너뛴다", () => {
+    renderChat();
+    send("간장치킨 1마리 토스페이로 시켜줘");
+    wait(1000);
+    fireEvent.click(screen.getByRole("button", { name: "응 해줘" }));
+    wait(700);
+    expect(screen.queryByText(/어떤 걸로 결제하시겠어요\?/)).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "토스페이" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    wait(250 + 400 + 700);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/결제를 취소했어요\.\s*어떤 걸로 결제하시겠어요\?/)).toBeInTheDocument();
+    expect(server.db.listOrders()).toHaveLength(0);
   });
 
   it("+ 를 누르면 빠른 메뉴가 열리고, 메뉴를 고르면 닫히면서 답한다", () => {

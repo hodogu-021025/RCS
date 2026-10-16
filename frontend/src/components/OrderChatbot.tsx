@@ -2,6 +2,7 @@ import { Fragment, useEffect, useEffectEvent, useId, useRef, useState, type CSSP
 import backgroundVideo from "../image/saylo_background.mp4";
 import { AccountText, CopyButton } from "./CopyButton";
 import { InstallBanner } from "./InstallBanner";
+import { PaymentSheet, type PaymentSheetHandle } from "./PaymentSheet";
 import { TelLink } from "./TelLink";
 import { AccountIcon, ChatIcon, HelpIcon, MenuIcon, MicIcon, PlusIcon, SpeakerIcon } from "./icons";
 import { Tutorial } from "./Tutorial";
@@ -70,6 +71,9 @@ import {
   won,
   matchChoices,
   withoutQuantity,
+  PAYMENTS,
+  findPayment,
+  isMockPayment,
   type BotPrompt,
   type Choice,
   type ChosenOption,
@@ -77,6 +81,7 @@ import {
   type InfoCard,
   type Order,
   type OrderRow,
+  type PaymentMethod,
   type Reservation,
   type Restaurant,
 } from "./orderChatKnowledge";
@@ -94,6 +99,7 @@ import {
   openStateText,
   orderLabel,
   orderStatusCard,
+  paidCard,
   transferCard,
   storeInfoCard,
   parsePeople,
@@ -111,14 +117,15 @@ import {
   type ReservationSlots,
 } from "./understanding";
 
-// 배달: idle → menu(메뉴 대기) → qty(수량 대기) → [세트 메뉴면 choose(맛 고르기)] → confirm(주문 확인 대기) → pay(결제수단 선택 대기) → paying(결제 팝업) → done
+// 배달: idle → menu(메뉴 대기) → qty(수량 대기) → [세트 메뉴면 choose(맛 고르기)] → confirm(주문 확인 대기) → pay(결제수단 선택 대기)
+//      → [모의 결제면 paying(결제 창)] → done. 계좌이체는 pay 에서 바로 주문을 넣고 입금 안내를 보여 준다
 // 식당: idle → food(음식 종류 대기) → restaurant(식당 목록에서 선택 대기)
 //      → rsvDate(날짜) → rsvTime(시간) → rsvPeople(인원) → rsvConfirm(예약 확인) → idle
 // 배달 주문은 로그인한 고객님만, 계정의 배달지·연락처로 한다. 로그인 전이면 needLogin(로그인하러 갈지 묻는 중),
 //        계정에 배달지·연락처가 없으면 needContact(계정 관리로 갈지 묻는 중)에서 멈춘다
 // 그 밖: info(어느 가게 정보인지 고르는 중), cancelConfirm(내 주문 취소 확인)
 type Stage =
-  | "idle" | "menu" | "qty" | "choose" | "confirm" | "done"
+  | "idle" | "menu" | "qty" | "choose" | "confirm" | "pay" | "paying" | "done"
   | "food" | "restaurant" | "rsvDate" | "rsvTime" | "rsvPeople" | "rsvConfirm"
   | "info" | "cancelConfirm" | "needLogin" | "needContact";
 
@@ -212,6 +219,15 @@ const deliveryQty = (item: DeliveryItem, lead?: string): NewMessage => ({
   max: MAX_QTY,
   priceEach: item.price,
 });
+
+// 결제수단 고르기 말풍선. 신용카드·카카오페이·토스페이는 모의 결제(자체 테스트용), 계좌이체는 진짜 입금
+const paymentPrompt = (order: Order, lead?: string): NewMessage =>
+  botPrompt({
+    text: `${lead ? `${lead}\n` : ""}어떤 걸로 결제하시겠어요?\n총 결제금액: ${won(order.price)}\n신용카드·카카오페이·토스페이는 모의 결제라 실제로 돈이 나가지 않아요.`,
+    say: `${lead ? `${lead} ` : ""}총 결제금액은 ${won(order.price)}이에요. 신용카드, 카카오페이, 토스페이 모의 결제나 계좌이체로 결제할 수 있어요. 어떤 걸로 하시겠어요?`,
+    choices: PAYMENTS.map((p) => ({ label: p.mock ? `${p.label} (모의)` : p.label, value: p.label })),
+    noDirect: true,
+  });
 
 // 세트 메뉴의 맛 고르기 말풍선. 세트 수 × 1세트에 고를 수만큼, 같은 맛은 한 번만 고른다
 const choicePrompt = (item: DeliveryItem, qty: number, lead?: string): NewMessage => {
@@ -487,6 +503,10 @@ export function OrderChatbot() {
   // 한 문장에 같이 말해 둔 것들: 메뉴를 고르기 전에 말한 수량("치킨 두 마리"),
   // 식당을 고르기 전에 말한 예약 날짜·시간·인원("내일 7시 4명")
   const [pendingQty, setPendingQty] = useState<number | null>(null);
+  // 주문 전에 같이 말해 둔 결제수단("카카오페이로"): 주문서를 확인하면 고르는 단계를 건너뛴다
+  const [pendingPay, setPendingPay] = useState<PaymentMethod | null>(null);
+  // 모의 결제 창을 띄운 결제수단 (띄워 둔 동안 stage 는 paying)
+  const [payMethod, setPayMethod] = useState<PaymentMethod | null>(null);
   // 세트 메뉴의 맛을 고르는 중인 메뉴와 세트 수
   const [choosing, setChoosing] = useState<{ item: DeliveryItem; qty: number } | null>(null);
   const [rsvSlots, setRsvSlots] = useState<ReservationSlots>({});
@@ -515,6 +535,7 @@ export function OrderChatbot() {
   const timersRef = useRef<number[]>([]);
   // "새 대화"를 누를 때마다 1씩 오른다. 그 전에 시작한 서버 조회의 답은 새 대화에 끼어들지 않는다
   const conversationRef = useRef(0);
+  const sheetRef = useRef<PaymentSheetHandle>(null);
 
   // 말로 입력: 들은 문장을 글자로 입력한 것과 똑같이 처리한다 (입력창이 접혀 있어도 된다)
   const voice = useVoiceInput(handleVoice);
@@ -796,10 +817,12 @@ export function OrderChatbot() {
   const qtyInRange = (n: number | undefined): n is number => n !== undefined && n >= 1 && n <= MAX_QTY;
 
   // 고른 메뉴(들)로 주문을 이어 간다. 수량까지 있으면 바로 주문서로, 없으면 수량을 묻고,
-  // 여러 메뉴면 그중에서 고르게 한다. 같이 말한 수량("두 마리")은 기억해 뒀다가 쓴다
+  // 여러 메뉴면 그중에서 고르게 한다. 같이 말한 수량("두 마리")·결제수단("카카오페이로")은 기억해 뒀다가 쓴다
   function deliverItems(items: DeliveryItem[], text: string) {
     const said = parseQuantity(text);
     if (deliveryBlocked(items.length === 1 ? { itemId: items[0].id, qty: said ?? pendingQty ?? undefined } : {})) return;
+    const pay = findPayment(text);
+    if (pay) setPendingPay(pay);
     if (items.length > 1) {
       setPendingItem(null);
       setPendingQty(qtyInRange(said) ? said : null);
@@ -866,6 +889,7 @@ export function OrderChatbot() {
     setStage("idle");
     setPendingItem(null);
     setPendingQty(null);
+    setPendingPay(null);
     setChoosing(null);
     botReply(() => push(botText("배달 주문을 그만할게요. 다른 게 필요하면 말씀해 주세요!")));
   }
@@ -1057,13 +1081,16 @@ export function OrderChatbot() {
     }
     botReplyAsync(async () => {
       await cancelMyOrder(target.id);
-      // 입금 전(입금 대기)이면 돌려받을 돈이 없다. 입금이 확인된 뒤(접수)면 환불은 가게가 직접 해 준다 (계좌이체라 자동 환불이 없다)
+      // 입금 전(입금 대기)이면 돌려받을 돈이 없다. 입금이 확인된 뒤(접수)면 환불은 가게가 직접 해 준다 (계좌이체라 자동 환불이 없다).
+      // 모의 결제는 실제로 나간 돈이 없다
       return () =>
         push(
           botText(
-            target.status === "입금 대기"
-              ? "주문을 취소했어요.\n아직 입금 전이라 따로 하실 일은 없어요."
-              : `주문을 취소했어요.\n입금하신 금액은 ${target.order.store.name}에서 돌려드려요. 환불이 늦어지면 가게에 문의해 주세요.`,
+            isMockPayment(target.payment)
+              ? "주문을 취소했어요.\n모의 결제라 실제로 나간 돈은 없어요."
+              : target.status === "입금 대기"
+                ? "주문을 취소했어요.\n아직 입금 전이라 따로 하실 일은 없어요."
+                : `주문을 취소했어요.\n입금하신 금액은 ${target.order.store.name}에서 돌려드려요. 환불이 늦어지면 가게에 문의해 주세요.`,
           ),
         );
     });
@@ -1167,8 +1194,14 @@ export function OrderChatbot() {
     );
   }
 
-  // 음성으로 들은 문장. 글자 입력과 같다
+  // 음성으로 들은 문장. 결제 창이 떠 있으면 "결제"·"취소"만 받고, 그 밖에는 글자 입력과 같다
   function handleVoice(text: string) {
+    if (stage === "paying") {
+      if (isNo(text)) sheetRef.current?.cancel();
+      else if (isYes(text) || text.includes("결제")) sheetRef.current?.pay();
+      else setNotice('결제 화면에서는 "결제" 또는 "취소"라고 말씀해 주세요.');
+      return;
+    }
     if (thinking) {
       setNotice("답하는 중이에요. 잠시 뒤 다시 말씀해 주세요.");
       return;
@@ -1177,10 +1210,10 @@ export function OrderChatbot() {
     handle(text);
   }
 
-  // 받아들였으면 true. 봇이 답하는 중이면 받지 않는다 (입력창의 글은 그대로 남긴다)
+  // 받아들였으면 true. 봇이 답하는 중이거나 결제 창이 떠 있으면 받지 않는다 (입력창의 글은 그대로 남긴다)
   function handle(raw: string): boolean {
     const text = raw.trim();
-    if (!text || thinking) {
+    if (!text || thinking || stage === "paying") {
       if (text && thinking) setNotice("답하는 중이에요. 잠시 뒤 다시 보내 주세요.");
       return false;
     }
@@ -1198,8 +1231,8 @@ export function OrderChatbot() {
 
     // "치킨집 예약", "근처 맛집": 메뉴 이름(치킨)이 들어 있어도 식당·예약 말이면 배달이 아니라 식당 찾기로 본다
     const wantsRestaurant = menuIntent(text) === "식당";
-    // 주문 확인 단계에서 빠른 메뉴(배달·식당 등)를 고르거나 식당·예약 얘기를 하면 주문을 접고 아래 일반 처리로 넘어간다
-    const switchingMenu = stage === "confirm" && (!!quickMenuReply(text) || wantsRestaurant);
+    // 주문 확인·결제수단 단계에서 빠른 메뉴(배달·식당 등)를 고르거나 식당·예약 얘기를 하면 주문을 접고 아래 일반 처리로 넘어간다
+    const switchingMenu = (stage === "confirm" || stage === "pay") && (!!quickMenuReply(text) || wantsRestaurant);
 
     // 로그인하러 갈지, 계정 관리로 갈지 묻는 중. 가겠다는 말이면 가고, 다른 말이면 아래 일반 처리로
     if (stage === "needLogin" || stage === "needContact") {
@@ -1270,13 +1303,34 @@ export function OrderChatbot() {
         setOrder(null);
         botReply(() => push(botText(`${pausedText(order.store.name, until)}\n이 주문은 접었어요. 다른 메뉴를 주문하시겠어요?`)));
       } else if (isYes(text)) {
-        placeOrder(order);
+        // 결제수단까지 말했으면("응 카카오페이로", 처음에 "카카오페이로") 고르는 단계를 건너뛴다
+        const method = findPayment(text) ?? pendingPay;
+        setPendingPay(null);
+        if (method) choosePayment(order, method);
+        else {
+          setStage("pay");
+          botReply(() => push(paymentPrompt(order)));
+        }
       } else if (findDeliveryItems(text).length > 0) {
         // 다른 메뉴를 말하면 그 메뉴로 다시
         setOrder(null);
         tryDelivery(text);
       } else {
         botReply(() => push(botText(`${ORDER_CARD_QUESTION} '응' 또는 '취소'로 답해 주세요.`), { role: "bot", kind: "confirm" }));
+      }
+      return;
+    }
+
+    // 결제수단 고르는 중: 모의 결제면 결제 창을, 계좌이체면 바로 주문을 넣는다
+    if (stage === "pay" && order && !switchingMenu) {
+      const method = findPayment(text);
+      if (method) choosePayment(order, method);
+      else if (isNo(text)) {
+        setStage("idle");
+        setOrder(null);
+        botReply(() => push(botText("주문을 취소했어요. 다른 게 필요하면 말씀해 주세요!")));
+      } else {
+        botReply(() => push(paymentPrompt(order, "결제수단을 골라 주세요.")));
       }
       return;
     }
@@ -1630,6 +1684,7 @@ export function OrderChatbot() {
   function startFresh() {
     setPendingItem(null);
     setPendingQty(null);
+    setPendingPay(null);
     setChoosing(null);
     setOrder(null);
     setRsv(null);
@@ -1657,21 +1712,44 @@ export function OrderChatbot() {
     botReply(() => push(botPrompt(reply)));
   }
 
-  // 주문서를 확인하면 계좌이체 주문으로 넣는다. 서버가 그 매장의 입금 계좌와 입금 기한을 붙여 돌려주면 입금 안내를 보여 준다.
-  // 그사이 가게가 일시 중지했거나 품절됐거나 입금 계좌가 없으면 서버가 거절하므로 그 이유를 알린다
-  function placeOrder(placed: Order) {
+  // 결제수단을 골랐다: 모의 결제면 결제 창을 띄우고(결제를 마치면 주문), 계좌이체면 바로 주문을 넣는다
+  function choosePayment(placed: Order, method: PaymentMethod) {
+    if (!method.mock) {
+      placeOrder(placed, method);
+      return;
+    }
+    setStage("paying");
+    later(() => setPayMethod(method), 300);
+  }
+
+  // 결제 창에서 닫기·취소: 결제수단을 다시 고르게 한다
+  function onPayCancel() {
+    setPayMethod(null);
+    setStage("pay");
+    if (order) botReply(() => push(paymentPrompt(order, "결제를 취소했어요.")), 400);
+  }
+
+  function onPaid() {
+    if (!order || !payMethod) return;
+    const method = payMethod;
+    setPayMethod(null);
+    placeOrder(order, method);
+  }
+
+  // 주문을 서버에 넣는다. 모의 결제는 바로 접수돼 결제 완료 안내를, 계좌이체는 서버가 그 매장의 입금 계좌와 입금 기한을 붙여 돌려주면 입금 안내를 보여 준다.
+  // 그사이 가게가 일시 중지했거나 품절됐거나 (계좌이체인데) 입금 계좌가 없으면 서버가 거절하므로 그 이유를 알린다
+  function placeOrder(placed: Order, method: PaymentMethod) {
     setOrder(null);
     setStage("done");
     botReplyAsync(async () => {
       try {
-        const rec = await addOrder(placed);
-        return () => push({ role: "bot", kind: "info", card: transferCard(rec) });
+        const rec = await addOrder(placed, method.label);
+        return () => push({ role: "bot", kind: "info", card: method.mock ? paidCard(rec) : transferCard(rec) });
       } catch (e) {
         const why = e instanceof Error && e.message ? e.message : "잠시 후 다시 시도해 주세요.";
         return () => {
           setStage("idle");
-          push(botText(`${why}
-주문이 접수되지 않았어요.`));
+          push(botText(`${why}\n주문이 접수되지 않았어요.${method.mock ? " 모의 결제도 진행되지 않았어요." : ""}`));
         };
       }
     });
@@ -1690,6 +1768,8 @@ export function OrderChatbot() {
     setPendingItem(null);
     setRsv(null);
     setPendingQty(null);
+    setPendingPay(null);
+    setPayMethod(null);
     setRsvSlots({});
     setLastPlace(null);
     setLastItem(null);
@@ -2139,7 +2219,7 @@ export function OrderChatbot() {
           </button>
         </div>
         {/* 주문을 서버에 넣는 사이에는 새 대화로 입금 안내를 날리지 않게 막는다 */}
-        <button className="new-chat" type="button" onClick={reset} disabled={stage === "done" && thinking}>
+        <button className="new-chat" type="button" onClick={reset} disabled={stage === "paying" || (stage === "done" && thinking)}>
           <PlusIcon />
           새 대화
         </button>
@@ -2268,6 +2348,7 @@ export function OrderChatbot() {
         </form>
       </div>
 
+      {payMethod && order && <PaymentSheet ref={sheetRef} method={payMethod} order={order} onCancel={onPayCancel} onPaid={onPaid} />}
       {tutorialOpen && <Tutorial onClose={closeTutorial} onTry={tryTutorialExample} />}
     </div>
   );

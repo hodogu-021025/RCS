@@ -178,12 +178,12 @@ describe("2. 한 번에 말한 정보 기억하기", () => {
     expect(await find(/^간장치킨 2마리$/)).toBeTruthy();
   });
 
-  it("카카오페이처럼 다른 결제수단을 말해도 계좌이체로 주문하고 입금 안내를 보여 준다", async () => {
+  it("처음에 '카카오페이로'라고 말해 두면 주문을 확인할 때 결제수단을 묻지 않고 그 모의 결제 창을 띄운다", async () => {
     await renderChat();
     await say("간장치킨 2마리 카카오페이로");
     await click("응 해줘");
-    expect(await find(/주문을 받았어요! 아래 계좌로 입금해 주세요/)).toBeTruthy();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "카카오페이" })).toBeInTheDocument();
+    expect(screen.queryByText(/어떤 걸로 결제하시겠어요/)).not.toBeInTheDocument();
   });
 });
 
@@ -738,6 +738,7 @@ describe("일시 중지 검토에서 찾은 문제", () => {
     await find(/^간장치킨 1마리$/);
     pause("h3"); // 화면은 아직 모른다 (서버만 멈춤)
     await say("응");
+    await say("계좌이체");
     expect(await find(/청전 치킨공방은 지금 잠시 주문을 받지 않아요/)).toBeTruthy();
     expect(await find(/주문이 접수되지 않았어요/)).toBeTruthy();
     expect(screen.queryByText(/아래 계좌로 입금해 주세요/)).not.toBeInTheDocument();
@@ -815,6 +816,7 @@ describe("세트 메뉴 맛 고르기", () => {
     expect(inCard("간장 파닭, 블랙스완 파닭(+1,000원)")).toBe(true);
     expect(inCard("27,000원")).toBe(true);
     await click("응 해줘");
+    await click("계좌이체");
     expect(await find(/주문을 받았어요/)).toBeTruthy();
     const saved = lastSaved();
     expect(saved.order.price).toBe(27000);
@@ -934,6 +936,7 @@ describe("취소했던 주문서 다시", () => {
     expect(await find(/처음에 고르신 간장치킨 3마리로 주문서를 다시 만들었어요/)).toBeTruthy();
     expect(inCard("60,000원")).toBe(true);
     await click("응 해줘");
+    await click("계좌이체");
     expect(await find(/주문을 받았어요/)).toBeTruthy();
   });
 
@@ -1042,6 +1045,7 @@ describe("손님 주문 시뮬레이션에서 찾은 것들", () => {
     await wait();
     await wait();
     await click("응 해줘");
+    await click("계좌이체");
     expect(await find(/주문을 받았어요/)).toBeTruthy();
     await say("지난번 메뉴 다시 주문해줘");
     expect(await find(/지난번에 드신 2마리 치킨 세트 1세트 \(간장 파닭, 뿌링클 치킨\(\+1,000원\)\)로 주문서를 만들었어요/)).toBeTruthy();
@@ -1121,7 +1125,7 @@ describe("가게 이름·메뉴 이름의 일부로 말하기", () => {
 });
 
 describe("채팅창을 끈 동안의 선택 버튼", () => {
-  it("주문서·확인 질문의 버튼이 자막 아래에 떠서, 눌러서 응 해줘까지 간다", async () => {
+  it("주문서·확인 질문·결제수단 버튼이 자막 아래에 떠서, 눌러서 응 해줘 → 계좌이체까지 간다", async () => {
     render(<OrderChatbot />); // 채팅창은 처음에 꺼져 있다
     await act(() => refresh(["settings", "popular", "menu"]));
     const caption = () => within(document.querySelector<HTMLElement>(".voice-caption")!);
@@ -1130,6 +1134,10 @@ describe("채팅창을 끈 동안의 선택 버튼", () => {
     expect(caption().getByText("간장치킨 1마리")).toBeInTheDocument(); // 주문서 표
     expect(caption().getByRole("button", { name: "배달지 변경" })).toBeEnabled();
     fireEvent.click(caption().getByRole("button", { name: "응 해줘" }));
+    await wait();
+    await wait(15_000);
+    for (const name of ["신용카드 (모의)", "카카오페이 (모의)", "토스페이 (모의)"]) expect(caption().getByRole("button", { name })).toBeEnabled();
+    fireEvent.click(caption().getByRole("button", { name: "계좌이체" }));
     await wait();
     expect(await find(/주문을 받았어요/)).toBeTruthy();
   });
